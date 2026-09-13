@@ -1,0 +1,151 @@
+{
+  "schema_version": 1,
+  "excluded_stores": [
+    "rakuten"
+  ],
+  "stores": {
+    "dospara": {
+      "name": "ドスパラ",
+      "adapter": "dospara",
+      "seed_urls": [
+        "https://www.dospara.co.jp/campaign-list"
+      ]
+    },
+    "ark": {
+      "name": "PC SHOP ark",
+      "adapter": "html",
+      "seed_urls": [
+        "https://www.ark-pc.co.jp/",
+        "https://www.ark-pc.co.jp/t/c/760/"
+      ],
+      "product_patterns": [
+        "/i/\\d+/"
+      ],
+      "sale_patterns": [
+        "/t/c/\\d+/",
+        "/special/"
+      ],
+      "default_condition": "new",
+      "pc_only": true
+    },
+    "tsukumo": {
+      "name": "ツクモ",
+      "adapter": "html",
+      "seed_urls": [
+        "https://shop.tsukumo.co.jp/"
+      ],
+      "product_patterns": [
+        "/goods/\\d+"
+      ],
+      "sale_patterns": [
+        "/special/",
+        "/features/"
+      ],
+      "default_condition": "new",
+      "pc_only": true
+    },
+    "sofmap": {
+      "name": "Sofmap",
+      "adapter": "html",
+      "seed_urls": [
+        "https://www.sofmap.com/contents/?id=2959&sid=1"
+      ],
+      "product_patterns": [
+        "/product_detail.aspx\\?"
+      ],
+      "sale_patterns": [
+        "/contents/"
+      ],
+      "default_condition": "new"
+    },
+    "joshin": {
+      "name": "Joshin",
+      "adapter": "html",
+      "seed_urls": [
+        "https://joshinweb.jp/"
+      ],
+      "product_patterns": [
+        "/[^/]+/\\d+/\\d{8,14}\\.html"
+      ],
+      "sale_patterns": [
+        "/season/",
+        "sale"
+      ],
+      "default_condition": "new"
+    },
+    "bic": {
+      "name": "ビックカメラ",
+      "adapter": "html",
+      "seed_urls": [
+        "https://www.biccamera.com/bc/main/"
+      ],
+      "product_patterns": [
+        "/bc/item/\\d+"
+      ],
+      "sale_patterns": [
+        "/bc/c/",
+        "/bc/category/"
+      ],
+      "default_condition": "new"
+    },
+    "koubou": {
+      "name": "パソコン工房",
+      "adapter": "html",
+      "seed_urls": [
+        "https://www.pc-koubou.jp/goods/parts_goods_tokusen.php"
+      ],
+      "product_patterns": [
+        "/products/detail.php\\?product_id="
+      ],
+      "sale_patterns": [
+        "/goods/parts_goods",
+        "/pc/sale"
+      ],
+      "default_condition": "new",
+      "browser_fallback": true
+    },
+    "yodobashi": {
+      "name": "ヨドバシ",
+      "adapter": "html",
+      "seed_urls": [
+        "https://www.yodobashi.com/"
+      ],
+      "product_patterns": [
+        "/product/\\d+"
+      ],
+      "sale_patterns": [
+        "/ec/feature/",
+        "/category/"
+      ],
+      "default_condition": "new",
+      "browser_fallback": true
+    },
+    "yahoo": {
+      "name": "Yahoo!ショッピング",
+      "adapter": "yahoo",
+      "queries": [
+        "セール SSD",
+        "特価 パソコン",
+        "セール モニター",
+        "特価 周辺機器"
+      ]
+    },
+    "amazon": {
+      "name": "Amazon",
+      "adapter": "amazon",
+      "source_url": "https://raw.githubusercontent.com/chijimi33/Chimolog-price-tool/main/public/chimolog_products.json"
+    }
+  },
+  "flyer": {
+    "index_url": "https://www.pc-koubou.jp/shopinfo/contents/sale_campaign.php",
+    "branches": [
+      "枚方",
+      "大阪日本橋",
+      "東大阪",
+      "なんばアウトレット別館",
+      "堺",
+      "岸和田"
+    ]
+  },
+  "seller_aliases": {}
+}

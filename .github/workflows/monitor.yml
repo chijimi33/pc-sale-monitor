@@ -1,0 +1,95 @@
+name: Sale monitor (parallel validation)
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '17 */4 * * *'
+  push:
+    branches: [main]
+    paths: ['sale_monitor/**', 'config/**', 'scripts/**', 'pyproject.toml', '.github/workflows/monitor.yml']
+
+permissions:
+  contents: read
+
+concurrency:
+  group: sale-monitor-state
+  cancel-in-progress: false
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: pip install -e .
+      - run: python -m unittest discover -s tests -v
+
+  collect:
+    needs: test
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        store: [dospara, ark, tsukumo, sofmap, joshin, bic, koubou, yodobashi, yahoo, amazon]
+    env:
+      GITHUB_TOKEN: ${{ github.token }}
+      YAHOO_CLIENT_ID: ${{ secrets.YAHOO_CLIENT_ID }}
+      RUN_ID: ${{ github.run_id }}-${{ github.run_attempt }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: pip install -e .
+      - if: matrix.store == 'koubou' || matrix.store == 'yodobashi'
+        run: python -m playwright install --with-deps chromium
+      - if: matrix.store == 'koubou'
+        run: sudo apt-get update && sudo apt-get install -y tesseract-ocr tesseract-ocr-jpn poppler-utils
+      - run: python scripts/state_branch.py prepare
+      - name: Collect with durable checkpoints
+        run: python -m sale_monitor.cli collect --store ${{ matrix.store }} --state state-repo/state --run-id "$RUN_ID" --seconds 2100
+      - name: Export only this store's state
+        if: always()
+        run: python scripts/export_store.py --store ${{ matrix.store }}
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: state-${{ matrix.store }}
+          path: outgoing/
+          retention-days: 14
+          if-no-files-found: warn
+
+  publish:
+    needs: [test, collect]
+    if: always() && needs.test.result == 'success'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: write
+      actions: read
+    env:
+      GITHUB_TOKEN: ${{ github.token }}
+      RUN_ID: ${{ github.run_id }}-${{ github.run_attempt }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: pip install -e .
+      - run: python scripts/state_branch.py prepare
+      - uses: actions/download-artifact@v4
+        continue-on-error: true
+        with:
+          pattern: state-*
+          path: incoming
+          merge-multiple: true
+      - run: python -m sale_monitor.cli aggregate --incoming incoming --state state-repo/state --public state-repo/public --run-id "$RUN_ID"
+      - run: python scripts/state_branch.py publish
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: latest-result-json
+          path: state-repo/public/
+          retention-days: 14

@@ -101,4 +101,3 @@ OCRはTesseractの日本語・英語モデルを使用し、Actionsでインス�
 - [Playwright Python](https://playwright.dev/python/docs/intro)：表示後のHTML取得。
 - [GitHub Actionsのschedule](https://docs.github.com/en/actions/reference/workflows-and-actions/events-that-trigger-workflows#schedule)：実行時刻と制約。
 - [ドスパラ既存ツール](https://github.com/chijimi33/Dospara-coupon-price-tool)、[ちもろぐ既存ツール](https://github.com/chijimi33/Chimolog-price-tool)。
-
