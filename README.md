@@ -35,7 +35,7 @@ python -m sale_monitor.cli collect --store ark --run-id trial-001
 python -m sale_monitor.cli aggregate --run-id trial-001
 ```
 
-同一巡回の店舗には同じ `--run-id` を指定します。`--seconds` は実行環境の時間制限に合わせた中断時刻で、Web呼出数の上限ではありません。キュー・商品観測・履歴への受け渡しを商品ごとに原子的に保存し、次回は未完了位置から再開します。取得障害は在庫切れに変換しません。キャッシュは正本として使用しません。
+同一巡回の店舗には同じ `--run-id` を指定します。`--seconds` は実行環境の時間制限に合わせた中断時刻で、Web呼出数の上限ではありません。キュー・商品観測・履歴への受け渡しを商品ごとに原子的に保存し、次回は未完了位置から再開します。現在比較には今回の `observed_run_id` を持つ価格だけを使います。取得障害は在庫切れに変換しません。同じ巡回で失敗したページは、関連する比較候補ごとに再取得せず、未処理として次回へ繰り越します。キャッシュは正本として使用しません。
 
 Yahoo!はGitHubリポジトリの **Settings → Secrets and variables → Actions** に `YAHOO_CLIENT_ID` を設定すると有効になります。APIキーをコード、公開JSON、ChatGPTの会話へ記載する必要はありません。現時点では未取得として扱います。
 
@@ -57,10 +57,11 @@ Yahoo!はGitHubリポジトリの **Settings → Secrets and variables → Actio
 | `public/latest.json` | 軽量な最新索引、10店の取得状況 |
 | `public/notifications.json` | 現在も根拠が有効な通知候補と固定ID |
 | `public/review_queue.json` | 判定できない候補と不足理由、チラシ確認先 |
+| `public/flyer_review.json` | 共通チラシの画像URL、版、OCR文字列・商品候補、掲載数量の適用範囲 |
 | `public/evidence.json` | 商品単位のA/B計算と比較証拠 |
 | `public/validation.json` | 並行検証の期間・取得率・切替可否 |
 
-予定の読取URLは `https://raw.githubusercontent.com/chijimi33/pc-sale-monitor/monitor-data/public/latest.json` です。初回の公開成功までは存在しません。ChatGPTへ全店再巡回を要求せず、`docs/chatgpt-task-prompt.md` の切替用プロンプトで通知します。
+公開中の読取URLは `https://raw.githubusercontent.com/chijimi33/pc-sale-monitor/monitor-data/public/latest.json` です。ChatGPTへ全店再巡回を要求せず、検証後に `docs/chatgpt-task-prompt.md` の切替用プロンプトで通知します。
 
 イベントの公開は配信確認ではありません。初期構成は厳密な一度だけの配信を保証しません。明示的な配信確認を受けた場合だけ `ack --event-id ...` で記録できます。古いイベントを再提示するときも `current_evidence` の現在条件を使用します。
 
@@ -96,6 +97,8 @@ OCRはTesseractの日本語・英語モデルを使用し、Actionsでインス�
 40回・95%・20件は初期運用の検証ゲートです。A/Bの数値基準を変更するものではありません。Yahoo!未設定やサイト側取得障害が残る間は切替不可として原因を表示します。Amazonの無料取得率もここで測定し、必要性が判明してからKeepa APIを比較します。有料契約は作成していません。
 
 ## 参照
+
+初期の取得状況と残課題は [導入状況](docs/deployment-status.md) を参照してください。最新の状況は常に公開JSONを優先します。
 
 - [Yahoo!商品検索v3](https://developer.yahoo.co.jp/webapi/shopping/v3/itemsearch.html)：送料区分、一般ストアポイントとプレミアムポイントの分離、検索結果ウィンドウ。
 - [Playwright Python](https://playwright.dev/python/docs/intro)：表示後のHTML取得。

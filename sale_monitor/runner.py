@@ -49,6 +49,7 @@ class Collector:
             self.state["queue"][task_id] = {"created_at": iso(), "attempts": 0, **task}
 
     def record(self, offer: Offer):
+        offer.observed_run_id = self.run_id
         aliases = self.config.get("seller_aliases", {})
         if offer.seller_id in aliases:
             offer.seller_id = aliases[offer.seller_id]
@@ -175,11 +176,10 @@ class Collector:
                 self.enqueue({"type": "product", **product})
             for url in pagination:
                 self.enqueue({**task, "url": url})
-            # Campaign scope is registered lists plus their explicitly linked sale
-            # pages; it does not recursively crawl unrelated catalogue categories.
-            if task.get("depth", 0) == 0:
-                for url in campaigns:
-                    self.enqueue({"type": "list", "url": url, "sale_page": True, "depth": 1})
+            # Follow explicitly linked sale pages, including nested sale portals.
+            # The queue deduplicates cycles; ordinary category links stay excluded.
+            for url in campaigns:
+                self.enqueue({"type": "list", "url": url, "sale_page": True, "depth": task.get("depth", 0) + 1})
         elif kind == "product":
             if self.store == "amazon":
                 offer = adapters.amazon_product(self.client, task)

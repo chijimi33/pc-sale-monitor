@@ -144,8 +144,9 @@ def amazon_product(client: Client, candidate: dict) -> Offer:
         if match:
             offer.seller_id = "amazon:" + match.group(1)
     shipping = first(tree, '//*[@id="mir-layout-DELIVERY_BLOCK-slot-PRIMARY_DELIVERY_MESSAGE_LARGE"]')
-    if shipping and "無料配送" in shipping and not re.search(r"以上|プライム|Prime|会員", shipping):
-        offer.shipping_yen = 0
+    if shipping and "無料配送" in shipping:
+        conditional = re.search(r"以上|プライム|Prime|会員|初回|特典|条件|定期", shipping, re.I)
+        offer.shipping_yen = None if conditional else 0
     condition = first(tree, '//*[@id="newAccordionRow"]') or first(tree, '//*[@id="conditionInfoFeature_feature_div"]')
     if condition and "新品" in condition:
         offer.condition = "new"

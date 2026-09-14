@@ -7,7 +7,7 @@ import tempfile
 import unittest
 from unittest.mock import patch
 
-from sale_monitor.adapters import yahoo_page
+from sale_monitor.adapters import amazon_product, yahoo_page
 from sale_monitor.engine import evaluate, update_events
 from sale_monitor.flyers import collect_flyer, extract_candidates
 from sale_monitor.http import Client, FetchError, Page, SafeRedirect
@@ -22,7 +22,7 @@ NOW = datetime(2026, 9, 14, 0, 0, tzinfo=UTC)
 
 def offer(store="ark", price=9000, **kwargs):
     data = dict(store=store, product_id="one", url=f"https://{store}.example/item/one", title="test", model="MODEL-A", brand="Brand", seller_id=store,
-                price_yen=price, shipping_yen=0, condition="new", stock="in_stock", observed_at=iso(NOW), verified=True, points_yen=0,
+                price_yen=price, shipping_yen=0, condition="new", stock="in_stock", observed_at=iso(NOW), observed_run_id="run1", verified=True, points_yen=0,
                 evidence=[{"url": f"https://{store}.example/item/one", "checked_at": iso(NOW)}])
     data.update(kwargs)
     return Offer(**data)
@@ -161,6 +161,23 @@ class Events(unittest.TestCase):
 
 
 class Parsers(unittest.TestCase):
+    def test_amazon_first_order_free_shipping_is_conditional(self):
+        for delivery, expected in [("無料配送 9月16日 にお届け（初回注文特典）", None), ("無料配送 9月16日 にお届け", 0), ("3,500円以上で無料配送", None)]:
+            with self.subTest(delivery=delivery):
+                body = '<h1>SSD</h1><input id="ASIN" value="B000000001"><div id="corePrice_feature_div"><span class="a-price"><span class="a-offscreen">￥9,000</span></span></div><div id="mir-layout-DELIVERY_BLOCK-slot-PRIMARY_DELIVERY_MESSAGE_LARGE">' + delivery + '</div>'
+                class Fake:
+                    def get(self, url): return Page(url, body.encode(), iso(NOW))
+                parsed = amazon_product(Fake(), {"url": "https://www.amazon.co.jp/dp/B000000001"})
+                self.assertEqual(parsed.shipping_yen, expected)
+
+    def test_bto_candidates_keep_distinct_ids_and_require_configuration_review(self):
+        cfg = {"product_patterns": [r"/bto/customizer/\?pc_id="], "pc_only": True}
+        body = '<main><a href="/bto/customizer/?pc_id=3722">BTO PC特価</a><a href="/bto/customizer/?pc_id=3719">BTO PC特価</a></main>'
+        products, _, _ = discover(Page("https://www.ark-pc.co.jp/bto/special/bto-weekly-sale/", body.encode(), iso(NOW)), cfg, sale_page=True)
+        parsed = [parse_product("ark", Page(p["url"], b'<h1>BTO</h1>', iso(NOW)), cfg) for p in products]
+        self.assertEqual({p.product_id for p in parsed}, {"3722", "3719"})
+        self.assertTrue(all("bto_configuration_review_needed" in p.issues for p in parsed))
+
     def test_product_json_not_related_low_price(self):
         html = '''<h1>Part</h1><script type="application/ld+json">{"@type":"Product","name":"Part","brand":{"name":"MSI"},"sku":"4526541047763","offers":{"@type":"Offer","priceCurrency":"JPY","price":10980,"availability":"https://schema.org/InStock","itemCondition":"https://schema.org/NewCondition","shippingDetails":{"shippingRate":{"currency":"JPY","value":"0"}}}}</script><div>関連商品 980円</div>'''
         o = parse_product("ark", Page("https://www.ark-pc.co.jp/i/1/", html.encode(), iso(NOW)), {})
@@ -193,6 +210,29 @@ class Parsers(unittest.TestCase):
 
 
 class Persistence(unittest.TestCase):
+    def test_unprocessed_previous_cycle_price_cannot_become_current(self):
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            disk = Store(root)
+            old = offer(observed_run_id="previous", observed_at=iso(NOW-timedelta(hours=4)))
+            disk.save("stores/ark.json", {"store": "ark", "run_id": "run1", "status": "partial", "offers": {old.key: old.to_dict()}})
+            index = aggregate(root, root/"public", "run1", NOW)
+            self.assertEqual(index["stores"]["ark"]["current_offers"], 0)
+            self.assertEqual(disk.load("public/evidence.json", {})["decisions"], [])
+            self.assertEqual(disk.load("requests/tsukumo.json", []), [])
+
+    def test_nested_sale_portal_is_followed_without_duplicate_tasks(self):
+        cfg = {"stores": {"ark": {"adapter": "html", "seed_urls": [], "product_patterns": ["/i/"], "sale_patterns": ["/special/"]}}}
+        class Fake:
+            count = 0
+            def get(self, url): return Page(url, b'<a href="/special/sale/">sale</a>', iso(NOW))
+        with tempfile.TemporaryDirectory() as folder:
+            c = Collector(Path(folder), "ark", cfg, "run1", Fake()); c.seed()
+            c.process({"type": "list", "url": "https://www.ark-pc.co.jp/special/portal/", "sale_page": True, "depth": 1})
+            self.assertEqual(len(c.state["queue"]), 1)
+            c.process({"type": "list", "url": "https://www.ark-pc.co.jp/special/portal/", "sale_page": True, "depth": 2})
+            self.assertEqual(len(c.state["queue"]), 1)
+
     def test_rakuten_request_blocked_before_transport(self):
         client = Client()
         with patch.object(client.opener, "open") as op:
@@ -270,6 +310,18 @@ class Persistence(unittest.TestCase):
 
 
 class Flyers(unittest.TestCase):
+    def test_review_feed_includes_shared_extraction_and_quantity_scope(self):
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            disk = Store(root)
+            disk.save("flyers/latest.json", {"edition": "one", "branches": list(BRANCHES), "assets": [{"extraction_path": "flyers/assets/one.json", "content_hash": "one", "url": "https://a.example/flyer.jpg"}]})
+            disk.save("flyers/assets/one.json", {"text": "SSD 9,980円 限定10台", "candidates": [{"listed_quantity": 10, "needs_review": True}]})
+            aggregate(root, root/"public", "run1", NOW)
+            feed = disk.load("public/flyer_review.json", {})
+            self.assertEqual(len(feed["assets"]), 1)
+            self.assertEqual(feed["assets"][0]["candidates"][0]["listed_quantity"], 10)
+            self.assertEqual(feed["quantity_scope"], "common_flyer_not_store_inventory")
+
     def test_common_assets_cached_even_for_six_consumers(self):
         page = Page("https://www.pc-koubou.jp/shopinfo/contents/sale_flyer.php", b'<main><img src="/flyer.jpg"></main>', iso(NOW))
         class Fake:

@@ -83,6 +83,7 @@ class Offer:
     coupon: dict = field(default_factory=dict)
     expires_at: str | None = None
     observed_at: str | None = None
+    observed_run_id: str | None = None
     source_updated_at: str | None = None
     verified: bool = False
     discovery_url: str | None = None

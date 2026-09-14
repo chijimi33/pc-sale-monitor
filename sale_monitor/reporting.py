@@ -12,7 +12,7 @@ from .storage import Store, atomic_json, read_json
 
 def health(state: dict, now) -> dict:
     offers = [Offer.from_dict(row) for row in state.get("offers", {}).values()]
-    current = [o for o in offers if fresh(o.observed_at, now) and "latest_fetch_failed" not in o.issues]
+    current = [o for o in offers if o.observed_run_id == state.get("run_id") and state.get("status") != "job_missing" and fresh(o.observed_at, now) and "latest_fetch_failed" not in o.issues]
     fields = {"identity": lambda o: bool(o.identity), "seller": lambda o: bool(o.seller_id), "condition": lambda o: o.condition is not None,
               "price": lambda o: type(o.price_yen) is int, "shipping": lambda o: type(o.shipping_yen) is int,
               "stock": lambda o: o.stock != "unknown", "evidence": lambda o: bool(o.evidence and o.verified)}
@@ -62,7 +62,7 @@ def aggregate(root: Path, public: Path, run_id: str, now=None) -> dict:
             offer = Offer.from_dict(row)
             # A previous good snapshot is historical evidence, not a substitute
             # for a missing job or failed fetch in this run.
-            if fresh(offer.observed_at, now) and "latest_fetch_failed" not in offer.issues:
+            if offer.observed_run_id == run_id and fresh(offer.observed_at, now) and "latest_fetch_failed" not in offer.issues:
                 current.append(offer)
     historical = [row for row in disk.history() if row.get("run_id") != run_id]
     registry = disk.load("events/registry.json", {"states": {}, "events": {}})
@@ -125,10 +125,17 @@ def aggregate(root: Path, public: Path, run_id: str, now=None) -> dict:
     index = {"schema_version": 1, "generated_at": iso(now), "run_id": run_id, "mode": "parallel_validation", "monitored_store_count": 10,
              "excluded_stores": ["rakuten"], "complete_stores": complete, "collection_completion_rate": complete/10,
              "stores": statuses, "notification_count": len(notification), "review_count": len(reviews),
-             "files": {"notifications": "notifications.json", "reviews": "review_queue.json", "evidence": "evidence.json", "validation": "validation.json"},
+             "files": {"notifications": "notifications.json", "reviews": "review_queue.json", "flyer_review": "flyer_review.json", "evidence": "evidence.json", "validation": "validation.json"},
              "delivery_guarantee": "at_least_once_best_effort; publication_and_delivery_are_distinct", "full_rescan_needed": False}
     atomic_json(public / "notifications.json", {"generated_at": iso(now), "events": notification})
     atomic_json(public / "review_queue.json", {"generated_at": iso(now), "candidates": reviews, "flyer": disk.load("flyers/latest.json", None)})
+    flyer = disk.load("flyers/latest.json", None)
+    assets = []
+    for asset in (flyer or {}).get("assets", []):
+        parsed = disk.load(asset["extraction_path"], {})
+        assets.append({**asset, "candidates": parsed.get("candidates", []), "text": parsed.get("text", "")})
+    atomic_json(public / "flyer_review.json", {"generated_at": iso(now), "flyer": flyer, "assets": assets,
+                "collection_status": statuses["koubou"].get("flyer"), "quantity_scope": "common_flyer_not_store_inventory"})
     atomic_json(public / "evidence.json", {"generated_at": iso(now), "decisions": decisions})
     disk.save(f"metrics/{run_id}.json", index)
     report = validation(root, now)

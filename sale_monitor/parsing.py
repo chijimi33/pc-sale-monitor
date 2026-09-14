@@ -84,7 +84,7 @@ def stock_status(value: str | None) -> str:
 def product_id(url: str) -> str:
     p = urlsplit(url)
     q = dict(parse_qsl(p.query))
-    return q.get("product_id") or q.get("sku") or p.path.strip("/").split("/")[-1].replace(".html", "")
+    return q.get("product_id") or q.get("pc_id") or q.get("sku") or p.path.strip("/").split("/")[-1].replace(".html", "")
 
 
 def json_products(tree) -> list[dict]:
@@ -123,7 +123,7 @@ def parse_product(store: str, page: Page, cfg: dict, discovery: dict | None = No
     if not offer.model and item.get("mpn") and item["mpn"] != offer.product_id:
         offer.model = str(item["mpn"])
     brand = item.get("brand")
-    offer.brand = (brand.get("name") if isinstance(brand, dict) else brand) or field(data, r"^メーカー$|^ブランド$")
+    offer.brand = (brand.get("name") if isinstance(brand, dict) else brand) or field(data, r"^メーカー(名)?$|^ブランド(名)?$")
     offer.warranty = field(data, r"^保証期間$")
     offer.variant = field(data, r"^商品構成$|^セット内容$")
     schema_offer = item.get("offers", {})
@@ -206,6 +206,8 @@ def parse_product(store: str, page: Page, cfg: dict, discovery: dict | None = No
         offer.issues.append("canonical_product_mismatch")
     if re.search(r"セット|[24]枚組|まとめ買い", offer.title) and not offer.variant:
         offer.issues.append("bundle_contents_review_needed")
+    if "/bto/customizer/" in page.url:
+        offer.issues.append("bto_configuration_review_needed")
     offer.verified = bool(offer.title and offer.price_yen and (offer.identity or offer.model) and not offer.issues)
     offer.evidence = [{"url": page.url, "checked_at": page.observed_at, "method": page.method, "content_hash": digest(page.text), "fields": evidence_fields}]
     return offer
