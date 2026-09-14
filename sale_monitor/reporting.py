@@ -19,11 +19,12 @@ def health(state: dict, now) -> dict:
     coverage = {key: {"known": sum(test(o) for o in current), "total": len(current)} for key, test in fields.items()}
     queue = state.get("queue", {})
     created = [timestamp(q.get("created_at")) for q in queue.values() if timestamp(q.get("created_at"))]
+    errors = Counter((e.get("reason"), e.get("url")) for e in state.get("errors", []))
     return {"status": state.get("status", "not_run"), "checkpoint_at": state.get("checkpoint_at"), "run_id": state.get("run_id"),
             "cycle_complete": state.get("cycle_complete", False), "list_pages": state.get("list_pages", 0), "listed_candidates": state.get("listed_candidates", 0),
             "known_offers": len(offers), "current_offers": len(current), "eligible_offers": sum(not o.errors(now) for o in current),
             "mandatory_field_coverage": coverage, "pending_count": len(queue), "oldest_pending_at": iso(min(created)) if created else None,
-            "pending_over_24h": sum(now - t > timedelta(hours=24) for t in created), "errors": state.get("errors", []),
+            "pending_over_24h": sum(now - t > timedelta(hours=24) for t in created), "errors": [{"reason": reason, "url": url, "affected_tasks": count} for (reason, url), count in errors.items()],
             "discovery_gaps": state.get("discovery_gaps", []), "source_metadata": state.get("source_metadata"), "flyer": state.get("flyer")}
 
 

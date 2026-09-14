@@ -33,6 +33,7 @@ class Collector:
         self.state["errors"] = []
         self.attempted = set()
         self.pages = {}
+        self.page_failures = {}
 
     def save(self):
         self.state["checkpoint_at"] = iso()
@@ -103,13 +104,19 @@ class Collector:
         self.save()
 
     def page(self, url: str):
+        if url in self.page_failures:
+            raise FetchError(self.page_failures[url])
         if url not in self.pages:
             try:
-                self.pages[url] = self.client.get(url)
-            except FetchError:
-                if not self.cfg.get("browser_fallback"):
-                    raise
-                self.pages[url] = self.client.rendered(url)
+                try:
+                    self.pages[url] = self.client.get(url)
+                except FetchError:
+                    if not self.cfg.get("browser_fallback"):
+                        raise
+                    self.pages[url] = self.client.rendered(url)
+            except Exception as exc:
+                self.page_failures[url] = str(exc) if isinstance(exc, FetchError) else type(exc).__name__
+                raise
         return self.pages[url]
 
     def process(self, task: dict):

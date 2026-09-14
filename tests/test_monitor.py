@@ -246,6 +246,17 @@ class Persistence(unittest.TestCase):
             resumed = Collector(root, "ark", cfg, "run2"); resumed.seed()
             self.assertEqual({t["type"] for t in resumed.state["queue"].values()}, {"list", "product"})
 
+    def test_failed_search_home_not_requested_for_every_product(self):
+        from unittest.mock import Mock
+        cfg = {"stores": {"ark": {"adapter": "html", "seed_urls": ["https://www.ark-pc.co.jp/"]}}}
+        client = Mock(); client.get.side_effect = FetchError("http_403")
+        with tempfile.TemporaryDirectory() as folder:
+            collector = Collector(Path(folder), "ark", cfg, "one", client)
+            for _ in range(4):
+                with self.assertRaises(FetchError):
+                    collector.page("https://www.ark-pc.co.jp/")
+            self.assertEqual(client.get.call_count, 1)
+
     def test_aggregate_idempotent_history_and_events(self):
         with tempfile.TemporaryDirectory() as folder:
             root = Path(folder)
