@@ -51,7 +51,7 @@ def extract_candidates(text: str) -> list[dict]:
     results = []
     for index, line in enumerate(lines):
         match = re.search(r"(?:[¥￥]\s*(\d[\d,]+)|(\d[\d,]+)\s*円)", line)
-        if match:
+        if match and not re.search(r"月々|月額|分割(?:支払|払)|手数料", line):
             context = "\n".join(lines[max(0, index-3):index+4])
             quantity = re.search(r"(?:限定|数量)\s*(\d+)\s*(?:台|個|点)", context)
             limit = re.search(r"(?:お一人様|1人|一人)[^\n]{0,25}", context)
@@ -100,22 +100,32 @@ def collect_flyer(client: Client, state: Store, cfg: dict, review_root: Path) ->
     offers = []
     if reviewed and reviewed.get("edition") == edition and reviewed.get("reviewed_at") and reviewed.get("reviewer"):
         record["period"] = reviewed.get("period")
-        record["status"] = "reviewed"
+        hashes = {a["content_hash"] for a in assets}
+        reviewed_hashes = hashes.intersection(reviewed.get("reviewed_asset_hashes", []))
+        record["reviewed_asset_hashes"] = sorted(reviewed_hashes)
+        record["pending_asset_hashes"] = sorted(hashes - reviewed_hashes)
+        record["status"] = "reviewed" if reviewed_hashes == hashes else "partially_reviewed"
+        record["review_issues"] = []
+        record["review_notes"] = reviewed.get("review_notes", [])
+        record["dismissed_candidates"] = reviewed.get("dismissed_candidates", [])
         for row in reviewed.get("products", []):
+            if row.get("source_asset_hash") not in reviewed_hashes:
+                record["review_issues"].append("product_asset_not_reviewed")
+                continue
             key = row.get("jan") or row.get("model") or digest(row.get("title"))
             offer = Offer("koubou", digest([edition, key, row.get("sale_date")])[:24], page.url, channel="store_flyer", seller_id="koubou",
-                          title=row.get("title", ""), model=row.get("model"), jan=row.get("jan"), brand=row.get("brand"), condition=row.get("condition"),
+                          title=row.get("title", ""), model=row.get("model"), jan=row.get("jan"), brand=row.get("brand"), condition=row.get("condition"), variant=row.get("variant"),
                           price_yen=row.get("price_yen"), shipping_yen=0, observed_at=page.observed_at, stock="unknown", verified=True,
                           expires_at=row.get("expires_at"), listed_quantity=row.get("listed_quantity"), purchase_limit=row.get("purchase_limit"), branches=list(BRANCHES),
                           branch_overrides=row.get("branch_overrides", {}), discovery_url=page.url)
-            offer.issues = ["store_stock_confirmation_required"]
+            offer.issues = ["store_stock_confirmation_required", *row.get("issues", [])]
             offer.branches = [branch for branch in BRANCHES if not offer.branch_overrides.get(branch, {}).get("excluded")]
             if any(v.get("price_yen") is not None and v["price_yen"] != offer.price_yen or v.get("conditions") for v in offer.branch_overrides.values()):
                 offer.issues.append("store_specific_conditions_review_needed")
             start = timestamp(row.get("sale_date"))
             if start is None or start > utcnow():
                 offer.issues.append("sale_not_started_or_date_unknown")
-            offer.evidence = [{"url": page.url, "checked_at": page.observed_at, "method": "reviewed_common_flyer", "fields": {"edition": edition, "assets": assets, "reviewed_at": reviewed["reviewed_at"], "sale_date": row.get("sale_date"), "listed_quantity_scope": "common_flyer_not_store_inventory"}}]
+            offer.evidence = [{"url": page.url, "checked_at": page.observed_at, "method": "reviewed_common_flyer", "fields": {"edition": edition, "assets": [a for a in assets if a["content_hash"] == row["source_asset_hash"]], "reviewed_at": reviewed["reviewed_at"], "sale_date": row.get("sale_date"), "listed_quantity_scope": "common_flyer_not_store_inventory"}}]
             # A store-specific confirmation is allowed only with its own timestamp
             # and evidence. Shared printed quantity cannot satisfy this condition.
             from .models import fresh

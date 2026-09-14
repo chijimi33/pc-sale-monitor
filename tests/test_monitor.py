@@ -210,6 +210,45 @@ class Parsers(unittest.TestCase):
 
 
 class Persistence(unittest.TestCase):
+    def test_comparison_backlog_does_not_starve_sale_price_refresh(self):
+        cfg = {"stores": {"ark": {"adapter": "html", "seed_urls": []}}}
+        with tempfile.TemporaryDirectory() as folder:
+            c = Collector(Path(folder), "ark", cfg, "run1")
+            c.seed()
+            c.enqueue({"type": "list", "url": "https://a.example/search?q=old", "kind": "comparison", "priority": 0})
+            c.enqueue({"type": "product", "url": "https://a.example/sale", "kind": "sale"})
+            executed = []
+            def process(task):
+                executed.append(task["url"])
+                if task["kind"] == "comparison":
+                    raise FetchError("RemoteDisconnected")
+                c.record(offer())
+            c.process = process
+            # Allow exactly one task before the job's time deadline.
+            with patch("sale_monitor.runner.time.monotonic", side_effect=[0, 0, 2]):
+                c.collect(seconds=1)
+            self.assertEqual(executed, ["https://a.example/sale"])
+            self.assertEqual(len(c.state["queue"]), 1)
+            self.assertEqual(next(iter(c.state["offers"].values()))["observed_run_id"], "run1")
+
+    def test_comparison_priority_survives_search_list_product_and_pagination(self):
+        from sale_monitor.runner import task_order
+        cfg = {"stores": {"ark": {"adapter": "html", "seed_urls": ["https://a.example/"], "product_patterns": ["/i/"]}}}
+        class Fake:
+            count = 0
+            def get(self, url):
+                body = '<form action="/search"><input name="keyword"></form>' if url.endswith('/') else '<a href="/i/one">SSD</a><a rel="next" href="/search?keyword=SSD&page=2">次へ</a>'
+                return Page(url, body.encode(), iso(NOW))
+        with tempfile.TemporaryDirectory() as folder:
+            c = Collector(Path(folder), "ark", cfg, "run1", Fake()); c.seed()
+            c.process({"type": "search", "query": "SSD", "kind": "comparison", "priority": 0})
+            listing = next(t for t in c.state["queue"].values() if t.get("kind") == "comparison")
+            c.process(listing)
+            compared = [t for t in c.state["queue"].values() if t.get("kind") == "comparison"]
+            self.assertTrue(all(t["priority"] == 0 for t in compared))
+            ordered = sorted(compared + [{"type": "search", "kind": "comparison", "priority": 0, "created_at": "2000"}], key=task_order)
+            self.assertEqual(ordered[0]["type"], "product")
+
     def test_unprocessed_previous_cycle_price_cannot_become_current(self):
         with tempfile.TemporaryDirectory() as folder:
             root = Path(folder)
@@ -310,6 +349,35 @@ class Persistence(unittest.TestCase):
 
 
 class Flyers(unittest.TestCase):
+    def test_monthly_credit_ad_is_not_a_product_price(self):
+        self.assertEqual(extract_candidates("ゲーミングPCも月々3,000円から!"), [])
+        self.assertEqual(extract_candidates("分割支払手数料0円"), [])
+        self.assertEqual(extract_candidates("SSD 9,980円")[0]["price_yen"], 9980)
+
+    def test_partial_review_preserves_bundle_and_does_not_claim_store_inventory(self):
+        from hashlib import sha256
+        from sale_monitor.models import digest
+        first_hash, second_hash = [sha256(body).hexdigest() for body in (b"one", b"two")]
+        edition = digest(sorted([first_hash, second_hash]))
+        class Fake:
+            def get(self, url):
+                body = b"one" if url.endswith("flyer1.jpg") else b"two" if url.endswith("flyer2.jpg") else b'<main><img src="/flyer1.jpg"><img src="/flyer2.jpg"></main>'
+                return Page(url, body, iso(NOW))
+        with tempfile.TemporaryDirectory() as folder, patch("sale_monitor.flyers.extract_asset", return_value={"text": "", "method": "ocr", "status": "review_needed"}):
+            root = Path(folder); disk = Store(root)
+            Store(root/"reviews").save(edition+".json", {"edition": edition, "reviewer": "test", "reviewed_at": iso(NOW), "reviewed_asset_hashes": [first_hash], "products": [
+                {"title": "memory pair", "brand": "Brand", "model": "MODEL-A", "variant": "8GB x2", "condition": "new", "source_asset_hash": first_hash, "listed_quantity": 150, "price_yen": 9000, "sale_date": "2026-09-12"},
+                {"title": "unreviewed product", "source_asset_hash": second_hash}]})
+            offers, record = collect_flyer(Fake(), disk, {"index_url": "https://a.example/"}, root/"reviews")
+            self.assertEqual(record["status"], "partially_reviewed")
+            self.assertEqual(record["pending_asset_hashes"], [second_hash])
+            self.assertEqual(len(offers), 1)
+            self.assertEqual(offers[0].variant, "8GB x2")
+            self.assertEqual(offers[0].stock, "unknown")
+            self.assertEqual(offers[0].branches, list(BRANCHES))
+            self.assertIn("store_stock_confirmation_required", offers[0].issues)
+            self.assertFalse(same_product(offers[0], offer()))
+
     def test_review_feed_includes_shared_extraction_and_quantity_scope(self):
         with tempfile.TemporaryDirectory() as folder:
             root = Path(folder)

@@ -14,6 +14,19 @@ from .parsing import canonical, discover, parse_product, search_form
 from .storage import Store
 
 
+def task_order(task: dict) -> tuple:
+    kind = task["type"]
+    if task.get("kind") == "comparison":
+        # Finish a high-priority comparison's product checks before starting
+        # another search, but never let a search backlog starve sale refreshes.
+        stage = 2
+        step = {"product": 0, "list": 1, "yahoo": 1, "search": 2}.get(kind, 3)
+    else:
+        stage = 0 if kind in ("list", "dospara_list", "amazon_discovery") else 1
+        step = 0
+    return stage, task.get("priority", 3), step, task["created_at"]
+
+
 class Collector:
     def __init__(self, root: Path, store: str, config: dict, run_id: str, client: Client | None = None):
         if store not in STORES:
@@ -99,7 +112,7 @@ class Collector:
                 self.enqueue({"type": "product", "url": row["url"], "kind": row.get("discovery_kind", "sale"), "source": row.get("discovery_url"), "title": row.get("title", "")})
         for query in self.disk.load(f"requests/{self.store}.json", []):
             if self.cfg["adapter"] == "yahoo":
-                self.enqueue({"type": "yahoo", "query": query["query"], "start": 1, "kind": "comparison"})
+                self.enqueue({"type": "yahoo", "query": query["query"], "start": 1, "kind": "comparison", "priority": query.get("priority", 3)})
             elif self.cfg["adapter"] == "html":
                 self.enqueue({"type": "search", "query": query["query"], "kind": "comparison", "priority": query.get("priority", 3)})
         self.save()
@@ -161,7 +174,7 @@ class Collector:
             url = search_form(home, task["query"])
             if not url:
                 raise FetchError("search_form_not_found")
-            self.enqueue({"type": "list", "url": url, "sale_page": False, "kind": "comparison", "depth": 0})
+            self.enqueue({"type": "list", "url": url, "sale_page": False, "kind": "comparison", "depth": 0, "priority": task.get("priority", 3)})
         elif kind == "list":
             page = self.page(task["url"])
             products, pagination, campaigns = discover(page, self.cfg, sale_page=task.get("sale_page", False), comparison=task.get("kind") == "comparison")
@@ -173,7 +186,7 @@ class Collector:
             self.state["list_pages"] += 1
             self.state["listed_candidates"] += len(products)
             for product in products:
-                self.enqueue({"type": "product", **product})
+                self.enqueue({"type": "product", **product, "priority": task.get("priority", 3)})
             for url in pagination:
                 self.enqueue({**task, "url": url})
             # Follow explicitly linked sale pages, including nested sale portals.
@@ -204,8 +217,7 @@ class Collector:
             pending = [(k, v) for k, v in self.state["queue"].items() if k not in self.attempted]
             if not pending:
                 break
-            priorities = {"list": 0, "dospara_list": 0, "amazon_discovery": 0, "yahoo": 1, "product": 1, "dospara_product": 1, "search": 2}
-            task_id, task = min(pending, key=lambda kv: (priorities.get(kv[1]["type"], 3), kv[1].get("priority", 3), kv[1]["created_at"]))
+            task_id, task = min(pending, key=lambda kv: task_order(kv[1]))
             self.attempted.add(task_id)
             try:
                 self.process(task)

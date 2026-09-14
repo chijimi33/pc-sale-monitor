@@ -20,10 +20,11 @@ def health(state: dict, now) -> dict:
     queue = state.get("queue", {})
     created = [timestamp(q.get("created_at")) for q in queue.values() if timestamp(q.get("created_at"))]
     errors = Counter((e.get("reason"), e.get("url")) for e in state.get("errors", []))
+    queue_types = Counter(q["type"] + ":" + (q.get("kind") or "sale") for q in queue.values())
     return {"status": state.get("status", "not_run"), "checkpoint_at": state.get("checkpoint_at"), "run_id": state.get("run_id"),
             "cycle_complete": state.get("cycle_complete", False), "list_pages": state.get("list_pages", 0), "listed_candidates": state.get("listed_candidates", 0),
             "known_offers": len(offers), "current_offers": len(current), "eligible_offers": sum(not o.errors(now) for o in current),
-            "mandatory_field_coverage": coverage, "pending_count": len(queue), "oldest_pending_at": iso(min(created)) if created else None,
+            "mandatory_field_coverage": coverage, "pending_count": len(queue), "pending_by_type": dict(queue_types), "oldest_pending_at": iso(min(created)) if created else None,
             "pending_over_24h": sum(now - t > timedelta(hours=24) for t in created), "errors": [{"reason": reason, "url": url, "affected_tasks": count} for (reason, url), count in errors.items()],
             "discovery_gaps": state.get("discovery_gaps", []), "source_metadata": state.get("source_metadata"), "flyer": state.get("flyer")}
 
@@ -131,9 +132,11 @@ def aggregate(root: Path, public: Path, run_id: str, now=None) -> dict:
     atomic_json(public / "review_queue.json", {"generated_at": iso(now), "candidates": reviews, "flyer": disk.load("flyers/latest.json", None)})
     flyer = disk.load("flyers/latest.json", None)
     assets = []
+    dismissed = {c["candidate_id"]: c["reason"] for c in (flyer or {}).get("dismissed_candidates", [])}
     for asset in (flyer or {}).get("assets", []):
         parsed = disk.load(asset["extraction_path"], {})
-        assets.append({**asset, "candidates": parsed.get("candidates", []), "text": parsed.get("text", "")})
+        candidates = [c for c in parsed.get("candidates", []) if c.get("candidate_id") not in dismissed]
+        assets.append({**asset, "candidates": candidates, "text": parsed.get("text", "")})
     atomic_json(public / "flyer_review.json", {"generated_at": iso(now), "flyer": flyer, "assets": assets,
                 "collection_status": statuses["koubou"].get("flyer"), "quantity_scope": "common_flyer_not_store_inventory"})
     atomic_json(public / "evidence.json", {"generated_at": iso(now), "decisions": decisions})

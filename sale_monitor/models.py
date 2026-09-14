@@ -163,5 +163,9 @@ class Offer:
 def same_product(a: Offer, b: Offer) -> bool:
     if not a.identity or a.identity != b.identity or a.condition != b.condition:
         return False
+    # A printed two-module bundle can use the same part number as one module.
+    # Missing counterpart configuration cannot prove that they are equivalent.
+    if bool(a.variant) != bool(b.variant):
+        return False
     # Different known variants or guarantee conditions must not be merged.
     return not any(x and y and normalize(x) != normalize(y) for x, y in ((a.variant, b.variant), (a.warranty, b.warranty)))
