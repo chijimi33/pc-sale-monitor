@@ -10,6 +10,30 @@ from .models import STORES, Offer, digest, fresh, iso, timestamp, utcnow
 from .storage import Store, atomic_json, read_json
 
 
+def errors_by_url(errors: list[dict]) -> list[dict]:
+    counts = Counter()
+    for error in errors:
+        counts[error.get("reason"), error.get("url")] += error.get("affected_tasks", 1)
+    return [{"reason": reason, "url": url, "affected_tasks": count} for (reason, url), count in counts.items()]
+
+
+def summarize_errors(errors: list[dict]) -> list[dict]:
+    groups = {}
+    urls = {}
+    for error in errors_by_url(errors):
+        reason, url = error["reason"], error["url"]
+        group = groups.setdefault(reason, {"reason": reason, "affected_tasks": 0, "distinct_urls": 0, "example_urls": []})
+        group["affected_tasks"] += error["affected_tasks"]
+        seen = urls.setdefault(reason, set())
+        if url and url not in seen:
+            seen.add(url)
+            if len(group["example_urls"]) < 3:
+                group["example_urls"].append(url)
+        group["distinct_urls"] = len(seen)
+        group["url"] = next(iter(seen)) if len(seen) == 1 else None
+    return list(groups.values())
+
+
 def health(state: dict, now) -> dict:
     offers = [Offer.from_dict(row) for row in state.get("offers", {}).values()]
     current = [o for o in offers if o.observed_run_id == state.get("run_id") and state.get("status") != "job_missing" and fresh(o.observed_at, now) and "latest_fetch_failed" not in o.issues]
@@ -19,7 +43,6 @@ def health(state: dict, now) -> dict:
     coverage = {key: {"known": sum(test(o) for o in current), "total": len(current)} for key, test in fields.items()}
     queue = state.get("queue", {})
     created = [timestamp(q.get("created_at")) for q in queue.values() if timestamp(q.get("created_at"))]
-    errors = Counter((e.get("reason"), e.get("url")) for e in state.get("errors", []))
     queue_types = Counter(q["type"] + ":" + (q.get("kind") or "sale") for q in queue.values())
     return {"status": state.get("status", "not_run"), "checkpoint_at": state.get("checkpoint_at"), "run_id": state.get("run_id"),
             "cycle_complete": state.get("cycle_complete", False), "list_pages": state.get("list_pages", 0), "listed_candidates": state.get("listed_candidates", 0),
@@ -27,7 +50,7 @@ def health(state: dict, now) -> dict:
             "mandatory_field_coverage": coverage, "pending_count": len(queue), "pending_by_type": dict(queue_types), "oldest_pending_at": iso(min(created)) if created else None,
             "retry_after_epoch_seconds": state.get("retry_after", {}),
             "comparison_no_results": sum(r.get("result") == "no_results" and r.get("observed_run_id") == state.get("run_id") for r in state.get("comparison_searches", {}).values()),
-            "pending_over_24h": sum(now - t > timedelta(hours=24) for t in created), "errors": [{"reason": reason, "url": url, "affected_tasks": count} for (reason, url), count in errors.items()],
+            "pending_over_24h": sum(now - t > timedelta(hours=24) for t in created), "errors": summarize_errors(state.get("errors", [])),
             "discovery_gaps": state.get("discovery_gaps", []), "source_metadata": state.get("source_metadata"), "flyer": state.get("flyer")}
 
 
@@ -52,12 +75,15 @@ def aggregate(root: Path, public: Path, run_id: str, now=None) -> dict:
     disk = Store(root)
     states = {name: disk.load(f"stores/{name}.json", {}) for name in STORES}
     statuses = {}
+    collection_errors = {}
     current = []
     changes = {}
     for name, state in states.items():
         if state.get("run_id") != run_id:
             state = {**state, "status": "job_missing", "cycle_complete": False}
         statuses[name] = health(state, now)
+        collection_errors[name] = {"run_id": state.get("run_id"), "checkpoint_at": state.get("checkpoint_at"), "status": state.get("status", "not_run"),
+                                   "errors": errors_by_url(state.get("errors", [])), "discovery_gaps": state.get("discovery_gaps", [])}
         if state.get("run_id") != run_id:
             continue
         changes.update(state.get("changes", {}))
@@ -128,9 +154,10 @@ def aggregate(root: Path, public: Path, run_id: str, now=None) -> dict:
     index = {"schema_version": 1, "generated_at": iso(now), "run_id": run_id, "mode": "parallel_validation", "monitored_store_count": 10,
              "excluded_stores": ["rakuten"], "complete_stores": complete, "collection_completion_rate": complete/10,
              "stores": statuses, "notification_count": len(notification), "review_count": len(reviews),
-             "files": {"notifications": "notifications.json", "reviews": "review_queue.json", "flyer_review": "flyer_review.json", "evidence": "evidence.json", "validation": "validation.json"},
+             "files": {"notifications": "notifications.json", "reviews": "review_queue.json", "flyer_review": "flyer_review.json", "evidence": "evidence.json", "validation": "validation.json", "collection_errors": "collection_errors.json"},
              "delivery_guarantee": "at_least_once_best_effort; publication_and_delivery_are_distinct", "full_rescan_needed": False}
     atomic_json(public / "notifications.json", {"generated_at": iso(now), "events": notification})
+    atomic_json(public / "collection_errors.json", {"generated_at": iso(now), "run_id": run_id, "stores": collection_errors})
     atomic_json(public / "review_queue.json", {"generated_at": iso(now), "candidates": reviews, "flyer": disk.load("flyers/latest.json", None)})
     flyer = disk.load("flyers/latest.json", None)
     assets = []

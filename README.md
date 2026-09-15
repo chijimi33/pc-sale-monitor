@@ -57,6 +57,7 @@ Yahoo!はGitHubリポジトリの **Settings → Secrets and variables → Actio
 | `state/requests/<store>.json` | 特価候補だけを対象とする次回の比較検索 |
 | `state/metrics/<run>.json` | 巡回範囲・必須項目取得率・未処理滞留の測定 |
 | `public/latest.json` | 軽量な最新索引、10店の取得状況 |
+| `public/collection_errors.json` | URL別の取得失敗件数・巡回漏れの詳細。索引には原因別の件数とURL例を掲載 |
 | `public/notifications.json` | 現在も根拠が有効な通知候補と固定ID |
 | `public/review_queue.json` | 判定できない候補と不足理由、チラシ確認先 |
 | `public/flyer_review.json` | 共通チラシの画像URL、版、OCR文字列・商品候補、掲載数量の適用範囲 |

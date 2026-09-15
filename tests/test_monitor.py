@@ -14,7 +14,7 @@ from sale_monitor.flyers import collect_flyer, extract_candidates
 from sale_monitor.http import Client, FetchError, Page, SafeRedirect
 from sale_monitor.models import BRANCHES, STORES, UTC, Offer, allowed_url, iso, same_product
 from sale_monitor.parsing import canonical, confirmed_empty_search, discover, parse_product
-from sale_monitor.reporting import aggregate, validation
+from sale_monitor.reporting import aggregate, summarize_errors, validation
 from sale_monitor.runner import Collector
 from sale_monitor.storage import Store
 
@@ -240,6 +240,33 @@ class Parsers(unittest.TestCase):
 
 
 class Persistence(unittest.TestCase):
+    def test_error_summary_preserves_all_failures_in_separate_details(self):
+        errors = [{"reason": "rate_limited_retry_later", "url": f"https://www.ark-pc.co.jp/i/{n}/"} for n in range(500)]
+        errors.extend([errors[0].copy(), {"reason": "http_403"}, {"reason": "http_403"}])
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder); disk = Store(root)
+            disk.save("stores/ark.json", {"store": "ark", "run_id": "run1", "status": "partial", "errors": errors})
+            index = aggregate(root, root/"public", "run1", NOW)
+            summary = index["stores"]["ark"]["errors"]
+            self.assertEqual(len(summary), 2)
+            self.assertEqual(summary[0]["affected_tasks"], 501)
+            self.assertEqual(summary[0]["distinct_urls"], 500)
+            self.assertEqual(len(summary[0]["example_urls"]), 3)
+            self.assertEqual(summary[1]["affected_tasks"], 2)
+            details = disk.load("public/collection_errors.json", {})
+            self.assertEqual(details["generated_at"], index["generated_at"])
+            self.assertEqual(details["run_id"], "run1")
+            rows = details["stores"]["ark"]["errors"]
+            self.assertEqual(len(rows), 501)
+            self.assertEqual(sum(r["affected_tasks"] for r in rows), 503)
+            self.assertEqual(rows[0]["affected_tasks"], 2)
+            self.assertIn(errors[499]["url"], [r["url"] for r in rows])
+            self.assertEqual(summarize_errors(rows), summary)
+            self.assertEqual(disk.load("stores/ark.json", {})["errors"], errors)
+            self.assertEqual(index["files"]["collection_errors"], "collection_errors.json")
+            self.assertEqual(index["complete_stores"], 0)
+            self.assertEqual(index["monitored_store_count"], 10)
+
     def test_http_404_retains_body_for_store_specific_search_classification(self):
         from io import BytesIO
         error = HTTPError("https://shop.tsukumo.co.jp/search?keyword=one", 404, "not found", {"Content-Type": "text/html;charset=utf-8"}, BytesIO(b'<h1>search page</h1>'))
