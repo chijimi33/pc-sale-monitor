@@ -13,7 +13,7 @@ from sale_monitor.engine import evaluate, update_events
 from sale_monitor.flyers import collect_flyer, extract_candidates
 from sale_monitor.http import Client, FetchError, Page, SafeRedirect
 from sale_monitor.models import BRANCHES, STORES, UTC, Offer, allowed_url, iso, same_product
-from sale_monitor.parsing import canonical, discover, parse_product
+from sale_monitor.parsing import canonical, confirmed_empty_search, discover, parse_product
 from sale_monitor.reporting import aggregate, validation
 from sale_monitor.runner import Collector
 from sale_monitor.storage import Store
@@ -162,6 +162,17 @@ class Events(unittest.TestCase):
 
 
 class Parsers(unittest.TestCase):
+    def test_empty_search_requires_matching_query_and_store_markup(self):
+        url = "https://shop.tsukumo.co.jp/search?keyword=2150000884686"
+        body = '<title>検索結果：2150000884686｜ツクモ公式通販サイト</title><input name="keyword" value="2150000884686"><div id="sli_noresult"><div>該当する商品がありませんでした。</div><div><a href="?keyword=2150000884686&amp;end_of_sales=0">販売終了商品も検索結果に表示する</a></div></div>'
+        self.assertEqual(confirmed_empty_search("tsukumo", Page(url, body.encode(), iso(NOW), status=404)), "2150000884686")
+        self.assertIsNone(confirmed_empty_search("ark", Page(url, body.encode(), iso(NOW), status=404)))
+        for candidate in [Page(url, b'<h1>Not Found</h1>', iso(NOW), status=404),
+                          Page(url, body.replace('value="2150000884686"', 'value="different"').encode(), iso(NOW), status=404),
+                          Page(url.replace('/search?', '/goods/1/?'), body.encode(), iso(NOW), status=404),
+                          Page(url, body.encode(), iso(NOW), status=403)]:
+            self.assertIsNone(confirmed_empty_search("tsukumo", candidate))
+
     def test_amazon_first_order_free_shipping_is_conditional(self):
         for delivery, expected in [("無料配送 9月16日 にお届け（初回注文特典）", None), ("無料配送 9月16日 にお届け", 0), ("3,500円以上で無料配送", None)]:
             with self.subTest(delivery=delivery):
@@ -185,6 +196,24 @@ class Parsers(unittest.TestCase):
         self.assertEqual(o.price_yen, 10980)
         self.assertEqual(o.shipping_yen, 0)
         self.assertEqual(o.jan, "4526541047763")
+
+    def test_ark_conflicting_primary_expiry_requires_review(self):
+        body = '''<script type="application/ld+json">{"@type":"Product","name":"MAG A650BNL","sku":"4526541047831","offers":{"@type":"Offer","priceCurrency":"JPY","price":3980,"priceValidUntil":"2026-09-18","availability":"https://schema.org/InStock","itemCondition":"https://schema.org/NewCondition","shippingDetails":{"shippingRate":{"currency":"JPY","value":0}}}}</script><li class="itemprice"><div class="date-diff2">開催期間:10/01 23:59まで</div><div id="item-15601883">3,980円</div></li><li class="itemprice"><div class="date-diff2">開催期間:12/31 23:59まで</div><div id="item-other">980円</div></li>'''
+        page = Page("https://www.ark-pc.co.jp/i/15601883/", body.encode(), iso(NOW))
+        o = parse_product("ark", page, {})
+        self.assertEqual((o.price_yen, o.shipping_yen, o.stock), (3980, 0, "in_stock"))
+        self.assertIsNone(o.expires_at)
+        self.assertFalse(o.verified)
+        self.assertIn("expiry_conflict_review_needed", evaluate(o, [], [], NOW)["reasons"])
+        self.assertEqual(o.evidence[0]["fields"]["expiry"]["schema"], "2026-09-18")
+        page.body = body.replace('10/01', '09/18').encode()
+        aligned = parse_product("ark", page, {})
+        self.assertTrue(aligned.verified)
+        self.assertEqual(aligned.expires_at, "2026-09-18T14:59:59+00:00")
+        page.body = body.replace('10/01 23:59', '09/18 12:00').encode()
+        self.assertIn("expiry_conflict_review_needed", parse_product("ark", page, {}).issues)
+        page.body = body.replace('"priceValidUntil":"2026-09-18",', '').encode()
+        self.assertIsNone(parse_product("ark", page, {}).expires_at)
 
     def test_koubou_embedded_variant(self):
         html = '''<h1>COUGAR cooler</h1><dl><dt>商品番号</dt><dd>4541995039782</dd><dt>商品型番</dt><dd>CGR-PSDVARGB-B-360</dd><dt>メーカー</dt><dd>COUGAR</dd><dt>送料</dt><dd>無料</dd></dl><input id="priceIncTax" value="6980"><script>eccube.classCategories={"a":{"b":{"product_code":"CGR-PSDVARGB-B-360","price02":6980,"stock_find":true,"point":"0","limit":"1"}}};</script>'''
@@ -211,6 +240,38 @@ class Parsers(unittest.TestCase):
 
 
 class Persistence(unittest.TestCase):
+    def test_http_404_retains_body_for_store_specific_search_classification(self):
+        from io import BytesIO
+        error = HTTPError("https://shop.tsukumo.co.jp/search?keyword=one", 404, "not found", {"Content-Type": "text/html;charset=utf-8"}, BytesIO(b'<h1>search page</h1>'))
+        client = Client(delay=0)
+        with patch.object(client.opener, "open", side_effect=error):
+            with self.assertRaises(FetchError) as result: client.get(error.url)
+        self.assertEqual(result.exception.page.status, 404)
+        self.assertEqual(result.exception.page.body, b'<h1>search page</h1>')
+
+    def test_confirmed_empty_search_completes_without_creating_out_of_stock_offer(self):
+        url = "https://shop.tsukumo.co.jp/search?keyword=2150000884686"
+        body = '<title>検索結果：2150000884686｜ツクモ公式通販サイト</title><input name="keyword" value="2150000884686"><div id="sli_noresult">該当する商品がありませんでした。</div>'
+        class Fake:
+            count = 0
+            def get(self, target):
+                self.count += 1
+                raise FetchError("http_404", Page(target, body.encode(), iso(NOW), status=404))
+        cfg = {"stores": {"tsukumo": {"adapter": "html", "seed_urls": [], "product_patterns": ["/goods/"], "browser_fallback": True}}}
+        with tempfile.TemporaryDirectory() as folder:
+            c = Collector(Path(folder), "tsukumo", cfg, "run1", Fake())
+            c.enqueue({"type": "list", "url": url, "kind": "comparison"})
+            state = c.collect(seconds=1)
+            self.assertEqual(state["status"], "complete")
+            self.assertEqual(state["queue"], {})
+            self.assertEqual(state["offers"], {})
+            self.assertEqual(state["comparison_searches"][url]["result"], "no_results")
+            existing = offer("tsukumo").to_dict()
+            c.state["offers"]["existing"] = existing.copy()
+            c.process({"type": "list", "url": url, "kind": "comparison"})
+            self.assertEqual(c.state["offers"]["existing"], existing)
+            self.assertEqual(c.client.count, 1)
+
     def test_repeated_runs_do_not_replace_seven_day_window_coverage(self):
         with tempfile.TemporaryDirectory() as folder:
             root = Path(folder); disk = Store(root)
@@ -234,6 +295,10 @@ class Persistence(unittest.TestCase):
             report = validation(root, NOW)
             self.assertEqual(report["measured_four_hour_windows"], 40)
             self.assertTrue(report["cutover_ready"], report["reasons"])
+            disk.save("validation/manual_review.json", {"reviewed_at": iso(NOW), "reviewed_count": 20, "false_positive_count": 0, "needs_review_count": 1})
+            report = validation(root, NOW)
+            self.assertFalse(report["cutover_ready"])
+            self.assertIn("manual_audit_unresolved_findings", report["reasons"])
 
     def test_server_wait_applies_to_other_urls_browser_and_resumed_collector(self):
         cfg = {"stores": {"ark": {"adapter": "html", "seed_urls": [], "browser_fallback": True}}}
@@ -430,6 +495,28 @@ class Persistence(unittest.TestCase):
             aggregate(root, root/"public", "run1", NOW)
             self.assertEqual(len(disk.history()), 3)
             self.assertEqual(len(disk.load("events/registry.json", {})["events"]), 1)
+
+    def test_expiry_conflict_removes_retained_notification_without_ending_sale(self):
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder); disk = Store(root)
+            items = [offer(), *competitors()]
+            for o in items:
+                disk.save(f"stores/{o.store}.json", {"store": o.store, "run_id": "run1", "status": "complete", "offers": {o.key: o.to_dict()}})
+            aggregate(root, root/"public", "run1", NOW)
+            original = disk.load("public/notifications.json", {})["events"]
+            self.assertEqual(len(original), 1)
+            items[0].verified = False
+            items[0].issues = ["expiry_conflict_review_needed"]
+            for o in items:
+                o.observed_run_id = "run2"
+                disk.save(f"stores/{o.store}.json", {"store": o.store, "run_id": "run2", "status": "complete", "offers": {o.key: o.to_dict()}})
+            aggregate(root, root/"public", "run2", NOW)
+            self.assertEqual(disk.load("public/notifications.json", {})["events"], [])
+            events = list(disk.load("events/registry.json", {})["events"].values())
+            self.assertEqual([e["event_id"] for e in events], [original[0]["event_id"]])
+            self.assertNotIn("ended", [e["kind"] for e in events])
+            reviews = disk.load("public/review_queue.json", {})["candidates"]
+            self.assertIn("expiry_conflict_review_needed", next(r for r in reviews if r["store"] == "ark")["reasons"])
 
 
 class Flyers(unittest.TestCase):

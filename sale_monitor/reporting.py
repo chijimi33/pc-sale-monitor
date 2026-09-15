@@ -26,6 +26,7 @@ def health(state: dict, now) -> dict:
             "known_offers": len(offers), "current_offers": len(current), "eligible_offers": sum(not o.errors(now) for o in current),
             "mandatory_field_coverage": coverage, "pending_count": len(queue), "pending_by_type": dict(queue_types), "oldest_pending_at": iso(min(created)) if created else None,
             "retry_after_epoch_seconds": state.get("retry_after", {}),
+            "comparison_no_results": sum(r.get("result") == "no_results" and r.get("observed_run_id") == state.get("run_id") for r in state.get("comparison_searches", {}).values()),
             "pending_over_24h": sum(now - t > timedelta(hours=24) for t in created), "errors": [{"reason": reason, "url": url, "affected_tasks": count} for (reason, url), count in errors.items()],
             "discovery_gaps": state.get("discovery_gaps", []), "source_metadata": state.get("source_metadata"), "flyer": state.get("flyer")}
 
@@ -182,6 +183,8 @@ def validation(root: Path, now=None) -> dict:
     audit = read_json(root / "validation" / "manual_review.json", {})
     if not audit.get("reviewed_at") or audit.get("false_positive_count") != 0 or audit.get("reviewed_count", 0) < 20:
         reasons.append("manual_false_positive_audit_pending")
+    if audit.get("needs_review_count", 0):
+        reasons.append("manual_audit_unresolved_findings")
     return {"started_at": iso(start), "earliest_cutover_at": iso(start + timedelta(days=7)), "measured_runs": len(snapshots),
             "recent_runs": len(recent), "measured_four_hour_windows": len(sampled), "coverage": coverage, "manual_review": audit, "cutover_ready": not reasons, "reasons": reasons,
             "amazon_keepa_comparison": {"adoption": "not_enabled", "free_current_conditions_coverage": coverage.get("amazon"), "decision": "measure_free_gaps_before_paid_comparison"}}

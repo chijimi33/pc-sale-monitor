@@ -10,7 +10,7 @@ from . import adapters
 from .flyers import collect_flyer
 from .http import Client, FetchError
 from .models import STORES, Offer, allowed_url, digest, fresh, iso, timestamp, utcnow
-from .parsing import canonical, discover, parse_product, search_form
+from .parsing import canonical, confirmed_empty_search, discover, parse_product, search_form
 from .storage import Store
 
 
@@ -124,17 +124,18 @@ class Collector:
 
     def page(self, url: str):
         if url in self.page_failures:
-            raise FetchError(self.page_failures[url])
+            failure = self.page_failures[url]
+            raise failure if isinstance(failure, FetchError) else FetchError(failure)
         if url not in self.pages:
             try:
                 try:
                     self.pages[url] = self.client.get(url)
                 except FetchError as exc:
-                    if str(exc) == "rate_limited_retry_later" or not self.cfg.get("browser_fallback"):
+                    if str(exc) == "rate_limited_retry_later" or (exc.page is not None and confirmed_empty_search(self.store, exc.page)) or not self.cfg.get("browser_fallback"):
                         raise
                     self.pages[url] = self.client.rendered(url)
             except Exception as exc:
-                self.page_failures[url] = str(exc) if isinstance(exc, FetchError) else type(exc).__name__
+                self.page_failures[url] = exc if isinstance(exc, FetchError) else type(exc).__name__
                 raise
         return self.pages[url]
 
@@ -181,7 +182,18 @@ class Collector:
                 raise FetchError("search_form_not_found")
             self.enqueue({"type": "list", "url": url, "sale_page": False, "kind": "comparison", "depth": 0, "priority": task.get("priority", 3)})
         elif kind == "list":
-            page = self.page(task["url"])
+            try:
+                page = self.page(task["url"])
+            except FetchError as exc:
+                if task.get("kind") != "comparison" or exc.page is None or not confirmed_empty_search(self.store, exc.page):
+                    raise
+                page = exc.page
+            empty_query = confirmed_empty_search(self.store, page) if task.get("kind") == "comparison" else None
+            if empty_query:
+                self.state.setdefault("comparison_searches", {})[canonical(task["url"])] = {"query": empty_query, "result": "no_results",
+                    "observed_at": page.observed_at, "observed_run_id": self.run_id, "http_status": page.status, "content_hash": digest(page.text)}
+                self.state["list_pages"] += 1
+                return
             products, pagination, campaigns = discover(page, self.cfg, sale_page=task.get("sale_page", False), comparison=task.get("kind") == "comparison")
             if not products and task.get("sale_page") and self.cfg.get("browser_fallback") and page.method != "browser":
                 page = self.client.rendered(task["url"])

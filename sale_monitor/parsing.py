@@ -9,7 +9,7 @@ from urllib.parse import parse_qsl, urlencode, urljoin, urlsplit, urlunsplit
 from lxml import html
 
 from .http import Page
-from .models import Offer, allowed_url, digest, iso, timestamp, valid_jan
+from .models import JST, Offer, allowed_url, digest, iso, timestamp, valid_jan
 
 SALE = re.compile(r"特価|セール|タイムセール|値下げ|お買い得|在庫限り|数量限定|限定価格|処分|sale|clearance", re.I)
 PC = re.compile(r"パソコン|PC|CPU|GPU|SSD|HDD|DDR[345]|メモリ|マザーボード|グラフィック|電源|クーラー|モニター|ディスプレイ|キーボード|マウス|ゲーミング|ルーター|USB|Ryzen|GeForce|Radeon|Core\s+i[3579]|CORELIQUID|Samsung|SanDisk|Crucial", re.I)
@@ -149,6 +149,21 @@ def parse_product(store: str, page: Page, cfg: dict, discovery: dict | None = No
             offer.expires_at = iso(date + timedelta(days=1) - timedelta(seconds=1)) if len(expiry) == 10 else iso(date)
     evidence_fields = {"json_ld": bool(item), "specifications": data}
     # Scope selectors to the current product, never scrape a page-wide lowest price.
+    if store == "ark":
+        price_blocks = tree.xpath('//*[@id=$id]/ancestor::li[contains(concat(" ",normalize-space(@class)," ")," itemprice ")][1]', id="item-" + offer.product_id)
+        if len(price_blocks) == 1:
+            displayed = first(price_blocks[0], './div[contains(concat(" ",normalize-space(@class)," ")," date-diff2 ")]')
+            if displayed:
+                evidence_fields["expiry"] = {"schema": schema_offer.get("priceValidUntil"), "discovery": (discovery or {}).get("expires_at"), "product_display": displayed}
+                match = re.fullmatch(r"開催期間:\s*(\d{1,2})/(\d{1,2})\s+(\d{1,2}):(\d{2})まで", displayed)
+                date = timestamp(offer.expires_at)
+                # A date without a year cannot establish a new deadline. Compare
+                # it with the claimed deadline, retaining both sources on conflict.
+                if match and date:
+                    date = date.astimezone(JST)
+                    if tuple(map(int, match.groups())) != (date.month, date.day, date.hour, date.minute):
+                        offer.expires_at = None
+                        offer.issues.append("expiry_conflict_review_needed")
     if store == "koubou":
         offer.price_yen = integer(first(tree, '//input[@id="priceIncTax"]/@value'))
         if field(data, r"^送料$") == "無料":
@@ -244,6 +259,20 @@ def discover(page: Page, cfg: dict, *, sale_page: bool, comparison: bool = False
             elif not comparison and any(re.search(p, url) for p in cfg.get("sale_patterns", [])) and SALE.search(label + " " + url):
                 campaigns.add(url)
     return list(products.values()), sorted(pages - {canonical(page.url)}), sorted(campaigns - {canonical(page.url)})
+
+
+def confirmed_empty_search(store: str, page: Page) -> str | None:
+    parts = urlsplit(page.url)
+    query = dict(parse_qsl(parts.query)).get("keyword", "").strip()
+    if store != "tsukumo" or parts.hostname != "shop.tsukumo.co.jp" or not re.fullmatch(r"/search(?:/p\d+)?/?", parts.path) or not query or page.status not in (200, 404):
+        return None
+    tree = document(page)
+    markers = tree.xpath('//*[@id="sli_noresult"]')
+    if len(markers) != 1 or not any(clean(node) == "該当する商品がありませんでした。" for node in [markers[0], *markers[0].xpath('./div')]):
+        return None
+    if first(tree, '//input[@name="keyword"]/@value') != query:
+        return None
+    return query if (first(tree, '//title') or "").startswith("検索結果：" + query + "｜") else None
 
 
 def search_form(page: Page, query: str) -> str | None:

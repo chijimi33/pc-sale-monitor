@@ -15,7 +15,9 @@ from .models import allowed_url, iso
 
 
 class FetchError(RuntimeError):
-    pass
+    def __init__(self, reason: str, page: Page | None = None):
+        super().__init__(reason)
+        self.page = page
 
 
 class SafeRedirect(HTTPRedirectHandler):
@@ -32,6 +34,7 @@ class Page:
     observed_at: str
     method: str = "http"
     content_type: str = ""
+    status: int = 200
 
     @property
     def text(self):
@@ -96,6 +99,9 @@ class Client:
                 with self.opener.open(request, timeout=self.timeout) as result:
                     return Page(result.url, result.read(), iso(), content_type=result.headers.get("Content-Type", ""))
             except HTTPError as exc:
+                if exc.code == 404:
+                    page = Page(exc.url, exc.read(), iso(), content_type=(exc.headers or {}).get("Content-Type", ""), status=404)
+                    raise FetchError("http_404", page=page) from exc
                 if exc.code not in (429, 500, 502, 503, 504):
                     raise FetchError(f"http_{exc.code}") from exc
                 retry = (exc.headers or {}).get("Retry-After", "")
