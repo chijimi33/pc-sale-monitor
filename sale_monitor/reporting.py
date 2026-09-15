@@ -25,6 +25,7 @@ def health(state: dict, now) -> dict:
             "cycle_complete": state.get("cycle_complete", False), "list_pages": state.get("list_pages", 0), "listed_candidates": state.get("listed_candidates", 0),
             "known_offers": len(offers), "current_offers": len(current), "eligible_offers": sum(not o.errors(now) for o in current),
             "mandatory_field_coverage": coverage, "pending_count": len(queue), "pending_by_type": dict(queue_types), "oldest_pending_at": iso(min(created)) if created else None,
+            "retry_after_epoch_seconds": state.get("retry_after", {}),
             "pending_over_24h": sum(now - t > timedelta(hours=24) for t in created), "errors": [{"reason": reason, "url": url, "affected_tasks": count} for (reason, url), count in errors.items()],
             "discovery_gaps": state.get("discovery_gaps", []), "source_metadata": state.get("source_metadata"), "flyer": state.get("flyer")}
 
@@ -153,11 +154,15 @@ def validation(root: Path, now=None) -> dict:
     snapshots = [s for s in snapshots if timestamp(s.get("generated_at"))]
     snapshots.sort(key=lambda s: s["generated_at"])
     start = timestamp(snapshots[0]["generated_at"]) if snapshots else now
-    recent = [s for s in snapshots if now - timestamp(s["generated_at"]) <= timedelta(days=7)]
+    recent = [s for s in snapshots if timedelta(0) <= now - timestamp(s["generated_at"]) <= timedelta(days=7)]
+    # Manual reruns and code pushes are diagnostics, not additional hours of
+    # parallel operation. Use the latest observation in each four-hour window.
+    windows = {int(timestamp(s["generated_at"]).timestamp()) // (4 * 3600): s for s in recent}
+    sampled = list(windows.values())
     reasons = []
     if now - start < timedelta(days=7):
         reasons.append("seven_days_not_elapsed")
-    if len(recent) < 40:
+    if len(sampled) < 40:
         reasons.append("insufficient_scheduled_runs")
     if any(s.get("complete_stores", 0) < 10 for s in recent):
         reasons.append("ten_store_coverage_incomplete")
@@ -167,7 +172,7 @@ def validation(root: Path, now=None) -> dict:
     for name in STORES:
         known = Counter()
         total = Counter()
-        for snapshot in recent:
+        for snapshot in sampled:
             for key, values in snapshot.get("stores", {}).get(name, {}).get("mandatory_field_coverage", {}).items():
                 known[key] += values["known"]
                 total[key] += values["total"]
@@ -178,5 +183,5 @@ def validation(root: Path, now=None) -> dict:
     if not audit.get("reviewed_at") or audit.get("false_positive_count") != 0 or audit.get("reviewed_count", 0) < 20:
         reasons.append("manual_false_positive_audit_pending")
     return {"started_at": iso(start), "earliest_cutover_at": iso(start + timedelta(days=7)), "measured_runs": len(snapshots),
-            "recent_runs": len(recent), "coverage": coverage, "manual_review": audit, "cutover_ready": not reasons, "reasons": reasons,
+            "recent_runs": len(recent), "measured_four_hour_windows": len(sampled), "coverage": coverage, "manual_review": audit, "cutover_ready": not reasons, "reasons": reasons,
             "amazon_keepa_comparison": {"adoption": "not_enabled", "free_current_conditions_coverage": coverage.get("amazon"), "decision": "measure_free_gaps_before_paid_comparison"}}

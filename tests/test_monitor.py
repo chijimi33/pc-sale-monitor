@@ -5,7 +5,8 @@ import json
 from pathlib import Path
 import tempfile
 import unittest
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
+from urllib.error import HTTPError
 
 from sale_monitor.adapters import amazon_product, yahoo_page
 from sale_monitor.engine import evaluate, update_events
@@ -210,6 +211,89 @@ class Parsers(unittest.TestCase):
 
 
 class Persistence(unittest.TestCase):
+    def test_repeated_runs_do_not_replace_seven_day_window_coverage(self):
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder); disk = Store(root)
+            disk.save("metrics/start.json", {"generated_at": iso(NOW-timedelta(days=8)), "stores": {}})
+            for i in range(50):
+                disk.save(f"metrics/rerun-{i}.json", {"generated_at": iso(NOW-timedelta(seconds=i)), "stores": {}})
+            report = validation(root, NOW)
+            self.assertEqual(report["recent_runs"], 50)
+            self.assertLessEqual(report["measured_four_hour_windows"], 2)
+            self.assertIn("insufficient_scheduled_runs", report["reasons"])
+            self.assertFalse(report["cutover_ready"])
+
+    def test_full_parallel_window_coverage_can_pass_validation(self):
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder); disk = Store(root)
+            disk.save("metrics/start.json", {"generated_at": iso(NOW-timedelta(days=8)), "stores": {}})
+            states = {store: {"mandatory_field_coverage": {key: {"known": 20, "total": 20} for key in ("identity", "seller", "condition", "price", "shipping", "stock", "evidence")}, "pending_over_24h": 0} for store in STORES}
+            for i in range(40):
+                disk.save(f"metrics/run-{i}.json", {"generated_at": iso(NOW-timedelta(hours=4*i)), "complete_stores": 10, "stores": states})
+            disk.save("validation/manual_review.json", {"reviewed_at": iso(NOW), "reviewed_count": 20, "false_positive_count": 0})
+            report = validation(root, NOW)
+            self.assertEqual(report["measured_four_hour_windows"], 40)
+            self.assertTrue(report["cutover_ready"], report["reasons"])
+
+    def test_server_wait_applies_to_other_urls_browser_and_resumed_collector(self):
+        cfg = {"stores": {"ark": {"adapter": "html", "seed_urls": [], "browser_fallback": True}}}
+        with tempfile.TemporaryDirectory() as folder, patch("sale_monitor.http.time.time", return_value=1000):
+            root = Path(folder)
+            client = Client(browser=True, delay=0)
+            c = Collector(root, "ark", cfg, "run1", client)
+            error = HTTPError("https://www.ark-pc.co.jp/i/one/", 429, "slow down", {"Retry-After": "180"}, None)
+            with patch.object(client.opener, "open", side_effect=error) as op, patch.object(client, "rendered") as render:
+                with self.assertRaisesRegex(FetchError, "rate_limited_retry_later"):
+                    c.page(error.url)
+                with self.assertRaises(FetchError):
+                    client.get("https://www.ark-pc.co.jp/i/two/")
+                self.assertEqual(op.call_count, 1)
+                render.assert_not_called()
+            c.save()
+            resumed = Collector(root, "ark", cfg, "run2")
+            self.assertEqual(resumed.client.retry_after["www.ark-pc.co.jp"], 1180)
+            with patch.object(resumed.client.opener, "open") as op:
+                with self.assertRaises(FetchError):
+                    resumed.client.get("https://www.ark-pc.co.jp/i/three/")
+                with self.assertRaises(FetchError):
+                    resumed.client.rendered("https://www.ark-pc.co.jp/i/four/")
+                op.assert_not_called()
+
+    def test_retry_deadline_expires_and_other_hosts_remain_available(self):
+        client = Client(delay=0); client.retry_after["a.example"] = 1200
+        response = MagicMock(); response.__enter__.return_value = response
+        response.url = "https://b.example/product"; response.read.return_value = b"ok"; response.headers = {}
+        with patch.object(client.opener, "open", return_value=response) as op, patch("sale_monitor.http.time.time", return_value=1000):
+            self.assertEqual(client.get(response.url).body, b"ok")
+            self.assertEqual(op.call_count, 1)
+        with patch.object(client.opener, "open", return_value=response) as op, patch("sale_monitor.http.time.time", return_value=1201):
+            client.get("https://a.example/product")
+            self.assertEqual(op.call_count, 1)
+            self.assertNotIn("a.example", client.retry_after)
+
+    def test_retry_after_is_saved_even_on_last_retry_and_accepts_http_date(self):
+        client = Client(delay=0)
+        failures = [HTTPError("https://a.example/", 503, "retry", {"Retry-After": "0"}, None),
+                    HTTPError("https://a.example/", 503, "retry", {"Retry-After": "0"}, None),
+                    HTTPError("https://a.example/", 429, "wait", {"Retry-After": "Thu, 01 Jan 1970 00:20:00 GMT"}, None)]
+        with patch.object(client.opener, "open", side_effect=failures) as op, patch("sale_monitor.http.time.time", return_value=1000):
+            with self.assertRaises(FetchError): client.get("https://a.example/")
+            self.assertEqual(op.call_count, 3)
+            self.assertEqual(client.retry_after["a.example"], 1200)
+
+    def test_browser_rate_limit_defers_subsequent_http_requests(self):
+        client = Client(browser=True, delay=0)
+        with patch("playwright.sync_api.sync_playwright") as factory, patch("sale_monitor.http.time.time", return_value=1000):
+            browser = factory.return_value.__enter__.return_value.chromium.launch.return_value
+            response = browser.new_page.return_value.goto.return_value
+            response.status = 429; response.url = "https://a.example/"; response.header_value.return_value = "180"
+            with self.assertRaises(FetchError): client.rendered(response.url)
+            self.assertEqual(client.retry_after["a.example"], 1180)
+            browser.close.assert_called_once()
+            with patch.object(client.opener, "open") as op:
+                with self.assertRaises(FetchError): client.get("https://a.example/other")
+                op.assert_not_called()
+
     def test_comparison_backlog_does_not_starve_sale_price_refresh(self):
         cfg = {"stores": {"ark": {"adapter": "html", "seed_urls": []}}}
         with tempfile.TemporaryDirectory() as folder:
