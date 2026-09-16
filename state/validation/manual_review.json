@@ -1,89 +1,177 @@
 {
-  "schema_version": 1,
-  "reviewed_at": "2026-09-15T13:00:24.040304+00:00",
-  "reviewer": "ChatGPT/Codex",
-  "audited_event_count": 1,
-  "reviewed_count": 0,
-  "false_positive_count": 0,
-  "needs_review_count": 1,
-  "counting_policy": "Distinct events with unresolved findings are not counted as completed reviews. This record does not confirm delivery.",
+  "audited_event_count": 2,
   "audits": [
     {
+      "delivery_status": "unconfirmed",
       "event_id": "dd992baf0c0c85e7bc3be81a8f22eae4",
-      "offer_key": "7b5dbe35fc2a9b5756933aaf",
-      "source_run_id": "34942803104-1",
-      "reviewed_at": "2026-09-15T13:00:24.040304+00:00",
-      "status": "needs_review",
-      "product": "MSI MAG A650BNL",
       "evidence": [
         {
-          "store": "ark",
-          "url": "https://www.ark-pc.co.jp/i/15601883/",
-          "observed_at": "2026-09-15T12:46:12.303278+00:00",
           "body_sha256": "cc9fad8da53a7435e83201769f0dc05609042088e7b71a13de33b28f4e33b00a",
           "content_hash": "deb12d85c4338325391778f9283e9390309c243c175dc88ca4d2c9153f9d48f8",
+          "expiry_sources": {
+            "discovery": null,
+            "product_display": "開催期間:10/01 23:59まで",
+            "schema": "2026-09-18"
+          },
           "jan": "4526541047831",
           "model": "MAG A650BNL",
+          "observed_at": "2026-09-15T12:46:12.303278+00:00",
           "price_yen": 3980,
           "shipping_yen": 0,
           "stock": "in_stock",
-          "expiry_sources": {
-            "schema": "2026-09-18",
-            "discovery": null,
-            "product_display": "開催期間:10/01 23:59まで"
-          },
+          "store": "ark",
+          "url": "https://www.ark-pc.co.jp/i/15601883/",
           "verification": "ChatGPT reviewed primary product JSON-LD and product-scoped HTML; related product prices excluded"
         },
         {
-          "store": "tsukumo",
-          "url": "https://shop.tsukumo.co.jp/goods/4526541047831/",
-          "observed_at": "2026-09-15T12:46:15.402137+00:00",
           "body_sha256": "9d795556e543a367c53bdb6c7163fd0672775c9e8f150a572f3f7aa6f89edd5d",
           "content_hash": "0204fd8d1f8ccd26ff1bb5314d541ce5198b128a051a44432b9f4ff1f8942750",
+          "expiry_sources": null,
           "jan": "4526541047831",
           "model": null,
+          "observed_at": "2026-09-15T12:46:15.402137+00:00",
           "price_yen": 5980,
           "shipping_yen": 0,
           "stock": "in_stock",
-          "expiry_sources": null,
+          "store": "tsukumo",
+          "url": "https://shop.tsukumo.co.jp/goods/4526541047831/",
           "verification": "ChatGPT reviewed primary product JSON-LD and product-scoped HTML; related product prices excluded"
         },
         {
-          "store": "koubou",
-          "url": "https://www.pc-koubou.jp/products/detail.php?product_id=1054268",
-          "observed_at": "2026-09-15T12:46:17.108480+00:00",
           "body_sha256": "7bd2075ab56dfa9a33f0de49547e3acbfd82c444e7884620548cc6061423105a",
           "content_hash": "166fe195e23d87e74406f52a703d7cd1fb662de37023c85166c284882cf9ced4",
+          "expiry_sources": null,
           "jan": "4526541047831",
           "model": "MAG A650BNL",
+          "observed_at": "2026-09-15T12:46:17.108480+00:00",
           "price_yen": 5980,
           "shipping_yen": 0,
           "stock": "in_stock",
-          "expiry_sources": null,
+          "store": "koubou",
+          "url": "https://www.pc-koubou.jp/products/detail.php?product_id=1054268",
           "verification": "ChatGPT reviewed primary product JSON-LD and product-scoped HTML; related product prices excluded"
         }
       ],
-      "price_check": {
-        "status": "supported",
-        "candidate_payment_yen": 3980,
-        "lowest_other_payment_yen": 5980,
-        "independent_other_sellers": 2,
-        "difference_yen": 2000,
-        "difference_percent": 33.44481605351171,
-        "rule": "A",
-        "points_basis": "not_verified"
-      },
       "findings": [
         {
-          "reason": "expiry_conflict_review_needed",
-          "status": "open",
-          "store": "ark",
-          "schema_price_valid_until": "2026-09-18",
+          "action": "Hold notification, retain both source values, and do not infer the missing year or mark the sale ended.",
           "primary_product_display": "開催期間:10/01 23:59まで",
-          "action": "Hold notification, retain both source values, and do not infer the missing year or mark the sale ended."
+          "reason": "expiry_conflict_review_needed",
+          "schema_price_valid_until": "2026-09-18",
+          "status": "open",
+          "store": "ark"
         }
       ],
-      "delivery_status": "unconfirmed"
+      "offer_key": "7b5dbe35fc2a9b5756933aaf",
+      "price_check": {
+        "candidate_payment_yen": 3980,
+        "difference_percent": 33.44481605351171,
+        "difference_yen": 2000,
+        "independent_other_sellers": 2,
+        "lowest_other_payment_yen": 5980,
+        "points_basis": "not_verified",
+        "rule": "A",
+        "status": "supported"
+      },
+      "product": "MSI MAG A650BNL",
+      "reviewed_at": "2026-09-15T13:00:24.040304+00:00",
+      "source_run_id": "34942803104-1",
+      "status": "needs_review"
+    },
+    {
+      "delivery_status": "unconfirmed",
+      "event_id": "d2d76764ad56bfe39f2488f53e76bd4e",
+      "evidence": [
+        {
+          "body_sha256": "c5fd3de217a82ff1adf68cf60df4d8d981ba0dc3a7947f70fbc0bb5739372e08",
+          "condition": "new",
+          "condition_basis": "JSON-LD NewCondition",
+          "content_hash": "d110cadb01785087de9cc3cbc1f1cf16f9fa96cee16649cb27c47e2d7f533019",
+          "jan": "4537694358347",
+          "model": "CP-9020296-JP",
+          "observed_at": "2026-09-16T08:11:04.302364+00:00",
+          "price_yen": 14980,
+          "shipping_yen": 0,
+          "stock": "in_stock",
+          "store": "tsukumo",
+          "url": "https://shop.tsukumo.co.jp/goods/4537694358347/",
+          "verification": "Primary product JSON-LD gtin13 and name; visible network price, free-shipping label, and stock-status. No coupon or points applied."
+        },
+        {
+          "body_sha256": "b2f754c670c2f0b40342d1774d1ef38ad808dbf44cb1f77d46daec6bd21a7aaf",
+          "condition": "new",
+          "condition_basis": "JSON-LD NewCondition",
+          "content_hash": "42d19b0934e7346e60263fff0943e14679a97c1dd8500633683b65ef9212a3ea",
+          "jan": "4537694358347",
+          "model": "CP-9020296-JP",
+          "observed_at": "2026-09-16T08:11:06.584836+00:00",
+          "price_yen": 20480,
+          "shipping_yen": 0,
+          "stock": "in_stock",
+          "store": "ark",
+          "url": "https://www.ark-pc.co.jp/i/15602001/",
+          "verification": "Primary item-15602001 price container, JAN and model specification, JSON-LD free shipping and InStock. Related items excluded."
+        },
+        {
+          "body_sha256": "bcc8ca94277569c61410882b4d614777b9f46e3377932d810635f92e288fc399",
+          "condition": "new",
+          "condition_basis": "Configured new-catalog rule; standard primary product listing with no used/outlet designation. This is a catalog inference, not an explicit condition field.",
+          "content_hash": "41988b22afdac4b44aa86a7a6c4b80eac3f72fd164fa5a709c2609884a592d24",
+          "jan": "4537694358347",
+          "model": "CP-9020296-JP",
+          "observed_at": "2026-09-16T08:11:08.373618+00:00",
+          "price_yen": 20480,
+          "shipping_yen": 0,
+          "stock": "in_stock",
+          "store": "koubou",
+          "url": "https://www.pc-koubou.jp/products/detail.php?product_id=1128703",
+          "verification": "Primary product ID, JAN and model specification, priceIncTax and visible base price, free-shipping row, and matching product_code/price02 stock variant. Optional service bundle and 10% warranty add-on excluded."
+        }
+      ],
+      "findings": [],
+      "offer_key": "e006f98866821ed5c28d19e2",
+      "price_check": {
+        "candidate_payment_yen": 14980,
+        "difference_percent": 26.8555,
+        "difference_yen": 5500,
+        "independent_other_sellers": 2,
+        "lowest_other_payment_yen": 20480,
+        "points_basis": "not_verified",
+        "rule": "A",
+        "status": "supported"
+      },
+      "product": "Corsair RM850e 2025 CP-9020296-JP",
+      "reviewed_at": "2026-09-16T08:14:36.855725+00:00",
+      "scope": "Current payment-basis decision rechecked against the three named sellers. Unknown candidate expiry and points remain unknown; no assertion of the market-wide lowest price or delivery.",
+      "seller_evidence": [
+        {
+          "checked_at": "2026-09-16T08:14:36.855725+00:00",
+          "seller": "株式会社ヤマダデンキ",
+          "source_url": "https://shop.tsukumo.co.jp/shopping-help/service/tokusho.html",
+          "store": "tsukumo"
+        },
+        {
+          "checked_at": "2026-09-16T08:14:36.855725+00:00",
+          "seller": "株式会社アーク",
+          "source_url": "https://www.ark-pc.co.jp/info/law.html",
+          "store": "ark"
+        },
+        {
+          "checked_at": "2026-09-16T08:14:36.855725+00:00",
+          "seller": "株式会社ユニットコム",
+          "source_url": "https://www.pc-koubou.jp/shop_guide/tokusyouhou.php",
+          "store": "koubou"
+        }
+      ],
+      "source_run_id": "35056906624-1",
+      "status": "passed"
     }
-  ]
+  ],
+  "counting_policy": "Distinct events with unresolved findings are not counted as completed reviews. This record does not confirm delivery.",
+  "false_positive_count": 0,
+  "needs_review_count": 1,
+  "reviewed_at": "2026-09-16T08:14:36.855725+00:00",
+  "reviewed_count": 1,
+  "reviewer": "ChatGPT/Codex",
+  "schema_version": 1
 }

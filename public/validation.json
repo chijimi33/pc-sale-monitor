@@ -3,7 +3,7 @@
     "adoption": "not_enabled",
     "decision": "measure_free_gaps_before_paid_comparison",
     "free_current_conditions_coverage": {
-      "condition": 0.0,
+      "condition": 0,
       "evidence": 0.014156285390713477,
       "identity": 0.02406568516421291,
       "price": 0.014156285390713477,
@@ -14,7 +14,7 @@
   },
   "coverage": {
     "amazon": {
-      "condition": 0.0,
+      "condition": 0,
       "evidence": 0.014156285390713477,
       "identity": 0.02406568516421291,
       "price": 0.014156285390713477,
@@ -23,11 +23,11 @@
       "stock": 0.015005662514156285
     },
     "ark": {
-      "condition": 1.0,
+      "condition": 1,
       "evidence": 0.8078089461713419,
       "identity": 0.9791508718726308,
       "price": 0.9605761940864291,
-      "seller": 1.0,
+      "seller": 1,
       "shipping": 0.7827899924184989,
       "stock": 0.9791508718726308
     },
@@ -42,12 +42,12 @@
     },
     "dospara": {
       "condition": 0.975,
-      "evidence": 1.0,
+      "evidence": 1,
       "identity": 0.79375,
-      "price": 1.0,
-      "seller": 1.0,
-      "shipping": 1.0,
-      "stock": 1.0
+      "price": 1,
+      "seller": 1,
+      "shipping": 1,
+      "stock": 1
     },
     "joshin": {
       "condition": null,
@@ -63,25 +63,25 @@
       "evidence": 0.9699367088607594,
       "identity": 0.8299050632911392,
       "price": 0.9818037974683544,
-      "seller": 1.0,
+      "seller": 1,
       "shipping": 0.757120253164557,
       "stock": 0.8425632911392406
     },
     "sofmap": {
       "condition": 0.8666666666666667,
-      "evidence": 1.0,
-      "identity": 1.0,
-      "price": 1.0,
-      "seller": 1.0,
-      "shipping": 0.0,
+      "evidence": 1,
+      "identity": 1,
+      "price": 1,
+      "seller": 1,
+      "shipping": 0,
       "stock": 0.55
     },
     "tsukumo": {
       "condition": 0.9919957310565635,
       "evidence": 0.9079509071504802,
-      "identity": 1.0,
-      "price": 1.0,
-      "seller": 1.0,
+      "identity": 1,
+      "price": 1,
+      "seller": 1,
       "shipping": 0.8532550693703308,
       "stock": 0.493863393810032
     },
@@ -107,7 +107,7 @@
   "cutover_ready": false,
   "earliest_cutover_at": "2026-09-20T19:28:10.260709+00:00",
   "manual_review": {
-    "audited_event_count": 1,
+    "audited_event_count": 2,
     "audits": [
       {
         "delivery_status": "unconfirmed",
@@ -185,13 +185,101 @@
         "reviewed_at": "2026-09-15T13:00:24.040304+00:00",
         "source_run_id": "34942803104-1",
         "status": "needs_review"
+      },
+      {
+        "delivery_status": "unconfirmed",
+        "event_id": "d2d76764ad56bfe39f2488f53e76bd4e",
+        "evidence": [
+          {
+            "body_sha256": "c5fd3de217a82ff1adf68cf60df4d8d981ba0dc3a7947f70fbc0bb5739372e08",
+            "condition": "new",
+            "condition_basis": "JSON-LD NewCondition",
+            "content_hash": "d110cadb01785087de9cc3cbc1f1cf16f9fa96cee16649cb27c47e2d7f533019",
+            "jan": "4537694358347",
+            "model": "CP-9020296-JP",
+            "observed_at": "2026-09-16T08:11:04.302364+00:00",
+            "price_yen": 14980,
+            "shipping_yen": 0,
+            "stock": "in_stock",
+            "store": "tsukumo",
+            "url": "https://shop.tsukumo.co.jp/goods/4537694358347/",
+            "verification": "Primary product JSON-LD gtin13 and name; visible network price, free-shipping label, and stock-status. No coupon or points applied."
+          },
+          {
+            "body_sha256": "b2f754c670c2f0b40342d1774d1ef38ad808dbf44cb1f77d46daec6bd21a7aaf",
+            "condition": "new",
+            "condition_basis": "JSON-LD NewCondition",
+            "content_hash": "42d19b0934e7346e60263fff0943e14679a97c1dd8500633683b65ef9212a3ea",
+            "jan": "4537694358347",
+            "model": "CP-9020296-JP",
+            "observed_at": "2026-09-16T08:11:06.584836+00:00",
+            "price_yen": 20480,
+            "shipping_yen": 0,
+            "stock": "in_stock",
+            "store": "ark",
+            "url": "https://www.ark-pc.co.jp/i/15602001/",
+            "verification": "Primary item-15602001 price container, JAN and model specification, JSON-LD free shipping and InStock. Related items excluded."
+          },
+          {
+            "body_sha256": "bcc8ca94277569c61410882b4d614777b9f46e3377932d810635f92e288fc399",
+            "condition": "new",
+            "condition_basis": "Configured new-catalog rule; standard primary product listing with no used/outlet designation. This is a catalog inference, not an explicit condition field.",
+            "content_hash": "41988b22afdac4b44aa86a7a6c4b80eac3f72fd164fa5a709c2609884a592d24",
+            "jan": "4537694358347",
+            "model": "CP-9020296-JP",
+            "observed_at": "2026-09-16T08:11:08.373618+00:00",
+            "price_yen": 20480,
+            "shipping_yen": 0,
+            "stock": "in_stock",
+            "store": "koubou",
+            "url": "https://www.pc-koubou.jp/products/detail.php?product_id=1128703",
+            "verification": "Primary product ID, JAN and model specification, priceIncTax and visible base price, free-shipping row, and matching product_code/price02 stock variant. Optional service bundle and 10% warranty add-on excluded."
+          }
+        ],
+        "findings": [],
+        "offer_key": "e006f98866821ed5c28d19e2",
+        "price_check": {
+          "candidate_payment_yen": 14980,
+          "difference_percent": 26.8555,
+          "difference_yen": 5500,
+          "independent_other_sellers": 2,
+          "lowest_other_payment_yen": 20480,
+          "points_basis": "not_verified",
+          "rule": "A",
+          "status": "supported"
+        },
+        "product": "Corsair RM850e 2025 CP-9020296-JP",
+        "reviewed_at": "2026-09-16T08:14:36.855725+00:00",
+        "scope": "Current payment-basis decision rechecked against the three named sellers. Unknown candidate expiry and points remain unknown; no assertion of the market-wide lowest price or delivery.",
+        "seller_evidence": [
+          {
+            "checked_at": "2026-09-16T08:14:36.855725+00:00",
+            "seller": "株式会社ヤマダデンキ",
+            "source_url": "https://shop.tsukumo.co.jp/shopping-help/service/tokusho.html",
+            "store": "tsukumo"
+          },
+          {
+            "checked_at": "2026-09-16T08:14:36.855725+00:00",
+            "seller": "株式会社アーク",
+            "source_url": "https://www.ark-pc.co.jp/info/law.html",
+            "store": "ark"
+          },
+          {
+            "checked_at": "2026-09-16T08:14:36.855725+00:00",
+            "seller": "株式会社ユニットコム",
+            "source_url": "https://www.pc-koubou.jp/shop_guide/tokusyouhou.php",
+            "store": "koubou"
+          }
+        ],
+        "source_run_id": "35056906624-1",
+        "status": "passed"
       }
     ],
     "counting_policy": "Distinct events with unresolved findings are not counted as completed reviews. This record does not confirm delivery.",
     "false_positive_count": 0,
     "needs_review_count": 1,
-    "reviewed_at": "2026-09-15T13:00:24.040304+00:00",
-    "reviewed_count": 0,
+    "reviewed_at": "2026-09-16T08:14:36.855725+00:00",
+    "reviewed_count": 1,
     "reviewer": "ChatGPT/Codex",
     "schema_version": 1
   },
