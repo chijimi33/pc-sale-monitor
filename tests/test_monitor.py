@@ -162,6 +162,35 @@ class Events(unittest.TestCase):
 
 
 class Parsers(unittest.TestCase):
+    def test_dospara_primary_manufacturer_delimiter_preserves_full_product_label(self):
+        labels = [("ADATA", "SLEG-900P-2TCS-DP (M.2 2280 2TB) ドスパラ限定モデル"),
+                  ("Razer", "Seiren V3 Chroma 32-Bit DSP (RZ19-05990100-R3M1)"),
+                  ("エレコム", "WRC-BE36QS-B (11be 無線LANルーター)"),
+                  ("MONTECH", "KING 95 PRO White (ATX ガラス ホワイト)"),
+                  ("Western Digital", "WD80EAAZ (8TB)")]
+        for brand, model in labels:
+            with self.subTest(brand=brand):
+                body = '<h1 class="p-product-show-detail__h3">' + brand + '  ' + model + '</h1>'
+                o = parse_product("dospara", Page("https://www.dospara.co.jp/SBR1144/IC524291.html", body.encode(), iso(NOW)), {})
+                self.assertEqual((o.brand, o.model), (brand, model))
+                self.assertEqual(o.evidence[0]["fields"]["product_label"]["full_model_label"], model)
+        pair = '<h1 class="p-product-show-detail__h3">ADATA  AX5U5600C4616G-DTAMRBK-DP (DDR5 PC5-44800 16GB 2枚組) ドスパラ限定モデル</h1>'
+        parsed = parse_product("dospara", Page("https://www.dospara.co.jp/SBR1534/IC611642.html", pair.encode(), iso(NOW)), {})
+        self.assertIn("bundle_contents_review_needed", parsed.issues)
+        self.assertIsNone(parsed.jan)
+
+    def test_dospara_unstructured_or_conflicting_heading_does_not_invent_model(self):
+        url = "https://www.dospara.co.jp/SBR1144/IC524291.html"
+        cases = ['<h1 class="p-product-show-detail__h3">Unknown PRODUCT-A</h1>',
+                 '<h1>ADATA  PRODUCT-A</h1>',
+                 '<h1 class="p-product-show-detail__h3">ADATA  PRODUCT-A</h1>' * 2,
+                 '<h1 class="p-product-show-detail__h3">ADATA  PRODUCT-A</h1><script type="application/ld+json">{"@type":"Product","name":"Different product","mpn":"IC524291"}</script>']
+        for body in cases:
+            self.assertIsNone(parse_product("dospara", Page(url, body.encode(), iso(NOW)), {}).model)
+        body = '<h1 class="p-product-show-detail__h3">ADATA  PRODUCT-A (2TB)</h1><table><tr><th>メーカー型番</th><td>PRODUCT-A</td></tr><tr><th>メーカー</th><td>ADATA</td></tr></table>'
+        parsed = parse_product("dospara", Page(url, body.encode(), iso(NOW)), {})
+        self.assertEqual(parsed.model, "PRODUCT-A")
+
     def test_empty_search_requires_matching_query_and_store_markup(self):
         url = "https://shop.tsukumo.co.jp/search?keyword=2150000884686"
         body = '<title>検索結果：2150000884686｜ツクモ公式通販サイト</title><input name="keyword" value="2150000884686"><div id="sli_noresult"><div>該当する商品がありませんでした。</div><div><a href="?keyword=2150000884686&amp;end_of_sales=0">販売終了商品も検索結果に表示する</a></div></div>'

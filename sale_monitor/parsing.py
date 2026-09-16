@@ -188,11 +188,19 @@ def parse_product(store: str, page: Page, cfg: dict, discovery: dict | None = No
             offer.shipping_yen = 0
         # Preserve the full displayed model string. A series name or inferred
         # abbreviated CPU name is never equated with a full part number.
-        label = first(tree, '//h1[contains(@class,"product-show-detail")]')
-        if label:
+        labels = tree.xpath('//h1[contains(@class,"product-show-detail")]')
+        if len(labels) == 1 and clean(labels[0]) == " ".join(offer.title.split()):
+            label = clean(labels[0])
             match = re.match(r"(AMD|Intel|ASRock|ASUS|MSI|GIGABYTE|CORSAIR|Corsair|Crucial|Samsung|SAMSUNG|Western Digital|玄人志向|CFD|ドスパラセレクト|Logicool|Thermaltake|Antec|NZXT)\s+(.+)", label)
+            if not match:
+                # The store's primary heading separates manufacturer and product
+                # with two spaces. Preserve that delimiter before whitespace
+                # normalization; unknown single-space labels stay unresolved.
+                match = re.fullmatch(r"([^\r\n]+?)[ \t\u3000]{2,}(\S[^\r\n]+)", labels[0].text_content().strip())
             if match:
-                offer.brand, offer.model = match[1], match[2].strip()
+                offer.brand = offer.brand or " ".join(match[1].split())
+                offer.model = offer.model or " ".join(match[2].split())
+                evidence_fields["product_label"] = {"brand": offer.brand, "full_model_label": offer.model, "source": "primary_product_heading"}
     if store == "tsukumo" and first(tree, '//li[contains(concat(" ",normalize-space(@class)," ")," free-shipping ")]') == "送料無料":
         offer.shipping_yen = 0
     selectors = {
