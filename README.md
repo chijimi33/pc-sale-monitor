@@ -107,6 +107,8 @@ OCRはTesseractの日本語・英語モデルを使用し、Actionsでインス�
 
 ## 参照
 
+ローカルQwenの検証とCodexの日次レビューの構成・保存先・切替条件は [Qwen検証の運用](docs/qwen-qa.md) を参照してください。三モデル比較と実データ報告を確認するまでは新ワーカーを有効にしません。
+
 初期の取得状況と残課題は [導入状況](docs/deployment-status.md) を参照してください。最新の状況は常に公開JSONを優先します。
 
 - [Yahoo!商品検索v3](https://developer.yahoo.co.jp/webapi/shopping/v3/itemsearch.html)：送料区分、一般ストアポイントとプレミアムポイントの分離、検索結果ウィンドウ。
