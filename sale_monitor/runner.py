@@ -17,14 +17,15 @@ from .storage import Store
 def task_order(task: dict) -> tuple:
     kind = task["type"]
     if task.get("kind") == "comparison":
-        # Finish a high-priority comparison's product checks before starting
-        # another search, but never let a search backlog starve sale refreshes.
+        # Resume older comparisons before refreshing newer ones at the same
+        # priority. Descendants keep the original request time so a comparison
+        # can finish without moving to the back of the next cycle's queue.
         stage = 2
         step = {"product": 0, "list": 1, "yahoo": 1, "search": 2}.get(kind, 3)
     else:
         stage = 0 if kind in ("list", "dospara_list", "amazon_discovery") else 1
         step = 0
-    return stage, task.get("priority", 3), step, task["created_at"]
+    return stage, task.get("priority", 3), task["created_at"], step
 
 
 class Collector:
@@ -63,7 +64,13 @@ class Collector:
         if task.get("url") and not allowed_url(task["url"]):
             return
         task_id = digest([task["type"], task.get("url"), task.get("query"), task.get("start"), task.get("kind"), task.get("item", {}).get("product_id")])[:24]
-        if task_id not in self.state["queue"] and task_id not in self.state["done"]:
+        if task_id in self.state["queue"]:
+            existing = self.state["queue"][task_id]
+            if task.get("priority", 3) < existing.get("priority", 3):
+                existing["priority"] = task["priority"]
+            if task.get("created_at") and task["created_at"] < existing["created_at"]:
+                existing["created_at"] = task["created_at"]
+        elif task_id not in self.state["done"]:
             self.state["queue"][task_id] = {"created_at": iso(), "attempts": 0, **task}
 
     def record(self, offer: Offer):
@@ -180,7 +187,7 @@ class Collector:
             url = search_form(home, task["query"])
             if not url:
                 raise FetchError("search_form_not_found")
-            self.enqueue({"type": "list", "url": url, "sale_page": False, "kind": "comparison", "depth": 0, "priority": task.get("priority", 3)})
+            self.enqueue({"type": "list", "url": url, "sale_page": False, "kind": "comparison", "depth": 0, "priority": task.get("priority", 3), "created_at": task.get("created_at") or iso()})
         elif kind == "list":
             try:
                 page = self.page(task["url"])
@@ -203,7 +210,8 @@ class Collector:
             self.state["list_pages"] += 1
             self.state["listed_candidates"] += len(products)
             for product in products:
-                self.enqueue({"type": "product", **product, "priority": task.get("priority", 3)})
+                origin = {"created_at": task["created_at"]} if task.get("kind") == "comparison" and task.get("created_at") else {}
+                self.enqueue({"type": "product", **product, "priority": task.get("priority", 3), **origin})
             for url in pagination:
                 self.enqueue({**task, "url": url})
             # Follow explicitly linked sale pages, including nested sale portals.

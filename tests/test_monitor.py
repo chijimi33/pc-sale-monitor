@@ -446,13 +446,50 @@ class Persistence(unittest.TestCase):
                 return Page(url, body.encode(), iso(NOW))
         with tempfile.TemporaryDirectory() as folder:
             c = Collector(Path(folder), "ark", cfg, "run1", Fake()); c.seed()
-            c.process({"type": "search", "query": "SSD", "kind": "comparison", "priority": 0})
+            origin = iso(NOW-timedelta(days=2))
+            c.process({"type": "search", "query": "SSD", "kind": "comparison", "priority": 0, "created_at": origin})
             listing = next(t for t in c.state["queue"].values() if t.get("kind") == "comparison")
             c.process(listing)
             compared = [t for t in c.state["queue"].values() if t.get("kind") == "comparison"]
             self.assertTrue(all(t["priority"] == 0 for t in compared))
-            ordered = sorted(compared + [{"type": "search", "kind": "comparison", "priority": 0, "created_at": "2000"}], key=task_order)
+            self.assertTrue(all(t["created_at"] == origin for t in compared))
+            ordered = sorted(compared + [{"type": "search", "kind": "comparison", "priority": 0, "created_at": iso(NOW)},
+                                         {"type": "search", "kind": "comparison", "priority": 3, "created_at": "2000"}], key=task_order)
             self.assertEqual(ordered[0]["type"], "product")
+
+    def test_resumed_comparison_search_precedes_new_same_priority_refresh(self):
+        cfg = {"stores": {"ark": {"adapter": "html", "seed_urls": []}}}
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            first = Collector(root, "ark", cfg, "before")
+            first.record(offer(discovery_kind="comparison"))
+            first.enqueue({"type": "search", "query": "old-model", "kind": "comparison", "priority": 3, "created_at": iso(NOW-timedelta(days=2))})
+            first.save()
+            resumed = Collector(root, "ark", cfg, "after")
+            executed = []
+            resumed.process = lambda task: executed.append(task)
+            with patch("sale_monitor.runner.time.monotonic", side_effect=[0, 0, 2]):
+                resumed.collect(seconds=1)
+            self.assertEqual([t["type"] for t in executed], ["search"])
+            self.assertEqual(executed[0]["query"], "old-model")
+            self.assertEqual(len(resumed.state["queue"]), 1)
+            self.assertEqual(next(iter(resumed.state["queue"].values()))["type"], "product")
+            self.assertEqual(next(iter(resumed.state["offers"].values()))["observed_run_id"], "before")
+
+    def test_pending_comparison_promotion_preserves_original_age_and_attempts(self):
+        cfg = {"stores": {"ark": {"adapter": "html", "seed_urls": []}}}
+        with tempfile.TemporaryDirectory() as folder:
+            c = Collector(Path(folder), "ark", cfg, "run1")
+            base = {"type": "product", "url": "https://a.example/i/one", "kind": "comparison"}
+            c.enqueue({**base, "priority": 3, "created_at": iso(NOW-timedelta(days=1)), "attempts": 2})
+            c.enqueue({**base, "priority": 0, "created_at": iso(NOW)})
+            task = next(iter(c.state["queue"].values()))
+            self.assertEqual((task["priority"], task["attempts"]), (0, 2))
+            self.assertEqual(task["created_at"], iso(NOW-timedelta(days=1)))
+            c.enqueue({**base, "priority": 3, "created_at": iso(NOW-timedelta(days=2))})
+            self.assertEqual(len(c.state["queue"]), 1)
+            self.assertEqual(task["priority"], 0)
+            self.assertEqual(task["created_at"], iso(NOW-timedelta(days=2)))
 
     def test_unprocessed_previous_cycle_price_cannot_become_current(self):
         with tempfile.TemporaryDirectory() as folder:
