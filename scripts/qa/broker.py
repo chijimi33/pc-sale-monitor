@@ -10,7 +10,7 @@ from urllib.parse import urlsplit
 
 from common import append_event, atomic, digest, environment, inside, now, read, run
 
-TOOL = {"name": "qa", "description": "Sale-monitor QA. op=list/read/replace/test/evidence/report. Paths are relative to the isolated repository. read optionally takes start (1-based), count (<=160). replace needs exact old and new strings. evidence takes a URL already present in the input. report requires a report object with summary, findings, unresolved, and decisions (benchmark only). All tool results and tests are recorded.",
+TOOL = {"name": "qa", "description": "Sale-monitor QA. op=list/read/replace/test/data/evidence/report. Paths are relative to the isolated repository. read optionally takes start (1-based), count (<=160). replace needs exact old and new strings. data reads one public snapshot file (path=notifications.json/evidence.json/review_queue.json/flyer_review.json/collection_errors.json); specify offer_key (event ID or store key also allowed) to select a record. evidence takes a URL from selected records. report requires a report object with summary, findings, unresolved, and decisions (benchmark only). All tool results and tests are recorded.",
         "inputSchema": {"type": "object", "properties": {
             "op": {"type": "string", "enum": ["list", "read", "replace", "test", "data", "evidence", "report"]},
             "path": {"type": "string"}, "start": {"type": "integer"}, "count": {"type": "integer"},

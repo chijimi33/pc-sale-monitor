@@ -5,6 +5,7 @@ import subprocess
 import time
 
 from common import ROOT, atomic, environment, now, read, run
+from process_guard import attach
 
 DISABLED = ["skill", "get_goal", "update_goal", "agent", "task_stop", "record_artifact", "tool_search",
             "report_findings", "list_agents", "send_message", "enter_worktree", "exit_worktree"]
@@ -42,6 +43,7 @@ def execute(job, config, prompt, timeout=3600):
     with (job / "agent.jsonl").open("w", encoding="utf-8") as out, (job / "agent.stderr").open("w", encoding="utf-8") as err:
         proc = subprocess.Popen(argv, cwd=job / "repo", env=env, stdout=out, stderr=err,
                                 creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
+        attach(proc)
         atomic(job / "agent-process.json", {"pid": proc.pid, "started_at": now()})
         init_checked = False
         issue = None

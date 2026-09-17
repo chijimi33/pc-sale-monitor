@@ -39,11 +39,20 @@ def summarize(latest, validation):
     stores = {}
     for name, store in latest["stores"].items():
         stores[name] = {key: store.get(key) for key in ("status", "current_offers", "eligible_offers", "pending_count", "pending_over_24h", "mandatory_field_coverage", "errors")}
+        stores[name]["mandatory_field_coverage"] = {k: [v["known"], v["total"]] for k, v in store.get("mandatory_field_coverage", {}).items()}
+        stores[name]["errors"] = [{k: error.get(k) for k in ("reason", "affected_tasks")} for error in store.get("errors", [])]
     return {"run_id": latest["run_id"], "generated_at": latest["generated_at"],
             "monitored_store_count": latest["monitored_store_count"], "complete_stores": latest["complete_stores"], "stores": stores,
             "validation": {key: validation.get(key) for key in ("cutover_ready", "reasons", "measured_runs", "measured_four_hour_windows", "earliest_cutover_at")},
             "manual_review": {key: validation.get("manual_review", {}).get(key) for key in ("reviewed_count", "false_positive_count", "needs_review_count")},
             "flyer": {key: (latest["stores"].get("koubou", {}).get("flyer") or {}).get(key) for key in ("status", "edition", "pending_asset_hashes", "review_issues", "url")}}
+
+
+def compact_evidence(value):
+    """Keep decision amounts/identities/provenance; load bulky page fields on demand."""
+    if isinstance(value, list): return [compact_evidence(v) for v in value]
+    if isinstance(value, dict): return {k: compact_evidence(v) for k, v in value.items() if k not in ("fields", "specifications")}
+    return value
 
 
 def snapshot():
@@ -139,12 +148,14 @@ def poll(config):
         candidates = [{"event_id": e["event_id"], "offer_key": e.get("offer_key"), "current_evidence": e.get("current_evidence")} for e in notifications.get("events", [])]
         # Full evidence stays on disk; prompt only the first candidate, rest is durable backlog.
         cursor = state.get("candidate_cursor", 0)
-        candidate = [candidates[cursor % len(candidates)]] if candidates else []
+        selected = [candidates[cursor % len(candidates)]] if candidates else []
+        candidate = compact_evidence(selected)
         atomic(job / "snapshot/notifications.json", notifications)
         atomic(job / "snapshot/latest.json", item["latest"])
         atomic(job / "snapshot/validation.json", item["validation"])
         inp = {"policy": POLICY, "current": compact, "previous": previous, "feedback": item["feedback"],
-               "candidate": candidate, "remaining_event_ids": [x["event_id"] for x in candidates if x not in candidate],
+               "candidate": candidate, "remaining_event_ids": [x["event_id"] for x in candidates if x not in selected],
+               "coverage_format": "mandatory_field_coverage値は[既知件数,今回取得件数]。分母0の取得率は不明。0%とも100%ともみなさない。",
                "snapshot_age_hours_at_start": (datetime.now(timezone.utc) - datetime.fromisoformat(item["latest"]["generated_at"])).total_seconds()/3600,
                "base_sha": base_sha, "data_sha": item["data_sha"],
                "known_user_state": "Yahoo Client ID未取得は既知。再質問しない。有料サービス禁止。Qwenは画像未対応。チラシ読取はCodexへ保留。",

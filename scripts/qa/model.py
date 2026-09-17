@@ -7,6 +7,7 @@ import time
 from urllib.request import urlopen
 
 from common import atomic, now, run
+from process_guard import attach
 
 PROFILES = {"Q3_K_XL": ("vulkan-q3", 99), "Q4_K_S": ("vulkan-q4s", 55), "Q4_K_M": ("vulkan-q4m", 50)}
 
@@ -34,6 +35,7 @@ def server(model, folder):
     started = time.monotonic()
     with (folder / "server.stdout").open("w") as out, (folder / "server.stderr").open("w") as err:
         proc = subprocess.Popen(argv, stdout=out, stderr=err, creationflags=subprocess.CREATE_NO_WINDOW)
+        attach(proc)
         atomic(folder / "server.json", {"pid": proc.pid, "started_at": now(), "model": model, "profile": profile, "arguments": argv, "model_bytes": model_path.stat().st_size})
         try:
             while time.monotonic() - started < 240:

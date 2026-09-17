@@ -1,4 +1,6 @@
 from pathlib import Path
+import os
+import subprocess
 import sys
 import tempfile
 import unittest
@@ -103,6 +105,24 @@ class HandoffTests(unittest.TestCase):
             self.assertEqual(state["held"][0]["attempts"], 3)
             self.assertEqual(state["queue"], [])
             self.assertEqual(len(list((self.root / "jobs").glob("*/manifest.json"))), 3)
+
+    @unittest.skipUnless(os.name == "nt", "Windows process ownership")
+    def test_child_ends_when_controller_exits(self):
+        import ctypes
+        from ctypes import wintypes
+        child_pid = self.root / "child-pid.txt"
+        program = "import sys,subprocess,os;sys.path.insert(0,sys.argv[1]);from process_guard import attach;p=subprocess.Popen([sys.executable,'-B','-c','import time;time.sleep(60)']);attach(p);open(sys.argv[2],'w').write(str(p.pid));os._exit(0)"
+        result = subprocess.run([sys.executable, "-B", "-c", program, str(QA), str(child_pid)], capture_output=True, timeout=10)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        kernel = ctypes.WinDLL("kernel32", use_last_error=True)
+        kernel.OpenProcess.argtypes = [wintypes.DWORD, wintypes.BOOL, wintypes.DWORD]
+        kernel.OpenProcess.restype = wintypes.HANDLE
+        kernel.WaitForSingleObject.argtypes = [wintypes.HANDLE, wintypes.DWORD]
+        kernel.CloseHandle.argtypes = [wintypes.HANDLE]
+        handle = kernel.OpenProcess(0x100000, False, int(child_pid.read_text()))
+        if handle:
+            try: self.assertEqual(kernel.WaitForSingleObject(handle, 5000), 0)
+            finally: kernel.CloseHandle(handle)
 
 
 if __name__ == "__main__": unittest.main()
