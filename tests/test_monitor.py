@@ -642,6 +642,34 @@ class Flyers(unittest.TestCase):
             self.assertIn("store_stock_confirmation_required", offers[0].issues)
             self.assertFalse(same_product(offers[0], offer()))
 
+    def test_reviewed_starting_price_cannot_become_a_final_payment(self):
+        from hashlib import sha256
+        from sale_monitor.models import digest
+        body = b"starting-price-flyer"
+        content_hash = sha256(body).hexdigest()
+        edition = digest([content_hash])
+        class Fake:
+            def get(self, url):
+                return Page(url, body if url.endswith(".jpg") else b'<main><img src="/flyer.jpg"></main>', iso(NOW))
+        with tempfile.TemporaryDirectory() as folder, patch("sale_monitor.flyers.extract_asset", return_value={"text": "", "status": "review_needed"}):
+            root = Path(folder); disk = Store(root)
+            row = {"title": "PC from 98,800 yen", "brand": "Brand", "model": "PC-A", "condition": "new",
+                   "source_asset_hash": content_hash, "sale_date": "2026-09-12", "price_yen": 98800,
+                   "price_basis": "starting_from", "printed_price_from_yen": 98800,
+                   "review_notes": ["Configuration and conditional vouchers need confirmation."],
+                   "branch_overrides": {BRANCHES[0]: {"stock": "in_stock", "source_url": "https://a.example/store", "checked_at": iso()}}}
+            Store(root/"reviews").save(edition+".json", {"edition": edition, "reviewer": "test", "reviewed_at": iso(NOW),
+                "reviewed_asset_hashes": [content_hash], "products": [row]})
+            offers, _ = collect_flyer(Fake(), disk, {"index_url": "https://a.example/"}, root/"reviews")
+            self.assertEqual(offers[0].stock, "in_stock")
+            self.assertIsNone(offers[0].price_yen)
+            self.assertIsNone(offers[0].payment)
+            self.assertIn("starting_price_not_final_price", evaluate(offers[0], [], [], NOW)["reasons"])
+            self.assertEqual(offers[0].evidence[0]["fields"]["printed_price_from_yen"], 98800)
+            self.assertEqual(offers[0].evidence[0]["fields"]["review_notes"], row["review_notes"])
+            self.assertIsNone(offers[0].points_yen)
+            self.assertEqual(offers[0].discount_yen, 0)
+
     def test_review_feed_includes_shared_extraction_and_quantity_scope(self):
         with tempfile.TemporaryDirectory() as folder:
             root = Path(folder)

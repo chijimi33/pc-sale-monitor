@@ -119,6 +119,12 @@ def collect_flyer(client: Client, state: Store, cfg: dict, review_root: Path) ->
                           expires_at=row.get("expires_at"), listed_quantity=row.get("listed_quantity"), purchase_limit=row.get("purchase_limit"), branches=list(BRANCHES),
                           branch_overrides=row.get("branch_overrides", {}), discovery_url=page.url)
             offer.issues = ["store_stock_confirmation_required", *row.get("issues", [])]
+            # A printed lower bound is evidence of a starting price, not the
+            # final payment for an identified configuration.
+            if row.get("price_basis") == "starting_from":
+                offer.price_yen = None
+                if "starting_price_not_final_price" not in offer.issues:
+                    offer.issues.append("starting_price_not_final_price")
             offer.branches = [branch for branch in BRANCHES if not offer.branch_overrides.get(branch, {}).get("excluded")]
             if any(v.get("price_yen") is not None and v["price_yen"] != offer.price_yen or v.get("conditions") for v in offer.branch_overrides.values()):
                 offer.issues.append("store_specific_conditions_review_needed")
@@ -126,6 +132,7 @@ def collect_flyer(client: Client, state: Store, cfg: dict, review_root: Path) ->
             if start is None or start > utcnow():
                 offer.issues.append("sale_not_started_or_date_unknown")
             offer.evidence = [{"url": page.url, "checked_at": page.observed_at, "method": "reviewed_common_flyer", "fields": {"edition": edition, "assets": [a for a in assets if a["content_hash"] == row["source_asset_hash"]], "reviewed_at": reviewed["reviewed_at"], "sale_date": row.get("sale_date"), "listed_quantity_scope": "common_flyer_not_store_inventory"}}]
+            offer.evidence[0]["fields"].update({key: row[key] for key in ("price_basis", "printed_price_from_yen", "review_notes") if key in row})
             # A store-specific confirmation is allowed only with its own timestamp
             # and evidence. Shared printed quantity cannot satisfy this condition.
             from .models import fresh
