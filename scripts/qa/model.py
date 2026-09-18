@@ -12,17 +12,22 @@ from process_guard import attach
 PROFILES = {"Q3_K_XL": ("vulkan-q3", 99), "Q4_K_S": ("vulkan-q4s", 55), "Q4_K_M": ("vulkan-q4m", 50)}
 
 
-@contextmanager
-def server(model, folder):
-    """Own only this child PID; never stop a user's inference server."""
-    folder = Path(folder); folder.mkdir(parents=True, exist_ok=True)
-    profile, layers = PROFILES[model]
+def ensure_available(folder):
+    """Check before reserving a worker attempt; a busy GPU is not a failed test."""
     check = run(["powershell.exe", "-NoProfile", "-Command",
                  "Get-Process | Where-Object { $_.ProcessName -match 'llama-server|lm-studio|lmstudio|Overwatch' -and ($_.WorkingSet64 -gt 2GB -or $_.ProcessName -eq 'llama-server') } | Select-Object -ExpandProperty Id"], folder)
     if check.returncode or check.stdout.strip():
         raise RuntimeError("GPU_busy_or_process_check_failed; existing apps were not stopped")
     with socket.socket() as sock:
         if sock.connect_ex(("127.0.0.1", 8081)) == 0: raise RuntimeError("QA_port_8081_busy")
+
+
+@contextmanager
+def server(model, folder):
+    """Own only this child PID; never stop a user's inference server."""
+    folder = Path(folder); folder.mkdir(parents=True, exist_ok=True)
+    profile, layers = PROFILES[model]
+    ensure_available(folder)
     model_path = Path("D:/AI/Models/unsloth/Qwen3.8-27B-GGUF") / f"Qwen3.8-27B-UD-{model}.gguf"
     argv = ["D:/AI/llama.cpp/runtimes/b10997-vulkan/llama-server.exe", "-m", str(model_path),
             "--alias", "qa-local", "--host", "127.0.0.1", "--port", "8081", "--ctx-size", "16384",

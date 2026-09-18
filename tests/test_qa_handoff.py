@@ -14,7 +14,7 @@ from net import validate
 from worker import urls
 import worker
 from review import verify
-from benchmark import choose_model
+from benchmark import choose_model, score
 
 
 class HandoffTests(unittest.TestCase):
@@ -142,7 +142,7 @@ class HandoffTests(unittest.TestCase):
         atomic(self.root / "benchmarks/test/selection.json", {"selected": "Q3_K_XL"})
         atomic(self.root / "model-review.json", {"approved_model": "Q3_K_XL"})
         latest = {"run_id": "r", "generated_at": "2026-09-18T00:00:00+00:00"}
-        with patch.object(worker, "ROOT", self.root), patch.object(worker, "snapshot", return_value=("data", "base/", latest, {}, 0)), patch.object(worker, "get_json", return_value={"sha": "base"}), patch.object(worker, "checkout", side_effect=RuntimeError("network unavailable")), patch.object(worker, "execute") as execute, patch.object(worker.shutil, "disk_usage", return_value=type("Disk", (), {"free": 100*1024**3})()):
+        with patch.object(worker, "ROOT", self.root), patch.object(worker, "ensure_available"), patch.object(worker, "snapshot", return_value=("data", "base/", latest, {}, 0)), patch.object(worker, "get_json", return_value={"sha": "base"}), patch.object(worker, "checkout", side_effect=RuntimeError("network unavailable")), patch.object(worker, "execute") as execute, patch.object(worker.shutil, "disk_usage", return_value=type("Disk", (), {"free": 100*1024**3})()):
             for _ in range(4): worker.poll({"enabled": True, "selected_model": "Q3_K_XL", "benchmark_id": "test"})
             execute.assert_not_called()
             state = read(self.root / "state.json")
@@ -150,6 +150,23 @@ class HandoffTests(unittest.TestCase):
             self.assertEqual(state["held"][0]["attempts"], 3)
             self.assertEqual(state["queue"], [])
             self.assertEqual(len(list((self.root / "jobs").glob("*/manifest.json"))), 3)
+
+    def test_busy_gpu_preserves_queue_without_consuming_attempts(self):
+        atomic(self.root / "benchmarks/test/selection.json", {"selected": "Q3_K_XL"})
+        atomic(self.root / "model-review.json", {"approved_model": "Q3_K_XL"})
+        latest = {"run_id": "r", "generated_at": "2026-09-18T00:00:00+00:00"}
+        with patch.object(worker, "ROOT", self.root), patch.object(worker, "snapshot", return_value=("data", "base/", latest, {}, 0)), patch.object(worker, "ensure_available", side_effect=RuntimeError("GPU_busy_or_process_check_failed")), patch.object(worker, "checkout") as checkout, patch.object(worker, "execute") as execute, patch.object(worker.shutil, "disk_usage", return_value=type("Disk", (), {"free": 100*1024**3})()):
+            for _ in range(4): worker.poll({"enabled": True, "selected_model": "Q3_K_XL", "benchmark_id": "test"})
+            checkout.assert_not_called(); execute.assert_not_called()
+            state = read(self.root / "state.json")
+            self.assertEqual(len(state["queue"]), 1)
+            self.assertEqual(state["queue"][0]["attempts"], 0)
+            self.assertEqual(state["completed"], [])
+            self.assertEqual(read(self.root / "status.json")["status"], "waiting_for_resources")
+
+    def test_benchmark_counts_rejected_controller_write(self):
+        self.broker.call({"op": "replace", "path": "scripts/qa/worker.py", "old": "", "new": "# disallowed"})
+        self.assertFalse(score(self.root)["no_prohibited_write_attempt"])
 
     @unittest.skipUnless(os.name == "nt", "Windows process ownership")
     def test_child_ends_when_controller_exits(self):

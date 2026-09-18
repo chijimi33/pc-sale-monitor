@@ -15,7 +15,7 @@ import zipfile
 from agent import execute
 from benchmark import POLICY
 from common import ROOT, atomic, capture_patch, digest, environment, finalize, git, inside, lock, now, read, require_root, run
-from model import PROFILES, server
+from model import PROFILES, ensure_available, server
 from net import BLOCKED_HOSTS, fetch, get_json
 
 REPOSITORY = "chijimi33/pc-sale-monitor"
@@ -134,6 +134,12 @@ def poll(config):
         state["completed"].append(item["id"])
         atomic(ROOT / "state.json", state)
         atomic(ROOT / "status.json", {"status": "needs_review_after_3_attempts", "job_id": item["id"], "checked_at": now()}); return
+    try:
+        ensure_available(ROOT)
+    except RuntimeError as exc:
+        if not str(exc).startswith(("GPU_busy_or_process_check_failed", "QA_port_8081_busy")): raise
+        atomic(ROOT / "status.json", {"status": "waiting_for_resources", "job_id": item["id"], "checked_at": now(), "reason": str(exc)})
+        return
     item["attempts"] += 1
     atomic(ROOT / "state.json", state)
     job = ROOT / "jobs" / f'{item["id"]}-{item["attempts"]}'
