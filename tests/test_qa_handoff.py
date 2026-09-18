@@ -14,6 +14,7 @@ from net import validate
 from worker import urls
 import worker
 from review import verify
+from benchmark import choose_model
 
 
 class HandoffTests(unittest.TestCase):
@@ -124,6 +125,18 @@ class HandoffTests(unittest.TestCase):
         self.assertEqual(worker.select_review(candidates, 1)[0]["offer_key"], "c")
         self.assertEqual(worker.select_review(candidates, 2)[0]["offer_key"], "b")
         self.assertEqual(worker.select_review([], 0), [])
+
+    def test_selection_requires_all_six_measurements(self):
+        rows = [{"model": m, "repeat": r, "status": "complete", "input_sha256": "same", "score": {"passed": True},
+                 "execution": {"seconds": t, "peak_rss_bytes": 100}} for m, t in (("Q3_K_XL", 10), ("Q4_K_S", 20), ("Q4_K_M", 30)) for r in (1, 2)]
+        self.assertEqual(choose_model(rows), "Q3_K_XL")
+        self.assertIsNone(choose_model(rows[1:]))
+        rows[0]["status"] = "failed"
+        self.assertIsNone(choose_model(rows))
+        rows[0]["status"] = "complete"; rows[0]["score"]["passed"] = False
+        self.assertEqual(choose_model(rows), "Q4_K_S")
+        rows[0]["input_sha256"] = "different"
+        self.assertIsNone(choose_model(rows))
 
     def test_queued_input_survives_checkout_failure(self):
         atomic(self.root / "benchmarks/test/selection.json", {"selected": "Q3_K_XL"})
