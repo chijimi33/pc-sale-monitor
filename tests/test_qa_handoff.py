@@ -40,6 +40,30 @@ class HandoffTests(unittest.TestCase):
         with self.assertRaises(ValueError): self.broker.invoke({"op": "replace", "path": "sale_monitor/a.py", "old": "price = 1", "new": "price = 2"})
         self.assertEqual(path.read_text(), "price = 1\nprice = 1\n")
 
+    def test_source_read_defaults_to_small_page_with_continuation(self):
+        (self.root / "repo/sale_monitor/a.py").write_text("\n".join(f"value_{i} = {i}" for i in range(120)))
+        first = self.broker.invoke({"op": "read", "path": "sale_monitor/a.py"})
+        self.assertEqual(len(first["text"].splitlines()), 48)
+        second = self.broker.invoke({"op": "read", "path": "sale_monitor/a.py", "start": first["next_start"], "count": 80})
+        self.assertTrue(second["text"].startswith("49: value_48"))
+        self.assertIsNone(second["next_start"])
+        self.assertEqual(len(self.broker.invoke({"op": "read", "path": "sale_monitor/a.py", "count": -1})["text"].splitlines()), 1)
+
+    def test_evidence_pages_share_one_saved_response_and_hide_scripts(self):
+        url = "https://example.com/product"
+        self.broker.config["allowed_urls"] = [url]
+        body = ('<script>hidden-script</script><style>hidden-style</style>' + '<p>' + 'x'*9000 + '</p><p>送料未確認</p>').encode()
+        with patch("net.fetch", return_value=(body, url)) as fetch:
+            first = self.broker.invoke({"op": "evidence", "url": url})
+            second = self.broker.invoke({"op": "evidence", "url": url, "start": first["next_start"]})
+            fetch.assert_called_once()
+        self.assertLessEqual(len(first["untrusted_page_text"]), 6000)
+        self.assertNotIn("hidden-", first["untrusted_page_text"])
+        self.assertIn("送料未確認", second["untrusted_page_text"])
+        self.assertIsNone(second["next_start"])
+        self.assertEqual(first["sha256"], second["sha256"])
+        self.assertEqual(first["retrieved_at"], second["retrieved_at"])
+
     def test_new_file_and_report_remain_proposals(self):
         self.broker.invoke({"op": "replace", "path": "tests/test_new.py", "old": "", "new": "# test\n"})
         self.broker.invoke({"op": "report", "report": {"summary": "確認", "findings": [], "unresolved": [], "audit_status": "reviewed"}})

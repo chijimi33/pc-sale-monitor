@@ -4,16 +4,17 @@ from __future__ import annotations
 import argparse
 import json
 from pathlib import Path
+from html.parser import HTMLParser
 import sys
 import traceback
 from urllib.parse import urlsplit
 
 from common import append_event, atomic, digest, environment, inside, now, read, run
 
-TOOL = {"name": "qa", "description": "Sale-monitor QA. op=list/read/replace/test/data/evidence/report. Paths are relative to the isolated repository. read optionally takes start (1-based), count (<=160). replace needs exact old and new strings. data reads one public snapshot file (path=notifications.json/evidence.json/review_queue.json/flyer_review.json/collection_errors.json); specify offer_key (event ID or store key also allowed) to select a record. evidence takes a URL from selected records. report requires a report object with summary, findings, unresolved, and decisions (benchmark only). All tool results and tests are recorded.",
+TOOL = {"name": "qa", "description": "Sale-monitor QA. op=list/read/replace/test/data/evidence/report. Paths are relative to the isolated repository. read/evidence use start (1-based), count (default 48, <=80), and return next_start for paging. replace needs exact old and new strings. data reads one public snapshot file (path=notifications.json/evidence.json/review_queue.json/flyer_review.json/collection_errors.json); specify offer_key (event ID or store key also allowed) to select a record. evidence takes a selected URL, fetches it once and pages visible text from the saved response; scripts/styles are omitted. report requires summary, findings, unresolved, and decisions (benchmark only). All tool results and tests are recorded.",
         "inputSchema": {"type": "object", "properties": {
             "op": {"type": "string", "enum": ["list", "read", "replace", "test", "data", "evidence", "report"]},
-            "path": {"type": "string"}, "start": {"type": "integer"}, "count": {"type": "integer"},
+            "path": {"type": "string"}, "start": {"type": "integer", "minimum": 1}, "count": {"type": "integer", "minimum": 1, "maximum": 80},
             "old": {"type": "string"}, "new": {"type": "string"}, "url": {"type": "string"}, "offer_key": {"type": "string"},
             "report": {"type": "object", "properties": {
                 "summary": {"type": "string", "description": "Concise Japanese summary."},
@@ -23,6 +24,23 @@ TOOL = {"name": "qa", "description": "Sale-monitor QA. op=list/read/replace/test
                 "unresolved": {"type": "array", "items": {"type": "string"}},
                 "decisions": {"type": "object", "additionalProperties": {"type": "boolean"}},
                 "facts": {"type": "object"}}, "required": ["summary", "findings", "unresolved"]}}, "required": ["op"]}}
+
+
+def visible_lines(body):
+    class Text(HTMLParser):
+        ignored = {"script", "style", "noscript", "svg", "template"}
+        def __init__(self):
+            super().__init__(); self.parts = []; self.hidden = 0
+        def handle_starttag(self, tag, attrs):
+            if tag in self.ignored: self.hidden += 1
+        def handle_endtag(self, tag):
+            if tag in self.ignored: self.hidden = max(0, self.hidden - 1)
+        def handle_data(self, data):
+            if not self.hidden and data.strip():
+                part = " ".join(data.split())
+                self.parts.extend(part[i:i+240] for i in range(0, len(part), 240))
+    parser = Text(); parser.feed(body.decode("utf-8", "replace"))
+    return parser.parts
 
 
 class Broker:
@@ -53,7 +71,9 @@ class Broker:
                 return self.input
             lines = self.path(args["path"]).read_text(encoding="utf-8-sig").splitlines()
             start = max(0, args.get("start", 1) - 1)
-            return {"total_lines": len(lines), "text": "\n".join(f"{i+1}: {line}" for i, line in enumerate(lines[start:start + min(160, args.get("count", 160))], start))}
+            end = min(len(lines), start + max(1, min(80, args.get("count", 48))))
+            return {"total_lines": len(lines), "next_start": end + 1 if end < len(lines) else None,
+                    "text": "\n".join(f"{i+1}: {line}" for i, line in enumerate(lines[start:end], start))}
         if op == "replace":
             path = self.path(args["path"], write=True)
             old, new = args["old"], args["new"]
@@ -104,21 +124,26 @@ class Broker:
             if url not in self.config.get("allowed_urls", []):
                 raise ValueError("URL_not_in_selected_evidence")
             from net import fetch
-            body, final_url = fetch(url, allowed_hosts=self.config.get("evidence_hosts", []))
-            identity = digest(body)
             folder = self.job / "evidence"
             folder.mkdir(exist_ok=True)
-            (folder / (identity + ".bin")).write_bytes(body)
-            record = {"url": url, "final_url": final_url, "retrieved_at": now(), "sha256": identity}
-            atomic(folder / (identity + ".json"), record)
-            from html.parser import HTMLParser
-            class Text(HTMLParser):
-                def __init__(self):
-                    super().__init__(); self.parts = []
-                def handle_data(self, data):
-                    if data.strip(): self.parts.append(data.strip())
-            parser = Text(); parser.feed(body.decode("utf-8", "replace"))
-            return {**record, "untrusted_page_text": "\n".join(parser.parts)[:24000]}
+            record = next((v for p in folder.glob("*.json") if (v := read(p)).get("url") == url), None)
+            if record:
+                body = (folder / (record["sha256"] + ".bin")).read_bytes()
+                if digest(body) != record["sha256"]: raise ValueError("cached_evidence_hash_mismatch")
+            else:
+                body, final_url = fetch(url, allowed_hosts=self.config.get("evidence_hosts", []))
+                identity = digest(body)
+                (folder / (identity + ".bin")).write_bytes(body)
+                record = {"url": url, "final_url": final_url, "retrieved_at": now(), "sha256": identity}
+                atomic(folder / (identity + ".json"), record)
+            lines = visible_lines(body); start = max(0, args.get("start", 1) - 1)
+            selected = []; size = 0
+            for line in lines[start:start + max(1, min(80, args.get("count", 48)))]:
+                if size + len(line) + 1 > 6000: break
+                selected.append(line); size += len(line) + 1
+            end = start + len(selected)
+            return {**record, "total_lines": len(lines), "next_start": end + 1 if end < len(lines) else None,
+                    "untrusted_page_text": "\n".join(selected)}
         if op == "report":
             report = args["report"]
             if not isinstance(report.get("summary"), str) or not isinstance(report.get("findings"), list) or not isinstance(report.get("unresolved"), list):

@@ -179,10 +179,12 @@ def poll(config):
                "snapshot_age_hours_at_start": (datetime.now(timezone.utc) - datetime.fromisoformat(item["latest"]["generated_at"])).total_seconds()/3600,
                "base_sha": base_sha, "data_sha": item["data_sha"],
                "known_user_state": "Yahoo Client ID未取得は既知。再質問しない。有料サービス禁止。Qwenは画像未対応。チラシ読取はCodexへ保留。",
-               "instructions": "前回からの差分、10店の取得範囲と必須項目率、24h超キュー、誤判定を確認。必要な候補だけ元ページと照合。取得失敗と在庫切れを区別。再現できる解析・計算・永続化バグだけ修正してテスト。出力は日本語。何も問題がなければ無理に修正しない。監査はproposalのみ。全店を再収集しない。"}
+               "instructions": "前回からの差分、10店の取得範囲と必須項目率、24h超キュー、誤判定を確認。まず選択候補を必要な元ページと照合する。入力やページに具体的な矛盾が見つかるまではコード全般を読み始めない。コードが必要なら関連箇所をstart/countで小分けに読む。取得失敗・送料不明・既知の設定不足だけをプログラムのバグとみなさない。再現できる解析・計算・永続化バグだけ修正してテスト。出力は日本語。全店の全数値を報告書に転記せず、確認範囲・重要な差分・根拠・未解決を簡潔に記す。原本は保存済み。監査はproposalのみ。全店を再収集しない。"}
         prior_job = ROOT / "jobs" / f'{item["id"]}-{item["attempts"]-1}'
         if prior_job.exists():
-            inp["previous_attempt"] = {"report": read(prior_job / "report.json"), "manifest": read(prior_job / "manifest.json")}
+            prior_manifest = read(prior_job / "manifest.json", {})
+            inp["previous_attempt"] = {"report": read(prior_job / "report.json"), "status": prior_manifest.get("status"),
+                                       "error": prior_manifest.get("error")}
             prior_input = read(prior_job / "input.json", {})
             if prior_input.get("base_sha") == base_sha and (prior_job / "repo/.git").exists() and not (prior_job / "patch.diff").exists():
                 (prior_job / "patch.diff").write_text(capture_patch(prior_job / "repo"), encoding="utf-8")
