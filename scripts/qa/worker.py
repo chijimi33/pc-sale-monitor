@@ -62,6 +62,11 @@ def select_review(candidates, cursor):
     return [pool[cursor % len(pool)]] if pool else []
 
 
+def merge_feedback(queued, current):
+    """New supervisor corrections also apply to inputs waiting in the queue."""
+    return list({item["id"]: item for item in [*queued, *current]}.values())
+
+
 def snapshot():
     # Resolve once so input files cannot come from different collector commits.
     sha = get_json(API + "/commits/monitor-data")["sha"]
@@ -172,7 +177,7 @@ def poll(config):
         atomic(job / "snapshot/review_queue.json", reviews)
         atomic(job / "snapshot/latest.json", item["latest"])
         atomic(job / "snapshot/validation.json", item["validation"])
-        inp = {"policy": POLICY, "current": compact, "previous": previous, "feedback": item["feedback"],
+        inp = {"policy": POLICY, "current": compact, "previous": previous, "feedback": merge_feedback(item["feedback"], feedback),
                "candidate": candidate, "remaining_event_ids": [x["event_id"] for x in candidates if x not in selected],
                "review_candidate": review_candidate, "review_queue_total": len(reviews.get("candidates", [])),
                "coverage_format": "mandatory_field_coverage値は[既知件数,今回取得件数]。分母0の取得率は不明。0%とも100%ともみなさない。",

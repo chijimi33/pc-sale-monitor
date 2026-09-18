@@ -18,6 +18,7 @@ TOOL = {"name": "qa", "description": "Sale-monitor QA. op=list/read/replace/test
             "path": {"type": "string"}, "start": {"type": "integer", "minimum": 1}, "count": {"type": "integer", "minimum": 1, "maximum": 80},
             "old": {"type": "string"}, "new": {"type": "string"}, "url": {"type": "string"}, "offer_key": {"type": "string"},
             "query": {"type": "string", "minLength": 1, "maxLength": 200},
+            "detail": {"type": "boolean", "description": "data only: return the full saved record, including historical decision and page fields. Default is the compact current-evidence view. Historical values are not current verification."},
             "report": {"type": "object", "properties": {
                 "summary": {"type": "string", "description": "Concise Japanese summary."},
                 "findings": {"type": "array", "items": {"type": "object", "properties": {
@@ -125,10 +126,19 @@ class Broker:
             visit(value)
             result = matches[:5]
             # Authorize only source URLs discovered in this selected record.
-            from worker import urls
+            from worker import compact_evidence, urls
             known = set(self.config.get("allowed_urls", [])) | set(urls(result))
             self.config["allowed_urls"] = sorted(known)
             self.config["evidence_hosts"] = sorted({urlsplit(u).hostname for u in known})
+            if args.get("detail"):
+                return result
+            result = compact_evidence(result)
+            for record in result:
+                if isinstance(record, dict) and record.get("current_evidence"):
+                    # The original event decision may be days older than this run.
+                    # Keep it on disk/on demand, not beside current evidence.
+                    for field in ("decision", "offer", "previous"):
+                        record.pop(field, None)
             return result
         if op == "evidence":
             # Only URLs explicitly supplied by the controller may be fetched.

@@ -18,6 +18,7 @@ from review import verify
 from benchmark import choose_model, score
 from agent import compression_problem
 from model import blocks_inference
+from compact_hook import grounding
 
 
 class HandoffTests(unittest.TestCase):
@@ -92,6 +93,50 @@ class HandoffTests(unittest.TestCase):
         self.assertIn("201: if store", found["text"])
         self.assertIn("202:     shipping = None", found["text"])
         self.assertLess(len(found["text"].splitlines()), 10)
+
+    def test_current_data_view_does_not_repeat_historical_event_or_page_noise(self):
+        self.broker.config["data_base_url"] = "https://example.com/snapshot/"
+        url = "https://www.ark-pc.co.jp/i/15602001/"
+        original = {"events": [{"event_id": "event", "offer": {"price_yen": 999},
+                                "decision": {"reference_yen": 888}, "previous": {"price_yen": 777},
+                                "current_evidence": {"offer": {"price_yen": 100, "shipping_yen": None,
+                                    "evidence": [{"url": url, "content_hash": "raw", "fields": {
+                                        "specifications": {"unrelated campaign": "wrong product date"}}}]}}}]}
+        atomic(self.root / "snapshot/notifications.json", original)
+        compact = self.broker.invoke({"op": "data", "path": "notifications.json", "offer_key": "event"})[0]
+        self.assertNotIn("decision", compact)
+        self.assertNotIn("offer", compact)
+        offer = compact["current_evidence"]["offer"]
+        self.assertEqual(offer["price_yen"], 100)
+        self.assertIsNone(offer["shipping_yen"])
+        self.assertEqual(offer["evidence"], [{"url": url, "content_hash": "raw"}])
+        full = self.broker.invoke({"op": "data", "path": "notifications.json", "offer_key": "event", "detail": True})
+        self.assertEqual(full, original["events"])
+        self.assertEqual(read(self.root / "snapshot/notifications.json"), original)
+        self.assertIn(url, self.broker.config["allowed_urls"])
+
+    def test_compaction_ledger_does_not_turn_selected_urls_into_fetched_sources(self):
+        atomic(self.root / "input.json", {"previous": None, "candidate": [{"url": "https://example.com/unread"}],
+            "current": {"stores": {"bic": {"pending_count": 893, "pending_over_24h": 863},
+                                   "joshin": {"pending_count": 893, "pending_over_24h": 863}},
+                        "validation": {"cutover_ready": False}}})
+        body = b"actual evidence"; identity = digest(body)
+        atomic(self.root / f"evidence/{identity}.json", {"url": "https://example.com/read", "sha256": identity})
+        (self.root / f"evidence/{identity}.bin").write_bytes(body)
+        atomic(self.root / "evidence/fake.json", {"url": "https://example.com/unread", "sha256": "fake"})
+        ledger = grounding(self.root)
+        self.assertFalse(ledger["previous_run_available"])
+        self.assertFalse(ledger["cutover_ready"])
+        self.assertEqual(ledger["per_store_pending_and_over24h"], {"bic": [893, 863], "joshin": [893, 863]})
+        self.assertEqual([s["url"] for s in ledger["qa_retrieved_sources_only"]], ["https://example.com/read"])
+        (self.root / f"evidence/{identity}.bin").write_bytes(b"changed")
+        self.assertEqual(grounding(self.root)["qa_retrieved_sources_only"], [])
+
+    def test_new_feedback_reaches_already_queued_work_without_mutating_input(self):
+        queued = [{"id": "old", "note": "earlier"}]
+        current = [{"id": "old", "note": "corrected"}, {"id": "new", "note": "source attribution"}]
+        self.assertEqual(worker.merge_feedback(queued, current), current)
+        self.assertEqual(queued, [{"id": "old", "note": "earlier"}])
 
     def test_accepted_truncated_compaction_is_not_silently_reused(self):
         import json
