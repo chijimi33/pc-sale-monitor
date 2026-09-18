@@ -58,6 +58,7 @@ class Broker:
         self.repo = self.job / "repo"
         self.input = read(self.job / "input.json")
         self.config = read(self.job / "job.json")
+        self.live_input_read = False
 
     def path(self, name, write=False):
         path = inside(self.repo, name)
@@ -77,7 +78,9 @@ class Broker:
                     for p in (self.repo / folder).rglob("*") if p.is_file() and p.suffix in (".py", ".md", ".json")]
         if op == "read":
             if args["path"] == "input.json":
-                if not any(key in args for key in ("start", "count", "query")):
+                if not any(key in args for key in ("start", "count", "query")) and not self.live_input_read:
+                    current = self.input.get("current")
+                    self.live_input_read = isinstance(current, dict) and isinstance(current.get("stores"), dict)
                     return self.input
                 lines = json.dumps(self.input, ensure_ascii=False, indent=2).splitlines()
             else:
@@ -88,8 +91,12 @@ class Broker:
                 hits = [i for i, line in enumerate(lines) if query.casefold() in line.casefold()]
                 indices = sorted({j for i in hits for j in range(max(0, i-3), min(len(lines), i+4))})
             end = min(len(indices), start + max(1, min(80, args.get("count", 48))))
-            return {"total_lines": len(lines), "next_start": end + 1 if end < len(indices) else None,
-                    "text": "\n".join(f"{i+1}: {lines[i]}" for i in indices[start:end])}
+            result = {"total_lines": len(lines), "next_start": end + 1 if end < len(indices) else None,
+                      "text": "\n".join(f"{i+1}: {lines[i]}" for i in indices[start:end])}
+            if args["path"] == "input.json" and self.live_input_read:
+                result.update(input_snapshot_previously_read=True,
+                              note="The full live input was returned earlier. Use query or start/count for specific fields; the original is unchanged.")
+            return result
         if op == "replace":
             path = self.path(args["path"], write=True)
             old, new = args["old"], args["new"]

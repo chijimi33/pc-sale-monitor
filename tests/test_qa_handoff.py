@@ -64,6 +64,22 @@ class HandoffTests(unittest.TestCase):
         self.assertIn('"final_pending_count": 17', found["text"])
         self.assertLess(len(found["text"].splitlines()), 8)
 
+    def test_live_bare_input_reread_is_bounded_without_changing_original(self):
+        value = {"current": {"stores": {"ark": {"pending_count": 17}}},
+                 "records": [{"price": i} for i in range(150)], "feedback_marker": "preserved"}
+        atomic(self.root / "input.json", value)
+        broker = Broker(self.root)
+        self.assertEqual(broker.invoke({"op": "read", "path": "input.json"}), value)
+        reread = broker.invoke({"op": "read", "path": "input.json"})
+        self.assertEqual(len(reread["text"].splitlines()), 48)
+        self.assertEqual(reread["next_start"], 49)
+        self.assertTrue(reread["input_snapshot_previously_read"])
+        found = broker.invoke({"op": "read", "path": "input.json", "query": "feedback_marker"})
+        self.assertIn('"feedback_marker": "preserved"', found["text"])
+        self.assertEqual(read(self.root / "input.json"), value)
+        self.assertEqual(self.broker.invoke({"op": "read", "path": "input.json"}), {"immutable": True})
+        self.assertEqual(self.broker.invoke({"op": "read", "path": "input.json"}), {"immutable": True})
+
     def test_evidence_pages_share_one_saved_response_and_hide_scripts(self):
         url = "https://example.com/product"
         self.broker.config["allowed_urls"] = [url]
