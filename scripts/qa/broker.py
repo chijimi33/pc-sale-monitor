@@ -12,11 +12,12 @@ from urllib.parse import urlsplit
 
 from common import append_event, atomic, digest, environment, inside, now, read, run
 
-TOOL = {"name": "qa", "description": "Sale-monitor QA. op=list/read/replace/test/data/evidence/report. Paths are relative to the isolated repository. read/evidence use start (1-based), count (default 48, <=80), and return next_start for paging. replace needs exact old and new strings. data reads one public snapshot file (path=notifications.json/evidence.json/review_queue.json/flyer_review.json/collection_errors.json); specify offer_key (event ID or store key also allowed) to select a record. evidence takes a selected URL, fetches it once and pages visible text from the saved response; scripts/styles are omitted. report requires summary, findings, unresolved, and decisions (benchmark only). All tool results and tests are recorded.",
+TOOL = {"name": "qa", "description": "Sale-monitor QA. op=list/read/replace/test/data/evidence/report. Paths are relative to the isolated repository. read/evidence use start (1-based), count (default 48, <=80), and return next_start for paging. replace needs exact old and new strings. data reads one public snapshot file (path=notifications.json/evidence.json/review_queue.json/flyer_review.json/collection_errors.json); specify offer_key (event ID or store key also allowed) to select a record. evidence takes a selected URL and optional literal query (for example 送料) to return matching text with nearby lines. Prefer query to reading navigation pages. It fetches once and pages the saved response; scripts/styles are omitted. With query, start/next_start index the filtered lines; displayed line numbers refer to the original page text. report requires summary, findings, unresolved, and decisions (benchmark only). All tool results and tests are recorded.",
         "inputSchema": {"type": "object", "properties": {
             "op": {"type": "string", "enum": ["list", "read", "replace", "test", "data", "evidence", "report"]},
             "path": {"type": "string"}, "start": {"type": "integer", "minimum": 1}, "count": {"type": "integer", "minimum": 1, "maximum": 80},
             "old": {"type": "string"}, "new": {"type": "string"}, "url": {"type": "string"}, "offer_key": {"type": "string"},
+            "query": {"type": "string", "minLength": 1, "maxLength": 200},
             "report": {"type": "object", "properties": {
                 "summary": {"type": "string", "description": "Concise Japanese summary."},
                 "findings": {"type": "array", "items": {"type": "object", "properties": {
@@ -144,12 +145,19 @@ class Broker:
                 record = {"url": url, "final_url": final_url, "retrieved_at": now(), "sha256": identity}
                 atomic(folder / (identity + ".json"), record)
             lines = visible_lines(body); start = max(0, args.get("start", 1) - 1)
+            indices = list(range(len(lines))); query = args.get("query"); matching = None
+            if query:
+                hits = [i for i, line in enumerate(lines) if query.casefold() in line.casefold()]
+                matching = len(hits)
+                indices = sorted({j for i in hits for j in range(max(0, i-3), min(len(lines), i+4))})
             selected = []; size = 0
-            for line in lines[start:start + max(1, min(80, args.get("count", 48)))]:
+            for index in indices[start:start + max(1, min(80, args.get("count", 48)))]:
+                line = f"{index+1}: {lines[index]}"
                 if size + len(line) + 1 > 6000: break
                 selected.append(line); size += len(line) + 1
             end = start + len(selected)
-            return {**record, "total_lines": len(lines), "next_start": end + 1 if end < len(lines) else None,
+            return {**record, "total_lines": len(lines), "matching_lines": matching,
+                    "next_start": end + 1 if end < len(indices) else None,
                     "untrusted_page_text": "\n".join(selected)}
         if op == "report":
             report = args["report"]

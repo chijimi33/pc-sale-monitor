@@ -19,6 +19,7 @@ def execute(job, config, prompt, timeout=3600):
     settings = {
         "security": {"auth": {"selectedType": "openai"}},
         "model": {"name": "qa-local"},
+        "context": {"autoCompactThreshold": 0.6},
         "modelProviders": {"openai": [{"id": "qa-local", "envKey": "QA_LOCAL_API_KEY",
             "baseUrl": "http://127.0.0.1:8081/v1", "generationConfig": {
                 "contextWindowSize": 16384, "timeout": 1200000,

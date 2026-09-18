@@ -69,6 +69,20 @@ class HandoffTests(unittest.TestCase):
         self.assertEqual(visible_lines(page.encode("cp932")), ["税込49,800円・送料未確認"])
         self.assertEqual(visible_lines('<meta charset="unknown-charset"><p>在庫未確認</p>'.encode()), ["在庫未確認"])
 
+    def test_evidence_search_keeps_nearby_conditions_and_original_lines(self):
+        url = "https://example.com/product"
+        self.broker.config["allowed_urls"] = [url]
+        body = ("<p>navigation</p>"*100 + "<p>送料</p><p>0円</p><p>一部地域を除く</p>" + "<p>footer</p>"*100).encode()
+        with patch("net.fetch", return_value=(body, url)):
+            found = self.broker.invoke({"op": "evidence", "url": url, "query": "送料"})
+            absent = self.broker.invoke({"op": "evidence", "url": url, "query": "在庫"})
+        self.assertEqual(found["matching_lines"], 1)
+        self.assertIn("101: 送料", found["untrusted_page_text"])
+        self.assertIn("一部地域を除く", found["untrusted_page_text"])
+        self.assertLess(len(found["untrusted_page_text"]), 200)
+        self.assertEqual(absent["untrusted_page_text"], "")
+        self.assertEqual(absent["matching_lines"], 0)
+
     def test_new_file_and_report_remain_proposals(self):
         self.broker.invoke({"op": "replace", "path": "tests/test_new.py", "old": "", "new": "# test\n"})
         self.broker.invoke({"op": "report", "report": {"summary": "確認", "findings": [], "unresolved": [], "audit_status": "reviewed"}})
