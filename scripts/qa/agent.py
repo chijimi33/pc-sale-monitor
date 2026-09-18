@@ -35,16 +35,21 @@ def compression_problem(job):
 def execute(job, config, prompt, timeout=3600):
     job = Path(job)
     env = environment(job)
+    live = config.get("live_validation", False)
+    # The SDK's separate 15-minute stream cap can interrupt a healthy local
+    # compaction before the HTTP timeout. Keep both live limits finite and
+    # below the unchanged overall job deadline; retain benchmark defaults.
+    env["QWEN_STREAM_MAX_LIFETIME_MS"] = "1500000" if live else "900000"
     settings = {
         "security": {"auth": {"selectedType": "openai"}},
         "model": {"name": "qa-local", "enableOpenAILogging": True,
                   "openAILoggingDir": str(job / "llm-requests")},
-        "context": {"autoCompactThreshold": 0.6},
+        "context": {"autoCompactThreshold": 0.75 if live and context_window(config) == 32768 else 0.6},
         "hooks": {"PreCompact": [{"hooks": [{"type": "command", "command": subprocess.list2cmdline([
             config["python"], "-B", "-X", "utf8", str(Path(__file__).with_name("compact_hook.py"))])}]}]},
         "modelProviders": {"openai": [{"id": "qa-local", "envKey": "QA_LOCAL_API_KEY",
             "baseUrl": "http://127.0.0.1:8081/v1", "generationConfig": {
-                "contextWindowSize": context_window(config), "timeout": 1200000,
+                "contextWindowSize": context_window(config), "timeout": 1500000 if live else 1200000,
                 "samplingParams": {"temperature": 1.0, "top_p": 0.95, "max_tokens": 4096}}}]},
         "telemetry": {"enabled": False},
         "tools": {"core": ["__no_builtin_tools__"], "disabled": DISABLED},

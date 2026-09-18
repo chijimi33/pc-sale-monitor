@@ -16,7 +16,7 @@ import worker
 import benchmark
 from review import verify
 from benchmark import choose_model, score
-from agent import compression_problem
+from agent import compression_problem, execute
 from model import blocks_inference, context_window
 from compact_hook import grounding
 
@@ -160,6 +160,28 @@ class HandoffTests(unittest.TestCase):
         for invalid in (True, "32768", 0, 65536):
             with self.subTest(invalid=invalid), self.assertRaises(ValueError):
                 worker.live_execution_config({"live_context_window_size": invalid})
+
+    def test_live_stream_budget_reaches_sdk_without_changing_benchmark(self):
+        config = {"python": sys.executable, "node": "unused-node", "live_context_window_size": 32768}
+        for name, cfg, threshold, lifetime, timeout in (
+            ("benchmark", config, 0.6, 900000, 1200000),
+            ("live", worker.live_execution_config(config), 0.75, 1500000, 1500000),
+        ):
+            with self.subTest(name=name), patch("agent.subprocess.Popen") as popen, patch("agent.attach"):
+                popen.return_value.poll.return_value = 0
+                popen.return_value.returncode = 0
+                popen.return_value.pid = 123
+                folder = self.root / name
+                execute(folder, cfg, "test", timeout=2940)
+                env = popen.call_args.kwargs["env"]
+                self.assertEqual(env.get("QWEN_STREAM_MAX_LIFETIME_MS"), str(lifetime))
+                settings = read(folder / "home/settings.json")
+                self.assertEqual(settings["context"]["autoCompactThreshold"], threshold)
+                generation = settings["modelProviders"]["openai"][0]["generationConfig"]
+                self.assertEqual(generation["timeout"], timeout)
+                self.assertEqual(generation["samplingParams"]["max_tokens"], 4096)
+                self.assertIn("2940s", popen.call_args.args[0])
+        self.assertNotIn("live_validation", config)
 
     def test_accepted_truncated_compaction_is_not_silently_reused(self):
         import json

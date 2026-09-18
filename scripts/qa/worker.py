@@ -68,7 +68,7 @@ def merge_feedback(queued, current):
 
 
 def live_execution_config(config):
-    live = {**config, "context_window_size": config.get("live_context_window_size", 16384)}
+    live = {**config, "context_window_size": config.get("live_context_window_size", 16384), "live_validation": True}
     context_window(live)  # Validate before reserving an attempt; benchmark config stays unchanged.
     return live
 
