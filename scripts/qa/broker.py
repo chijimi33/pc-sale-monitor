@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import re
 from pathlib import Path
 from html.parser import HTMLParser
 import sys
@@ -39,7 +40,13 @@ def visible_lines(body):
             if not self.hidden and data.strip():
                 part = " ".join(data.split())
                 self.parts.extend(part[i:i+240] for i in range(0, len(part), 240))
-    parser = Text(); parser.feed(body.decode("utf-8", "replace"))
+    declared = re.search(br'charset\s*=\s*["\x27]?\s*([\w-]+)', body[:16384], re.I)
+    encoding = declared.group(1).decode("ascii").lower() if declared else "utf-8-sig"
+    if encoding in ("shift_jis", "shift-jis", "sjis", "windows-31j", "x-sjis"):
+        encoding = "cp932"
+    try: decoded = body.decode(encoding, "replace")
+    except (LookupError, UnicodeError): decoded = body.decode("utf-8-sig", "replace")
+    parser = Text(); parser.feed(decoded)
     return parser.parts
 
 

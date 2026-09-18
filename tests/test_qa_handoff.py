@@ -9,7 +9,7 @@ from unittest.mock import patch
 QA = Path(__file__).resolve().parents[1] / "scripts/qa"
 sys.path.insert(0, str(QA))
 from common import atomic, capture_patch, digest, finalize, git, lock, read
-from broker import Broker
+from broker import Broker, visible_lines
 from net import validate
 from worker import urls
 import worker
@@ -63,6 +63,11 @@ class HandoffTests(unittest.TestCase):
         self.assertIsNone(second["next_start"])
         self.assertEqual(first["sha256"], second["sha256"])
         self.assertEqual(first["retrieved_at"], second["retrieved_at"])
+
+    def test_evidence_honors_japanese_page_charset(self):
+        page = '<meta http-equiv="Content-Type" content="text/html; charset=Shift_JIS"><p>税込49,800円・送料未確認</p>'
+        self.assertEqual(visible_lines(page.encode("cp932")), ["税込49,800円・送料未確認"])
+        self.assertEqual(visible_lines('<meta charset="unknown-charset"><p>在庫未確認</p>'.encode()), ["在庫未確認"])
 
     def test_new_file_and_report_remain_proposals(self):
         self.broker.invoke({"op": "replace", "path": "tests/test_new.py", "old": "", "new": "# test\n"})
