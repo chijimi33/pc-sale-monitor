@@ -31,7 +31,9 @@ def server(model, folder):
     model_path = Path("D:/AI/Models/unsloth/Qwen3.8-27B-GGUF") / f"Qwen3.8-27B-UD-{model}.gguf"
     argv = ["D:/AI/llama.cpp/runtimes/b10997-vulkan/llama-server.exe", "-m", str(model_path),
             "--alias", "qa-local", "--host", "127.0.0.1", "--port", "8081", "--ctx-size", "16384",
-            "--parallel", "1", "--n-predict", "4096", "--gpu-layers", str(layers), "--device", "Vulkan0",
+            # Normal agent calls remain capped at 4096 in agent.py. Compaction
+            # uses its own window-clamped budget and must not be cut at 4096.
+            "--parallel", "1", "--n-predict", "8192", "--gpu-layers", str(layers), "--device", "Vulkan0",
             "--fit", "off", "--flash-attn", "on", "--cache-type-k", "f16", "--cache-type-v", "f16",
             "--batch-size", "256", "--ubatch-size", "256", "--threads", "8", "--threads-batch", "8",
             "--jinja", "--reasoning", "on", "--reasoning-budget", "1024", "--reasoning-format", "deepseek",

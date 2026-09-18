@@ -12,7 +12,7 @@ from urllib.parse import urlsplit
 
 from common import append_event, atomic, digest, environment, inside, now, read, run
 
-TOOL = {"name": "qa", "description": "Sale-monitor QA. op=list/read/replace/test/data/evidence/report. Paths are relative to the isolated repository. read/evidence use start (1-based), count (default 48, <=80), and return next_start for paging. replace needs exact old and new strings. data reads one public snapshot file (path=notifications.json/evidence.json/review_queue.json/flyer_review.json/collection_errors.json); specify offer_key (event ID or store key also allowed) to select a record. evidence takes a selected URL and optional literal query (for example 送料) to return matching text with nearby lines. Prefer query to reading navigation pages. It fetches once and pages the saved response; scripts/styles are omitted. With query, start/next_start index the filtered lines; displayed line numbers refer to the original page text. report requires summary, findings, unresolved, and decisions (benchmark only). All tool results and tests are recorded.",
+TOOL = {"name": "qa", "description": "Sale-monitor QA. op=list/read/replace/test/data/evidence/report. Paths are relative to the isolated repository. read/evidence use start (1-based), count (default 48, <=80), and return next_start for paging. read also accepts a literal query to find code with nearby lines; prefer this to sequential scans. replace needs exact old and new strings. data reads one public snapshot file (path=notifications.json/evidence.json/review_queue.json/flyer_review.json/collection_errors.json); specify offer_key (event ID or store key also allowed) to select a record. evidence takes a selected URL and optional literal query (for example 送料) to return matching text with nearby lines. Prefer query to reading navigation pages. It fetches once and pages the saved response; scripts/styles are omitted. With query, start/next_start index the filtered lines; displayed line numbers refer to the original page text. report requires summary, findings, unresolved, and decisions (benchmark only). All tool results and tests are recorded.",
         "inputSchema": {"type": "object", "properties": {
             "op": {"type": "string", "enum": ["list", "read", "replace", "test", "data", "evidence", "report"]},
             "path": {"type": "string"}, "start": {"type": "integer", "minimum": 1}, "count": {"type": "integer", "minimum": 1, "maximum": 80},
@@ -79,9 +79,13 @@ class Broker:
                 return self.input
             lines = self.path(args["path"]).read_text(encoding="utf-8-sig").splitlines()
             start = max(0, args.get("start", 1) - 1)
-            end = min(len(lines), start + max(1, min(80, args.get("count", 48))))
-            return {"total_lines": len(lines), "next_start": end + 1 if end < len(lines) else None,
-                    "text": "\n".join(f"{i+1}: {line}" for i, line in enumerate(lines[start:end], start))}
+            query = args.get("query"); indices = list(range(len(lines)))
+            if query:
+                hits = [i for i, line in enumerate(lines) if query.casefold() in line.casefold()]
+                indices = sorted({j for i in hits for j in range(max(0, i-3), min(len(lines), i+4))})
+            end = min(len(indices), start + max(1, min(80, args.get("count", 48))))
+            return {"total_lines": len(lines), "next_start": end + 1 if end < len(indices) else None,
+                    "text": "\n".join(f"{i+1}: {lines[i]}" for i in indices[start:end])}
         if op == "replace":
             path = self.path(args["path"], write=True)
             old, new = args["old"], args["new"]

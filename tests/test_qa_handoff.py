@@ -16,6 +16,7 @@ import worker
 import benchmark
 from review import verify
 from benchmark import choose_model, score
+from agent import compression_problem
 
 
 class HandoffTests(unittest.TestCase):
@@ -82,6 +83,26 @@ class HandoffTests(unittest.TestCase):
         self.assertLess(len(found["untrusted_page_text"]), 200)
         self.assertEqual(absent["untrusted_page_text"], "")
         self.assertEqual(absent["matching_lines"], 0)
+
+    def test_source_search_preserves_locations_without_sequential_scan(self):
+        p = self.root / "repo/sale_monitor/a.py"
+        p.write_text("# unrelated\n" * 200 + "if store == 'sofmap':\n    shipping = None\n")
+        found = self.broker.invoke({"op": "read", "path": "sale_monitor/a.py", "query": "sofmap"})
+        self.assertIn("201: if store", found["text"])
+        self.assertIn("202:     shipping = None", found["text"])
+        self.assertLess(len(found["text"].splitlines()), 10)
+
+    def test_accepted_truncated_compaction_is_not_silently_reused(self):
+        import json
+        p = self.root / "runtime/projects/p/chats/session.jsonl"
+        p.parent.mkdir(parents=True)
+        def save(text):
+            p.write_text(json.dumps({"subtype": "chat_compression", "systemPayload": {
+                "compressedHistory": [{"role": "user", "parts": [{"text": text}]}]}}) + "\n" + '{"streaming":')
+        save("<state_snapshot>facts cut off by the server")
+        self.assertEqual(compression_problem(self.root), "incomplete_compaction_snapshot")
+        save("<state_snapshot>facts with regional exceptions</state_snapshot>")
+        self.assertIsNone(compression_problem(self.root))
 
     def test_new_file_and_report_remain_proposals(self):
         self.broker.invoke({"op": "replace", "path": "tests/test_new.py", "old": "", "new": "# test\n"})
