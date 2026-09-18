@@ -32,6 +32,23 @@ def compression_problem(job):
     return None
 
 
+def saved_report_receipt(job):
+    """A successful report tool call and its exact saved proposal end live work."""
+    job = Path(job)
+    try:
+        log = (job / "tools.jsonl").read_text(encoding="utf-8")
+        if not log.endswith("\n"): return False
+        event = json.loads(log.splitlines()[-1])
+        args = event.get("arguments", {})
+        report = read(job / "report.json", {})
+        if event.get("ok") is not True or args.get("op") != "report" or not isinstance(args.get("report"), dict):
+            return False
+        return bool(report.get("submitted_at")) and report == {
+            **args["report"], "submitted_at": report["submitted_at"], "audit_status": "proposal_only"}
+    except (OSError, ValueError, IndexError, TypeError, AttributeError):
+        return False
+
+
 def execute(job, config, prompt, timeout=3600):
     job = Path(job)
     env = environment(job)
@@ -75,6 +92,7 @@ def execute(job, config, prompt, timeout=3600):
         atomic(job / "agent-process.json", {"pid": proc.pid, "started_at": now()})
         init_checked = False
         issue = None
+        completion_reason = None
         memory_samples = []
         last_sample = 0
         last_compaction_check = 0
@@ -89,10 +107,12 @@ def execute(job, config, prompt, timeout=3600):
                     if init.get("tools") != ["mcp__saleqa__qa"]:
                         issue = "unexpected_tool_registry: " + repr(init.get("tools"))
             if elapsed > timeout + 15: issue = "wall_time_exceeded"
-            if elapsed - last_compaction_check > 5:
+            if live and init_checked and not issue and saved_report_receipt(job):
+                completion_reason = "report_saved"
+            if not completion_reason and elapsed - last_compaction_check > 5:
                 issue = issue or compression_problem(job)
                 last_compaction_check = elapsed
-            if issue:
+            if issue or completion_reason:
                 subprocess.run(["taskkill", "/PID", str(proc.pid), "/T", "/F"], capture_output=True,
                                creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
                 proc.wait(); break
@@ -105,8 +125,9 @@ def execute(job, config, prompt, timeout=3600):
                     except ValueError: pass
                 last_sample = elapsed
             time.sleep(1)
-        code = proc.returncode if not issue else 55
+        code = 55 if issue else (0 if completion_reason else proc.returncode)
     atomic(job / "memory.json", memory_samples)
     return {"exit_code": code, "seconds": round(time.monotonic() - started, 2), "registry_verified": init_checked and not issue,
-            "error": issue, "peak_rss_bytes": max((x.get("peak_rss") or 0 for x in memory_samples), default=None),
+            "error": issue, "completion_reason": completion_reason,
+            "peak_rss_bytes": max((x.get("peak_rss") or 0 for x in memory_samples), default=None),
             "max_sampled_gpu_dedicated_bytes": max((x.get("gpu_dedicated") or 0 for x in memory_samples), default=None)}

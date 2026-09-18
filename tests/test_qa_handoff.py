@@ -16,7 +16,7 @@ import worker
 import benchmark
 from review import verify
 from benchmark import choose_model, score
-from agent import compression_problem, execute
+from agent import compression_problem, execute, saved_report_receipt
 from model import blocks_inference, context_window
 from compact_hook import grounding
 
@@ -198,6 +198,48 @@ class HandoffTests(unittest.TestCase):
                 self.assertEqual(generation["samplingParams"]["max_tokens"], 4096)
                 self.assertIn("2940s", popen.call_args.args[0])
         self.assertNotIn("live_validation", config)
+
+    def test_report_completion_requires_matching_successful_tool_receipt(self):
+        report = {"summary": "検証結果", "findings": [], "unresolved": ["要確認"]}
+        self.broker.invoke({"op": "report", "report": report})
+        self.assertFalse(saved_report_receipt(self.root))  # file alone is insufficient
+        self.broker.call({"op": "report", "report": report})
+        self.assertTrue(saved_report_receipt(self.root))
+        original = read(self.root / "report.json")
+        atomic(self.root / "report.json", {**original, "summary": "changed"})
+        self.assertFalse(saved_report_receipt(self.root))
+        atomic(self.root / "report.json", original)
+        with (self.root / "tools.jsonl").open("a", encoding="utf-8") as out:
+            out.write('{"unfinished":')
+        self.assertFalse(saved_report_receipt(self.root))
+        (self.root / "tools.jsonl").write_text('', encoding="utf-8")
+        self.broker.call({"op": "report", "report": {"summary": "invalid"}})
+        self.assertFalse(saved_report_receipt(self.root))
+
+    def test_live_report_stops_agent_before_final_compaction_but_keeps_benchmark(self):
+        import json
+        report = {"summary": "検証結果", "findings": [], "unresolved": ["要確認"]}
+        self.broker.call({"op": "report", "report": report})
+        for live, registry in ((True, ["mcp__saleqa__qa"]), (False, ["mcp__saleqa__qa"]), (True, ["unexpected"])):
+            with self.subTest(live=live, registry=registry), patch("agent.subprocess.Popen") as popen, patch("agent.attach"), patch("agent.subprocess.run") as stop, patch("agent.time.monotonic", return_value=0), patch("agent.time.sleep"):
+                def start(*args, **kwargs):
+                    kwargs['stdout'].write(json.dumps({"tools": registry}) + '\n')
+                    kwargs['stdout'].flush()
+                    return popen.return_value
+                popen.side_effect = start
+                proc = popen.return_value
+                proc.poll.side_effect = [None, 0]
+                proc.pid = 123
+                proc.returncode = 1 if live else 0
+                result = execute(self.root, {"python": sys.executable, "node": "unused", "live_validation": live}, "test")
+                valid = registry == ["mcp__saleqa__qa"]
+                self.assertEqual(result['exit_code'], 0 if valid else 55)
+                self.assertEqual(result['completion_reason'], 'report_saved' if live and valid else None)
+                self.assertEqual(result['registry_verified'], valid)
+                if live:
+                    self.assertEqual(stop.call_args.args[0], ['taskkill', '/PID', '123', '/T', '/F'])
+                else:
+                    stop.assert_not_called()
 
     def test_accepted_truncated_compaction_is_not_silently_reused(self):
         import json
