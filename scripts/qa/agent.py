@@ -14,7 +14,7 @@ SYSTEM = """You validate a Japanese PC sale monitor and propose repairs. Use onl
 
 
 def compression_problem(job):
-    """0.24.0 can accept a server-truncated summary when usage is present."""
+    """0.24.0 can accept incomplete summaries after its post-processing."""
     for path in (Path(job) / "runtime/projects").glob("*/chats/*.jsonl"):
         for line in path.read_text(encoding="utf-8", errors="replace").splitlines():
             try: row = json.loads(line)
@@ -33,7 +33,8 @@ def execute(job, config, prompt, timeout=3600):
     env = environment(job)
     settings = {
         "security": {"auth": {"selectedType": "openai"}},
-        "model": {"name": "qa-local"},
+        "model": {"name": "qa-local", "enableOpenAILogging": True,
+                  "openAILoggingDir": str(job / "llm-requests")},
         "context": {"autoCompactThreshold": 0.6},
         "hooks": {"PreCompact": [{"hooks": [{"type": "command", "command": subprocess.list2cmdline([
             config["python"], "-B", "-X", "utf8", str(Path(__file__).with_name("compact_hook.py"))])}]}]},

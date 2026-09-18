@@ -8,7 +8,7 @@ from unittest.mock import patch
 
 QA = Path(__file__).resolve().parents[1] / "scripts/qa"
 sys.path.insert(0, str(QA))
-from common import atomic, capture_patch, digest, finalize, git, lock, read
+from common import atomic, capture_patch, digest, environment, finalize, git, lock, read
 from broker import Broker, visible_lines
 from net import validate
 from worker import urls
@@ -106,6 +106,19 @@ class HandoffTests(unittest.TestCase):
         self.assertIsNone(compression_problem(self.root))
         with p.open("ab") as stream: stream.write(b'"unfinished Japanese: \xe3\x81')
         self.assertIsNone(compression_problem(self.root))
+
+    def test_compaction_hook_protocol_and_receipt_stay_in_job(self):
+        import json
+        env = environment(self.root); env["PC_QA_ROOT"] = str(self.root)
+        result = subprocess.run([sys.executable, "-B", str(QA / "compact_hook.py")], env=env,
+                                cwd=self.root / "repo", capture_output=True, text=True, timeout=10)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        output = json.loads(result.stdout)["hookSpecificOutput"]
+        self.assertEqual(output["hookEventName"], "PreCompact")
+        self.assertIn("Escape angle brackets", output["additionalContext"])
+        record = json.loads((self.root / "compaction-hooks.jsonl").read_text())
+        self.assertEqual(record["instructions_sha256"], digest(output["additionalContext"].encode()))
+        self.assertIn("compaction-hooks.jsonl", finalize(self.root, "test")["files"])
 
     def test_new_file_and_report_remain_proposals(self):
         self.broker.invoke({"op": "replace", "path": "tests/test_new.py", "old": "", "new": "# test\n"})
