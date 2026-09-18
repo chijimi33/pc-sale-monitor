@@ -95,6 +95,24 @@ class HandoffTests(unittest.TestCase):
         self.assertEqual(first["sha256"], second["sha256"])
         self.assertEqual(first["retrieved_at"], second["retrieved_at"])
 
+    def test_retry_report_summary_does_not_repeat_or_destroy_full_prior_findings(self):
+        prior = {"summary": "要旨", "audit_status": "proposal_only", "findings": [{"title": "archived_detail_marker", "evidence": ["original evidence"]}], "unresolved": ["original uncertainty"]}
+        value = {"current": {"stores": {}}, "previous_attempt": {"report": prior, "patch_resumed": True}, "feedback": [{"id": "correction", "note": "apply this correction"}]}
+        atomic(self.root / "input.json", value)
+        broker = Broker(self.root)
+        projected = broker.invoke({"op": "read", "path": "input.json"})
+        self.assertNotIn('findings', projected['previous_attempt']['report'])
+        self.assertTrue(projected['previous_attempt']['report_summary_only'])
+        self.assertTrue(projected['previous_attempt']['patch_resumed'])
+        self.assertEqual(projected['feedback'], value['feedback'])
+        self.assertEqual(read(self.root / "input.json"), value)
+        self.assertEqual(broker.input, value)
+        detail = broker.invoke({"op": "read", "path": "input.json", "query": "archived_detail_marker"})
+        self.assertIn('original evidence', detail['text'])
+        benchmark_input = {"previous_attempt": {"report": prior}}
+        atomic(self.root / "input.json", benchmark_input)
+        self.assertEqual(Broker(self.root).invoke({"op": "read", "path": "input.json"}), benchmark_input)
+
     def test_evidence_honors_japanese_page_charset(self):
         page = '<meta http-equiv="Content-Type" content="text/html; charset=Shift_JIS"><p>税込49,800円・送料未確認</p>'
         self.assertEqual(visible_lines(page.encode("cp932")), ["税込49,800円・送料未確認"])

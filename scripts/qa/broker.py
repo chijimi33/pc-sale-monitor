@@ -81,6 +81,12 @@ class Broker:
                 if not any(key in args for key in ("start", "count", "query")) and not self.live_input_read:
                     current = self.input.get("current")
                     self.live_input_read = isinstance(current, dict) and isinstance(current.get("stores"), dict)
+                    prior = self.input.get("previous_attempt")
+                    if self.live_input_read and isinstance(prior, dict) and isinstance(prior.get("report"), dict):
+                        return {**self.input, "previous_attempt": {**prior,
+                            "report": {k: prior["report"].get(k) for k in ("summary", "audit_status", "submitted_at")},
+                            "report_summary_only": True,
+                            "full_report_access": "The full prior report remains in the original input.json. Use read with query or start/count when needed; apply the complete current feedback."}}
                     return self.input
                 lines = json.dumps(self.input, ensure_ascii=False, indent=2).splitlines()
             else:
