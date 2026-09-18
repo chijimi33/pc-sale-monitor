@@ -244,6 +244,27 @@ class Parsers(unittest.TestCase):
         page.body = body.replace('"priceValidUntil":"2026-09-18",', '').encode()
         self.assertIsNone(parse_product("ark", page, {}).expires_at)
 
+    def test_sofmap_primary_stock_is_not_a_quantity_or_related_offer(self):
+        product = '<script type="application/ld+json">{"@type":"Product","name":"Notebook","sku":"101644916","offers":{"@type":"Offer","priceCurrency":"JPY","price":349800,"availability":"https://schema.org/OnlineOnly"}}</script>'
+        row = '<tr><th>在庫</th><td><span class="ic stock stocklast">在庫限り</span><span>通常24時間以内に出荷<br>お一人様1点まで</span></td></tr>'
+        primary = '<main id="main"><section class="infobox"><table class="infotable">' + row + '<tr><th>送料</th><td>¥0 送料無料キャンペーン ※一部離島・山間部および北海道を除く</td></tr></table></section></main>'
+        related = '<aside><table class="infotable"><tr><th>在庫</th><td>売り切れ</td></tr></table></aside>'
+        def parse(text):
+            return parse_product("sofmap", Page("https://www.sofmap.com/product_detail.aspx?sku=101644916", text.encode(), iso(NOW)), {"default_condition": "new"})
+        parsed = parse(product + primary + related)
+        self.assertEqual((parsed.stock, parsed.price_yen), ("in_stock", 349800))
+        self.assertIsNone(parsed.listed_quantity)
+        self.assertIsNone(parsed.shipping_yen)
+        self.assertEqual(parsed.evidence[0]["fields"]["stock_status"]["source"], "primary_product_information")
+        sold_out = primary.replace('在庫限り', '売り切れ').replace('通常24時間以内に出荷', '')
+        self.assertEqual(parse(product + sold_out + related.replace('売り切れ', '在庫あり')).stock, "out_of_stock")
+        for text in (product, product + related.replace('売り切れ', '在庫あり'),
+                     product + primary.replace('通常24時間以内に出荷', ''),
+                     product + primary.replace('class="infobox"', 'class="related-infobox"'),
+                     product + primary.replace(row, row + row)):
+            with self.subTest(text=text):
+                self.assertEqual(parse(text).stock, "unknown")
+
     def test_koubou_embedded_variant(self):
         html = '''<h1>COUGAR cooler</h1><dl><dt>商品番号</dt><dd>4541995039782</dd><dt>商品型番</dt><dd>CGR-PSDVARGB-B-360</dd><dt>メーカー</dt><dd>COUGAR</dd><dt>送料</dt><dd>無料</dd></dl><input id="priceIncTax" value="6980"><script>eccube.classCategories={"a":{"b":{"product_code":"CGR-PSDVARGB-B-360","price02":6980,"stock_find":true,"point":"0","limit":"1"}}};</script>'''
         o = parse_product("koubou", Page("https://www.pc-koubou.jp/products/detail.php?product_id=1183984", html.encode(), iso(NOW)), {"default_condition": "new"})

@@ -225,6 +225,18 @@ def parse_product(store: str, page: Page, cfg: dict, discovery: dict | None = No
         scoped_stock = stock_status(first(tree, stock_path))
         if scoped_stock != "unknown":
             offer.stock = scoped_stock
+    if store == "sofmap":
+        # OnlineOnly describes a sales channel. Read availability from the
+        # primary product table, never recommendation tables or order limits.
+        stock_rows = tree.xpath('//*[@id="main"]/section[contains(concat(" ",normalize-space(@class)," ")," infobox ")]/table[contains(concat(" ",normalize-space(@class)," ")," infotable ")]//tr[th[normalize-space(.)="在庫"]]/td')
+        if len(stock_rows) == 1:
+            stock_text = clean(stock_rows[0])
+            scoped_stock = stock_status(stock_text)
+            if scoped_stock != "unknown":
+                offer.stock = scoped_stock
+                evidence_fields["stock_status"] = {
+                    "source": "primary_product_information", "text": stock_text,
+                    "status": scoped_stock}
     if offer.condition is None and cfg.get("default_condition") and not re.search(r"中古|アウトレット|再生品|バルク", offer.title + " " + str(field(data, r"商品状態|コンディション") or "")):
         offer.condition = cfg["default_condition"]
     shipping_text = field(data, r"^送料$|^配送料$")
