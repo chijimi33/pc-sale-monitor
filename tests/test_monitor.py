@@ -249,6 +249,29 @@ class Parsers(unittest.TestCase):
         o = parse_product("koubou", Page("https://www.pc-koubou.jp/products/detail.php?product_id=1183984", html.encode(), iso(NOW)), {"default_condition": "new"})
         self.assertEqual((o.price_yen, o.shipping_yen, o.stock, o.model), (6980, 0, "in_stock", "CGR-PSDVARGB-B-360"))
 
+    def test_koubou_preparing_purchase_button_overrides_stock_flag(self):
+        body = '''<h1>COUGAR cooler</h1><dl><dt>商品番号</dt><dd>4541995039782</dd><dt>商品型番</dt><dd>CGR-PSDVARGB-B-360</dd><dt>メーカー</dt><dd>COUGAR</dd><dt>送料</dt><dd>無料</dd></dl><input id="priceIncTax" value="6980"><script>eccube.classCategories={"a":{"b":{"product_code":"CGR-PSDVARGB-B-360","price02":6980,"stock_find":true,"point":"0","limit":"1"}}};</script><li class="productDetail--main__right--price"><div class="btn-addcart"><button class="sold-out" disabled="disabled">商品準備中</button></div></li>'''
+        def parse(text):
+            return parse_product("koubou", Page("https://www.pc-koubou.jp/products/detail.php?product_id=1", text.encode(), iso(NOW)), {"default_condition": "new"})
+        blocked = parse(body)
+        others = [offer(s, 10000, jan=blocked.jan, model=blocked.model, brand=blocked.brand) for s in ("ark", "tsukumo")]
+        decision = evaluate(blocked, others, [], NOW)
+        self.assertEqual(decision["status"], "insufficient")
+        self.assertIn("purchase_not_available", decision["reasons"])
+        self.assertEqual(blocked.stock, "unknown")
+        self.assertEqual(blocked.price_yen, 6980)
+        self.assertFalse(blocked.verified)
+        prior = {"ever_accepted": True, "facts": {"stock": "in_stock", "accepted": True}}
+        events, state = update_events(blocked, decision, prior, NOW)
+        self.assertEqual(events, [])
+        self.assertEqual(state, prior)  # preparation does not prove stockout/end
+        available = parse(body.replace('disabled="disabled">商品準備中', '>カートに入れる'))
+        self.assertTrue(available.verified)
+        self.assertEqual(evaluate(available, others, [], NOW)["status"], "accepted")
+        related = parse(body.replace('productDetail--main__right--price', 'related-product'))
+        self.assertTrue(related.verified)  # another product must not suppress this one
+        self.assertEqual(related.stock, "in_stock")
+
     def test_pagination_and_sale_scope(self):
         cfg = {"product_patterns": ["/i/"], "sale_patterns": []}
         html = '<li>通常 SSD<a href="/i/1/">SSD</a></li><li>特価 SSD<a href="/i/2/">SSD</a></li><li id="listnavi_next"><a href="/?offset=20">2</a></li>'

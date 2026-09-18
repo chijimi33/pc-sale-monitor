@@ -183,6 +183,15 @@ def parse_product(store: str, page: Page, cfg: dict, discovery: dict | None = No
                     offer.purchase_limit = str(matching[0].get("limit") or "") or None
             except (ValueError, AttributeError, TypeError):
                 offer.issues.append("variant_data_unreadable")
+        # Matching stock_find describes the variant, not whether the shop has
+        # opened purchasing. A preparing item can still have stock_find=true.
+        buttons = tree.xpath('//*[contains(concat(" ",normalize-space(@class)," ")," productDetail--main__right--price ")]//button[@disabled]')
+        if any(clean(button) == "商品準備中" for button in buttons):
+            evidence_fields["purchase_availability"] = {
+                "source": "disabled_primary_purchase_button", "button_text": "商品準備中",
+                "button_disabled": True, "variant_stock": offer.stock}
+            offer.stock = "unknown"
+            offer.issues.append("purchase_not_available")
     if store == "dospara":
         if first(tree, '//*[contains(concat(" ",normalize-space(@class)," ")," free_shipping ")]') == "送料無料":
             offer.shipping_yen = 0
