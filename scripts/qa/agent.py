@@ -1,10 +1,11 @@
 """Pinned Qwen Code runner with an explicit MCP-only tool allowlist."""
 from pathlib import Path
 import json
+import re
 import subprocess
 import time
 
-from common import ROOT, atomic, environment, now, read, run
+from common import ROOT, atomic, digest, environment, now, read, run
 from process_guard import attach
 from model import context_window
 
@@ -15,6 +16,59 @@ SYSTEM = """You validate a Japanese PC sale monitor and propose repairs. Use onl
 
 
 SYSTEM += " A collector snapshot or generated summary is not a QA page check. Attribute every date, condition and price to its exact product URL; never transfer a banner or another product's specification to the review candidate. Distinguish snapshot arithmetic from independently fetched source verification. A missing previous run means change comparison is unavailable. Treat each store's queue counts separately unless you actually sum them. All cutover gates must pass; the earliest date alone is insufficient. Apply Codex feedback before making report claims."
+
+
+LIVE_IDLE_SECONDS = 20 * 60  # Longer than the 600s test / 660s MCP call deadlines.
+
+
+class ProgressWatch:
+    """Recognize actual llama token advancement and completed successful tools.
+
+    File mtimes, health checks and memory sampling are not evidence of progress.
+    Complete records only; rereading/truncating a log cannot renew the deadline.
+    This detects stalls, not semantic loops that continue generating tokens.
+    """
+    token_line = re.compile(r"slot print_timing: id\s+(\d+)\s+\| task\s+(\d+)\s+\| (n_gen|prompt processing, n_tokens)\s*=\s*(\d+)")
+
+    def __init__(self, job, started):
+        self.job = Path(job)
+        self.offsets = {}
+        self.counts = {}
+        self.tools = set()
+        self.last_progress = started
+        self.source = "agent_start"
+
+    def lines(self, relative):
+        path = self.job / relative
+        try:
+            with path.open("rb") as stream:
+                offset = self.offsets.get(relative, 0)
+                if path.stat().st_size < offset: offset = 0
+                stream.seek(offset)
+                data = stream.read()
+        except FileNotFoundError:
+            return []
+        end = data.rfind(b"\n") + 1
+        self.offsets[relative] = offset + end
+        return data[:end].splitlines()
+
+    def idle_seconds(self, current):
+        for raw in self.lines("server/server.stderr"):
+            match = self.token_line.search(raw.decode("utf-8", errors="replace"))
+            if not match: continue
+            slot, task, phase, count = match.groups()
+            key = (slot, task, phase)
+            if int(count) > self.counts.get(key, 0):
+                self.counts[key] = int(count)
+                self.last_progress, self.source = current, "llama_tokens"
+        for raw in self.lines("tools.jsonl"):
+            try: event = json.loads(raw)
+            except ValueError: continue
+            identity = digest(raw)
+            if isinstance(event, dict) and event.get("ok") is True and identity not in self.tools:
+                self.tools.add(identity)
+                self.last_progress, self.source = current, "successful_tool"
+        return current - self.last_progress
 
 
 def compression_problem(job):
@@ -53,10 +107,10 @@ def execute(job, config, prompt, timeout=3600):
     job = Path(job)
     env = environment(job)
     live = config.get("live_validation", False)
-    # The SDK's separate 15-minute stream cap can interrupt a healthy local
-    # compaction before the HTTP timeout. Keep both live limits finite and
-    # below the unchanged overall job deadline; retain benchmark defaults.
-    env["QWEN_STREAM_MAX_LIFETIME_MS"] = "1500000" if live else "900000"
+    # Live inference is supervised by actual token/tool progress below, not
+    # elapsed runtime or a stream's lifetime. Benchmark conditions stay fixed.
+    env["QWEN_STREAM_MAX_LIFETIME_MS"] = "0" if live else "900000"
+    if live: env["QWEN_STREAM_IDLE_TIMEOUT_MS"] = "0"
     settings = {
         "security": {"auth": {"selectedType": "openai"}},
         "model": {"name": "qa-local", "enableOpenAILogging": True,
@@ -73,6 +127,7 @@ def execute(job, config, prompt, timeout=3600):
         "skills": {"disabledLevels": ["project", "user", "extension", "bundled"]},
         "permissions": {"deny": DISABLED, "allow": ["mcp__saleqa__qa"]},
     }
+    if live: settings["model"]["maxWallTimeSeconds"] = -1
     atomic(Path(env["QWEN_HOME"]) / "settings.json", settings)
     atomic(job / "mcp.json", {"mcpServers": {"saleqa": {
         "command": config["python"], "args": ["-B", "-X", "utf8", str(Path(__file__).with_name("broker.py")), str(job)],
@@ -82,9 +137,11 @@ def execute(job, config, prompt, timeout=3600):
             "--openai-api-key", "local-only", "--core-tools", "__no_builtin_tools__",
             "--exclude-tools", *DISABLED,
             "--allowed-tools", "mcp__saleqa__qa", "--mcp-config", str(job / "mcp.json"),
-            "--system-prompt", SYSTEM, "--output-format", "stream-json", "--max-wall-time", f"{timeout}s",
+            "--system-prompt", SYSTEM, "--output-format", "stream-json",
             "--channel", "CI", "--prompt", prompt]
+    if not live: argv.extend(["--max-wall-time", f"{timeout}s"])
     started = time.monotonic()
+    progress = ProgressWatch(job, started) if live else None
     with (job / "agent.jsonl").open("w", encoding="utf-8") as out, (job / "agent.stderr").open("w", encoding="utf-8") as err:
         proc = subprocess.Popen(argv, cwd=job / "repo", env=env, stdout=out, stderr=err,
                                 creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
@@ -97,7 +154,8 @@ def execute(job, config, prompt, timeout=3600):
         last_sample = 0
         last_compaction_check = 0
         while proc.poll() is None:
-            elapsed = time.monotonic() - started
+            current = time.monotonic()
+            elapsed = current - started
             if not init_checked:
                 with (job / "agent.jsonl").open(encoding="utf-8") as stream:
                     first = stream.readline()
@@ -106,7 +164,11 @@ def execute(job, config, prompt, timeout=3600):
                     init_checked = True
                     if init.get("tools") != ["mcp__saleqa__qa"]:
                         issue = "unexpected_tool_registry: " + repr(init.get("tools"))
-            if elapsed > timeout + 15: issue = "wall_time_exceeded"
+            if live:
+                if progress.idle_seconds(current) >= LIVE_IDLE_SECONDS:
+                    issue = issue or "no_progress_for_1200_seconds"
+            elif elapsed > timeout + 15:
+                issue = issue or "wall_time_exceeded"
             if live and init_checked and not issue and saved_report_receipt(job):
                 completion_reason = "report_saved"
             if not completion_reason and elapsed - last_compaction_check > 5:
@@ -127,6 +189,11 @@ def execute(job, config, prompt, timeout=3600):
             time.sleep(1)
         code = 55 if issue else (0 if completion_reason else proc.returncode)
     atomic(job / "memory.json", memory_samples)
+    if progress:
+        atomic(job / "progress.json", {"idle_limit_seconds": LIVE_IDLE_SECONDS, "wall_time_limit_seconds": None,
+            "last_progress_seconds_after_start": round(progress.last_progress - started, 2),
+            "last_progress_source": progress.source, "finished_at": now(),
+            "error": issue, "completion_reason": completion_reason})
     return {"exit_code": code, "seconds": round(time.monotonic() - started, 2), "registry_verified": init_checked and not issue,
             "error": issue, "completion_reason": completion_reason,
             "peak_rss_bytes": max((x.get("peak_rss") or 0 for x in memory_samples), default=None),

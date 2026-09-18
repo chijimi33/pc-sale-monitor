@@ -8,7 +8,6 @@ import json
 from pathlib import Path
 import shutil
 import sys
-import time
 from urllib.parse import urlsplit
 import zipfile
 
@@ -127,7 +126,6 @@ def report_index():
 
 
 def poll(config):
-    started = time.monotonic()
     live = live_execution_config(config)
     if not config.get("enabled"):
         atomic(ROOT / "status.json", {"status": "disabled_pending_model_review", "checked_at": now()}); return
@@ -226,8 +224,7 @@ def poll(config):
         atomic(job / "job.json", {"python": config["python"], "data_base_url": item["base_url"],
                                    "allowed_urls": permitted, "evidence_hosts": sorted({urlsplit(u).hostname for u in permitted})})
         with server(model, job / "server", context_window_size=context_window(live)):
-            remaining = max(1, 3600 - 660 - int(time.monotonic() - started))
-            execution = execute(job, live, "Read input.json, perform the requested verification and save a Japanese report.", timeout=remaining)
+            execution = execute(job, live, "Read input.json, perform the requested verification and save a Japanese report.")
         (job / "patch.diff").write_text(capture_patch(job / "repo"), encoding="utf-8")
         tests = run([config["python"], "-B", "-m", "unittest", "discover", "-s", "tests", "-q"], job / "repo", env=environment(job))
         atomic(job / "controller-tests.json", {"exit_code": tests.returncode, "stdout": tests.stdout, "stderr": tests.stderr, "at": now()})

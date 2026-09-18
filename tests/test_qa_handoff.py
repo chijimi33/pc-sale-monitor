@@ -16,7 +16,7 @@ import worker
 import benchmark
 from review import verify
 from benchmark import choose_model, score
-from agent import compression_problem, execute, saved_report_receipt
+from agent import compression_problem, execute, saved_report_receipt, ProgressWatch
 from model import blocks_inference, context_window
 from compact_hook import grounding
 
@@ -210,11 +210,11 @@ class HandoffTests(unittest.TestCase):
             with self.subTest(invalid=invalid), self.assertRaises(ValueError):
                 worker.live_execution_config({"live_context_window_size": invalid})
 
-    def test_live_stream_budget_reaches_sdk_without_changing_benchmark(self):
+    def test_live_progress_supervision_reaches_sdk_without_changing_benchmark(self):
         config = {"python": sys.executable, "node": "unused-node", "live_context_window_size": 32768}
         for name, cfg, threshold, lifetime, timeout in (
             ("benchmark", config, 0.6, 900000, 1200000),
-            ("live", worker.live_execution_config(config), 0.75, 1500000, 1500000),
+            ("live", worker.live_execution_config(config), 0.75, 0, 1500000),
         ):
             with self.subTest(name=name), patch("agent.subprocess.Popen") as popen, patch("agent.attach"):
                 popen.return_value.poll.return_value = 0
@@ -229,8 +229,76 @@ class HandoffTests(unittest.TestCase):
                 generation = settings["modelProviders"]["openai"][0]["generationConfig"]
                 self.assertEqual(generation["timeout"], timeout)
                 self.assertEqual(generation["samplingParams"]["max_tokens"], 4096)
-                self.assertIn("2940s", popen.call_args.args[0])
+                argv = popen.call_args.args[0]
+                if name == 'live':
+                    self.assertNotIn('--max-wall-time', argv)
+                    self.assertEqual(settings['model']['maxWallTimeSeconds'], -1)
+                else:
+                    self.assertEqual(argv[argv.index('--max-wall-time') + 1], '2940s')
+                    self.assertNotIn('maxWallTimeSeconds', settings['model'])
+                self.assertEqual(env.get('QWEN_STREAM_IDLE_TIMEOUT_MS'), '0' if name == 'live' else None)
         self.assertNotIn("live_validation", config)
+
+    def test_progress_requires_new_tokens_or_successful_complete_tool_records(self):
+        import json
+        folder = self.root / 'server'; folder.mkdir()
+        log = folder / 'server.stderr'
+        watch = ProgressWatch(self.root, 0)
+        line = '1.00 I slot print_timing: id  0 | task 7 | prompt processing, n_tokens = 256, progress = 0.5\n'
+        log.write_text(line)
+        self.assertEqual(watch.idle_seconds(100), 0)
+        with log.open('a') as stream:
+            stream.write(line + '2.00 health ready\n')
+            stream.write('2.00 I slot print_timing: id  0 | task 7 | n_gen = 12')
+        atomic(self.root / 'memory.json', {'updated': 500})
+        self.assertEqual(watch.idle_seconds(500), 400)
+        with log.open('a') as stream: stream.write(', tg = 4.0\n')
+        self.assertEqual(watch.idle_seconds(600), 0)
+        # Truncation/replay, a zero counter and failed tools cannot mask a stall.
+        log.write_text(line + '3.00 I slot print_timing: id  0 | task 8 | n_gen = 0\n')
+        failed = json.dumps({'ok': False, 'arguments': {'op': 'read'}}) + '\n'
+        (self.root / 'tools.jsonl').write_text(failed)
+        self.assertEqual(watch.idle_seconds(1000), 400)
+        receipt = json.dumps({'ok': True, 'arguments': {'op': 'test'}, 'at': 'verified'})
+        with (self.root / 'tools.jsonl').open('a') as stream: stream.write(receipt)
+        self.assertEqual(watch.idle_seconds(1100), 500)
+        with (self.root / 'tools.jsonl').open('a') as stream: stream.write('\n')
+        self.assertEqual(watch.idle_seconds(1200), 0)
+        with (self.root / 'tools.jsonl').open('a') as stream: stream.write(receipt + '\n')
+        self.assertEqual(watch.idle_seconds(2500), 1300)
+
+    def test_live_agent_continues_past_hour_with_progress_then_stops_on_real_stall(self):
+        import json
+        folder = self.root / 'server'; folder.mkdir()
+        log = folder / 'server.stderr'
+        config = {'python': sys.executable, 'node': 'unused', 'live_validation': True}
+        ticks = [0, 100, 1000, 1900, 2800, 3700, 4600, 5500, 6701, 6702]
+        with patch('agent.subprocess.Popen') as popen, patch('agent.attach'), patch('agent.subprocess.run') as stop, patch('agent.time.sleep'), patch('agent.time.monotonic', side_effect=ticks):
+            def start(*args, **kwargs):
+                kwargs['stdout'].write(json.dumps({'tools': ['mcp__saleqa__qa']}) + '\n')
+                kwargs['stdout'].flush()
+                return popen.return_value
+            popen.side_effect = start
+            calls = 0
+            def poll():
+                nonlocal calls
+                calls += 1
+                with log.open('a') as stream:
+                    stream.write(f'I slot print_timing: id 0 | task 1 | n_gen = {min(calls, 7)}\n')
+                return None
+            popen.return_value.poll.side_effect = poll
+            popen.return_value.pid = 123
+            result = execute(self.root, config, 'test', timeout=120)
+        self.assertEqual(calls, 8)
+        self.assertGreater(result['seconds'], 3600)
+        self.assertEqual(result['error'], 'no_progress_for_1200_seconds')
+        self.assertEqual(result['exit_code'], 55)
+        self.assertIsNone(result['completion_reason'])
+        self.assertEqual(stop.call_args.args[0], ['taskkill', '/PID', '123', '/T', '/F'])
+        receipt = read(self.root / 'progress.json')
+        self.assertIsNone(receipt['wall_time_limit_seconds'])
+        self.assertEqual(receipt['last_progress_seconds_after_start'], 5500)
+        self.assertIn('progress.json', finalize(self.root, 'failed')['files'])
 
     def test_report_completion_requires_matching_successful_tool_receipt(self):
         report = {"summary": "検証結果", "findings": [], "unresolved": ["要確認"]}
