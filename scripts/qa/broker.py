@@ -77,8 +77,11 @@ class Broker:
                     for p in (self.repo / folder).rglob("*") if p.is_file() and p.suffix in (".py", ".md", ".json")]
         if op == "read":
             if args["path"] == "input.json":
-                return self.input
-            lines = self.path(args["path"]).read_text(encoding="utf-8-sig").splitlines()
+                if not any(key in args for key in ("start", "count", "query")):
+                    return self.input
+                lines = json.dumps(self.input, ensure_ascii=False, indent=2).splitlines()
+            else:
+                lines = self.path(args["path"]).read_text(encoding="utf-8-sig").splitlines()
             start = max(0, args.get("start", 1) - 1)
             query = args.get("query"); indices = list(range(len(lines)))
             if query:

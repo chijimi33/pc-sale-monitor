@@ -5,7 +5,7 @@ on:
     - cron: '17 */4 * * *'
   push:
     branches: [main]
-    paths: ['sale_monitor/**', 'config/**', 'scripts/**', 'pyproject.toml', '.github/workflows/monitor.yml']
+    paths: ['sale_monitor/**', 'config/**', 'scripts/**', '!scripts/qa/**', 'pyproject.toml', '.github/workflows/monitor.yml']
 
 permissions:
   contents: read

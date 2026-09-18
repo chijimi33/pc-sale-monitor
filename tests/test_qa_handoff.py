@@ -52,6 +52,18 @@ class HandoffTests(unittest.TestCase):
         self.assertIsNone(second["next_start"])
         self.assertEqual(len(self.broker.invoke({"op": "read", "path": "sale_monitor/a.py", "count": -1})["text"].splitlines()), 1)
 
+    def test_explicit_input_reread_respects_paging_and_query(self):
+        self.broker.input = {"records": [{"price": i} for i in range(150)], "final_pending_count": 17}
+        self.assertEqual(self.broker.invoke({"op": "read", "path": "input.json"}), self.broker.input)
+        page = self.broker.invoke({"op": "read", "path": "input.json", "start": 1, "count": 80})
+        self.assertEqual(len(page["text"].splitlines()), 80)
+        self.assertEqual(page["next_start"], 81)
+        following = self.broker.invoke({"op": "read", "path": "input.json", "start": 81, "count": 3})
+        self.assertTrue(following["text"].startswith("81: "))
+        found = self.broker.invoke({"op": "read", "path": "input.json", "query": "final_pending_count"})
+        self.assertIn('"final_pending_count": 17', found["text"])
+        self.assertLess(len(found["text"].splitlines()), 8)
+
     def test_evidence_pages_share_one_saved_response_and_hide_scripts(self):
         url = "https://example.com/product"
         self.broker.config["allowed_urls"] = [url]
