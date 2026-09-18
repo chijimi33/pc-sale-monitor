@@ -17,7 +17,7 @@ import benchmark
 from review import verify
 from benchmark import choose_model, score
 from agent import compression_problem
-from model import blocks_inference
+from model import blocks_inference, context_window
 from compact_hook import grounding
 
 
@@ -149,6 +149,17 @@ class HandoffTests(unittest.TestCase):
         current = [{"id": "old", "note": "corrected"}, {"id": "new", "note": "source attribution"}]
         self.assertEqual(worker.merge_feedback(queued, current), current)
         self.assertEqual(queued, [{"id": "old", "note": "earlier"}])
+
+    def test_live_context_override_does_not_change_benchmark_config(self):
+        config = {"selected_model": "Q4_K_M", "live_context_window_size": 32768}
+        self.assertEqual(context_window(config), 16384)
+        live = worker.live_execution_config(config)
+        self.assertEqual(context_window(live), 32768)
+        self.assertNotIn("context_window_size", config)
+        self.assertEqual(context_window(worker.live_execution_config({})), 16384)
+        for invalid in (True, "32768", 0, 65536):
+            with self.subTest(invalid=invalid), self.assertRaises(ValueError):
+                worker.live_execution_config({"live_context_window_size": invalid})
 
     def test_accepted_truncated_compaction_is_not_silently_reused(self):
         import json

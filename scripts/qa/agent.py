@@ -6,6 +6,7 @@ import time
 
 from common import ROOT, atomic, environment, now, read, run
 from process_guard import attach
+from model import context_window
 
 DISABLED = ["skill", "get_goal", "update_goal", "agent", "task_stop", "record_artifact", "tool_search",
             "report_findings", "list_agents", "send_message", "enter_worktree", "exit_worktree"]
@@ -43,7 +44,7 @@ def execute(job, config, prompt, timeout=3600):
             config["python"], "-B", "-X", "utf8", str(Path(__file__).with_name("compact_hook.py"))])}]}]},
         "modelProviders": {"openai": [{"id": "qa-local", "envKey": "QA_LOCAL_API_KEY",
             "baseUrl": "http://127.0.0.1:8081/v1", "generationConfig": {
-                "contextWindowSize": 16384, "timeout": 1200000,
+                "contextWindowSize": context_window(config), "timeout": 1200000,
                 "samplingParams": {"temperature": 1.0, "top_p": 0.95, "max_tokens": 4096}}}]},
         "telemetry": {"enabled": False},
         "tools": {"core": ["__no_builtin_tools__"], "disabled": DISABLED},

@@ -15,7 +15,7 @@ import zipfile
 from agent import execute
 from benchmark import POLICY
 from common import ROOT, atomic, capture_patch, digest, environment, finalize, git, inside, lock, now, read, require_root, run
-from model import PROFILES, ensure_available, server
+from model import PROFILES, context_window, ensure_available, server
 from net import BLOCKED_HOSTS, fetch, get_json
 
 REPOSITORY = "chijimi33/pc-sale-monitor"
@@ -67,6 +67,12 @@ def merge_feedback(queued, current):
     return list({item["id"]: item for item in [*queued, *current]}.values())
 
 
+def live_execution_config(config):
+    live = {**config, "context_window_size": config.get("live_context_window_size", 16384)}
+    context_window(live)  # Validate before reserving an attempt; benchmark config stays unchanged.
+    return live
+
+
 def snapshot():
     # Resolve once so input files cannot come from different collector commits.
     sha = get_json(API + "/commits/monitor-data")["sha"]
@@ -110,6 +116,7 @@ def report_index():
 
 def poll(config):
     started = time.monotonic()
+    live = live_execution_config(config)
     if not config.get("enabled"):
         atomic(ROOT / "status.json", {"status": "disabled_pending_model_review", "checked_at": now()}); return
     selection = read(ROOT / "benchmarks" / config["benchmark_id"] / "selection.json", {})
@@ -203,9 +210,9 @@ def poll(config):
         permitted = sorted(urls(candidate) | urls(review_candidate))
         atomic(job / "job.json", {"python": config["python"], "data_base_url": item["base_url"],
                                    "allowed_urls": permitted, "evidence_hosts": sorted({urlsplit(u).hostname for u in permitted})})
-        with server(model, job / "server"):
+        with server(model, job / "server", context_window_size=context_window(live)):
             remaining = max(1, 3600 - 660 - int(time.monotonic() - started))
-            execution = execute(job, config, "Read input.json, perform the requested verification and save a Japanese report.", timeout=remaining)
+            execution = execute(job, live, "Read input.json, perform the requested verification and save a Japanese report.", timeout=remaining)
         (job / "patch.diff").write_text(capture_patch(job / "repo"), encoding="utf-8")
         tests = run([config["python"], "-B", "-m", "unittest", "discover", "-s", "tests", "-q"], job / "repo", env=environment(job))
         atomic(job / "controller-tests.json", {"exit_code": tests.returncode, "stdout": tests.stdout, "stderr": tests.stderr, "at": now()})

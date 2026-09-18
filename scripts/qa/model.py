@@ -13,6 +13,13 @@ from process_guard import attach
 PROFILES = {"Q3_K_XL": ("vulkan-q3", 99), "Q4_K_S": ("vulkan-q4s", 55), "Q4_K_M": ("vulkan-q4m", 50)}
 
 
+def context_window(config):
+    size = config.get("context_window_size", 16384)
+    if type(size) is not int or size not in (16384, 32768):
+        raise ValueError("unsupported_QA_context_window")
+    return size
+
+
 def blocks_inference(process):
     name = str(process.get("ProcessName", ""))
     return (bool(re.search(r"llama-server|lm[ -]?studio|llmster", name, re.I))
@@ -36,14 +43,15 @@ def ensure_available(folder):
 
 
 @contextmanager
-def server(model, folder):
+def server(model, folder, context_window_size=16384):
     """Own only this child PID; never stop a user's inference server."""
     folder = Path(folder); folder.mkdir(parents=True, exist_ok=True)
+    size = context_window({"context_window_size": context_window_size})
     profile, layers = PROFILES[model]
     ensure_available(folder)
     model_path = Path("D:/AI/Models/unsloth/Qwen3.8-27B-GGUF") / f"Qwen3.8-27B-UD-{model}.gguf"
     argv = ["D:/AI/llama.cpp/runtimes/b10997-vulkan/llama-server.exe", "-m", str(model_path),
-            "--alias", "qa-local", "--host", "127.0.0.1", "--port", "8081", "--ctx-size", "16384",
+            "--alias", "qa-local", "--host", "127.0.0.1", "--port", "8081", "--ctx-size", str(size),
             # Normal agent calls remain capped at 4096 in agent.py. Compaction
             # uses its own window-clamped budget and must not be cut at 4096.
             "--parallel", "1", "--n-predict", "8192", "--gpu-layers", str(layers), "--device", "Vulkan0",
