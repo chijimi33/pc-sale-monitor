@@ -125,6 +125,32 @@ def report_index():
     atomic(ROOT / "index.json", {"updated_at": now(), "reports": reports, "status": read(ROOT / "status.json")})
 
 
+def recover_interrupted_job():
+    """Called only while holding worker.lock, before starting another worker.
+
+    A prior 'running' record without a manifest is not proof of a live process.
+    Preserve its work as incomplete; do not reset attempts or approve a report.
+    """
+    status = read(ROOT / "status.json", {})
+    if status.get("status") != "running" or not status.get("job_id"): return
+    job = inside(ROOT / "jobs", status["job_id"])
+    if not job.is_dir(): raise ValueError("interrupted_job_directory_missing")
+    manifest = read(job / "manifest.json")
+    if manifest is None:
+        patch_error = None
+        if (job / "repo/.git").exists() and not (job / "patch.diff").exists():
+            try: (job / "patch.diff").write_text(capture_patch(job / "repo"), encoding="utf-8")
+            except Exception as exc: patch_error = repr(exc)
+        inp = read(job / "input.json", {})
+        atomic(job / "recovery.json", {"at": now(), "reason": "worker_lock_reacquired_without_finalization",
+            "cause_of_exit": "unknown", "previous_status": status, "patch_capture_error": patch_error})
+        manifest = finalize(job, "failed", base_sha=inp.get("base_sha"), data_sha=inp.get("data_sha"),
+            run_id=inp.get("current", {}).get("run_id"), error="worker_exited_without_finalization")
+    atomic(ROOT / "status.json", {"status": manifest["status"], "job_id": job.name,
+        "checked_at": now(), "recovered_after_process_exit": True})
+    report_index()
+
+
 def poll(config):
     live = live_execution_config(config)
     if not config.get("enabled"):
@@ -254,6 +280,7 @@ def main():
     require_root()
     try:
         with lock(ROOT / "worker.lock"):
+            recover_interrupted_job()
             poll(read(args.config)); report_index()
     except (BlockingIOError, PermissionError):
         print("Worker already running or storage unavailable", flush=True)

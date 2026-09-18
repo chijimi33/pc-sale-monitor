@@ -122,7 +122,7 @@ def append_event(job, event):
 def finalize(job, status, **extra):
     job = Path(job)
     files = {}
-    names = ["input.json", "report.json", "report.md", "patch.diff", "tests.json", "controller-tests.json", "tools.jsonl", "agent.jsonl", "agent.stderr", "memory.json", "progress.json", "compaction-hooks.jsonl"]
+    names = ["input.json", "report.json", "report.md", "patch.diff", "tests.json", "controller-tests.json", "tools.jsonl", "agent.jsonl", "agent.stderr", "memory.json", "progress.json", "recovery.json", "compaction-hooks.jsonl"]
     for folder in ("snapshot", "evidence", "llm-requests"):
         names.extend(p.relative_to(job).as_posix() for p in (job / folder).rglob("*") if p.is_file())
     for name in names:

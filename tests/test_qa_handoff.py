@@ -402,6 +402,36 @@ class HandoffTests(unittest.TestCase):
                 with lock(self.root / "worker.lock"): pass
         with lock(self.root / "worker.lock"): pass
 
+    def test_interrupted_worker_preserves_proposal_and_attempts_as_failed(self):
+        job = self.root / 'jobs' / ('a' * 20 + '-3')
+        atomic(job / 'input.json', {'base_sha': 'base', 'data_sha': 'data', 'current': {'run_id': 'run'}})
+        atomic(job / 'report.json', {'summary': 'unfinished proposal', 'audit_status': 'proposal_only'})
+        original = (job / 'report.json').read_bytes()
+        state = {'queue': [{'id': 'a' * 20, 'attempts': 3}], 'completed': []}
+        atomic(self.root / 'state.json', state)
+        atomic(self.root / 'status.json', {'status': 'running', 'job_id': job.name})
+        with patch.object(worker, 'ROOT', self.root), lock(self.root / 'worker.lock'):
+            worker.recover_interrupted_job()
+        manifest = verify(job)
+        self.assertEqual(read(job / 'manifest.json')['status'], 'failed')
+        self.assertIn('recovery.json', read(job / 'manifest.json')['files'])
+        self.assertEqual((job / 'report.json').read_bytes(), original)
+        self.assertEqual(read(self.root / 'state.json'), state)
+        self.assertEqual(read(self.root / 'status.json')['status'], 'failed')
+        self.assertEqual(read(self.root / 'index.json')['reports'][0]['job_id'], job.name)
+
+    def test_recovery_keeps_already_finalized_artifacts_unchanged(self):
+        job = self.root / 'jobs' / ('b' * 20 + '-1')
+        atomic(job / 'report.json', {'summary': 'saved proposal'})
+        finalize(job, 'awaiting_codex_review')
+        original = (job / 'manifest.json').read_bytes()
+        atomic(self.root / 'status.json', {'status': 'running', 'job_id': job.name})
+        with patch.object(worker, 'ROOT', self.root), lock(self.root / 'worker.lock'):
+            worker.recover_interrupted_job()
+        self.assertEqual((job / 'manifest.json').read_bytes(), original)
+        self.assertFalse((job / 'recovery.json').exists())
+        self.assertEqual(read(self.root / 'status.json')['status'], 'awaiting_codex_review')
+
     def test_source_url_discovery_excludes_rakuten(self):
         self.assertEqual(urls({"a": ["https://www.ark-pc.co.jp/i/1/", "https://item.rakuten.co.jp/x", "https://raw.githubusercontent.com/a"]}), {"https://www.ark-pc.co.jp/i/1/"})
 
