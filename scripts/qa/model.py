@@ -1,6 +1,7 @@
 from contextlib import contextmanager
 import json
 from pathlib import Path
+import re
 import socket
 import subprocess
 import time
@@ -12,11 +13,23 @@ from process_guard import attach
 PROFILES = {"Q3_K_XL": ("vulkan-q3", 99), "Q4_K_S": ("vulkan-q4s", 55), "Q4_K_M": ("vulkan-q4m", 50)}
 
 
+def blocks_inference(process):
+    name = str(process.get("ProcessName", ""))
+    return (bool(re.search(r"llama-server|lm[ -]?studio|llmster", name, re.I))
+            or ("overwatch" in name.lower() and process.get("WorkingSet64", 0) > 2 * 1024**3))
+
+
 def ensure_available(folder):
     """Check before reserving a worker attempt; a busy GPU is not a failed test."""
     check = run(["powershell.exe", "-NoProfile", "-Command",
-                 "Get-Process | Where-Object { $_.ProcessName -match 'llama-server|lm-studio|lmstudio|Overwatch' -and ($_.WorkingSet64 -gt 2GB -or $_.ProcessName -eq 'llama-server') } | Select-Object -ExpandProperty Id"], folder)
-    if check.returncode or check.stdout.strip():
+                 "Get-Process | Select-Object ProcessName,WorkingSet64 | ConvertTo-Json -Compress"], folder)
+    try:
+        processes = json.loads(check.stdout)
+        if isinstance(processes, dict): processes = [processes]
+        busy = any(blocks_inference(p) for p in processes)
+    except (ValueError, TypeError, AttributeError):
+        busy = True
+    if check.returncode or busy:
         raise RuntimeError("GPU_busy_or_process_check_failed; existing apps were not stopped")
     with socket.socket() as sock:
         if sock.connect_ex(("127.0.0.1", 8081)) == 0: raise RuntimeError("QA_port_8081_busy")

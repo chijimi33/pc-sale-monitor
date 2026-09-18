@@ -16,7 +16,7 @@ SYSTEM = """You validate a Japanese PC sale monitor and propose repairs. Use onl
 def compression_problem(job):
     """0.24.0 can accept a server-truncated summary when usage is present."""
     for path in (Path(job) / "runtime/projects").glob("*/chats/*.jsonl"):
-        for line in path.read_text(encoding="utf-8").splitlines():
+        for line in path.read_text(encoding="utf-8", errors="replace").splitlines():
             try: row = json.loads(line)
             except ValueError: continue  # final streaming record may be incomplete
             if row.get("subtype") != "chat_compression": continue

@@ -17,6 +17,7 @@ import benchmark
 from review import verify
 from benchmark import choose_model, score
 from agent import compression_problem
+from model import blocks_inference
 
 
 class HandoffTests(unittest.TestCase):
@@ -102,6 +103,8 @@ class HandoffTests(unittest.TestCase):
         save("<state_snapshot>facts cut off by the server")
         self.assertEqual(compression_problem(self.root), "incomplete_compaction_snapshot")
         save("<state_snapshot>facts with regional exceptions</state_snapshot>")
+        self.assertIsNone(compression_problem(self.root))
+        with p.open("ab") as stream: stream.write(b'"unfinished Japanese: \xe3\x81')
         self.assertIsNone(compression_problem(self.root))
 
     def test_new_file_and_report_remain_proposals(self):
@@ -228,6 +231,13 @@ class HandoffTests(unittest.TestCase):
             self.assertEqual(state["queue"][0]["attempts"], 0)
             self.assertEqual(state["completed"], [])
             self.assertEqual(read(self.root / "status.json")["status"], "waiting_for_resources")
+
+    def test_lm_studio_names_and_daemon_block_even_with_small_working_set(self):
+        for name in ("LM Studio", "lm-studio", "lmstudio", "llmster", "llama-server"):
+            with self.subTest(name=name):
+                self.assertTrue(blocks_inference({"ProcessName": name, "WorkingSet64": 1000}))
+        self.assertFalse(blocks_inference({"ProcessName": "notepad", "WorkingSet64": 1000}))
+        self.assertTrue(blocks_inference({"ProcessName": "Overwatch", "WorkingSet64": 3 * 1024**3}))
 
     def test_benchmark_counts_rejected_controller_write(self):
         self.broker.call({"op": "replace", "path": "scripts/qa/worker.py", "old": "", "new": "# disallowed"})
