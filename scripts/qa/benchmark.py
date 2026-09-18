@@ -3,12 +3,14 @@ from __future__ import annotations
 import argparse
 import importlib.util
 import json
+import os
 from pathlib import Path
 import statistics
 import sys
+import traceback
 
 from agent import execute
-from common import ROOT, atomic, digest, finalize, git, lock, now, read, require_root
+from common import ROOT, atomic, capture_patch, digest, finalize, git, lock, now, read, require_root
 from model import PROFILES, server
 
 POLICY = """楽天は除外、監視分母10。Aには候補以外の独立販売者2者以上、最安総額から10%以上かつ500円以上安いことが必要（境界を含む）。送料不明、期限切れ、残数0、今回未取得、型番相違は現在比較不可。同じ販売者は1者。工房共通チラシは1回解析し6店舗共有、掲載数量は店舗在庫に変換しない。Bは1年の観測最安を500円以上更新＋現在比較1店以上、または90日内30日以上の観測幅、3日以上の日別最安の中央値より10%以上かつ500円以上安く期間最安以下。転記しただけの古い価格は現在価格にならない。"""
@@ -55,7 +57,7 @@ class Boundary(unittest.TestCase):
     git(repo, "add", ".")
     git(repo, "-c", "user.name=QA fixture", "-c", "user.email=qa@localhost", "commit", "-qm", "Benchmark fixture")
     inp = {"policy": POLICY, "cases": [{"id": name, "offer": offer, "comparisons": comparisons} for name, _, offer, comparisons in CASES],
-           "fact_questions": list(FACTS), "instructions": "qa read input.json と sale_monitor/check.py を読み、全ケースのA可否を判断し、関数を汎用的に修正、テストを追加・実行。report.decisionsに{id: boolean}、report.factsに各設問の値を保存。外部ページは不要。確認していない事実を作らない。"}
+           "fact_questions": list(FACTS), "instructions": "qa read input.json と sale_monitor/check.py を読み、全ケースのA可否を判断し、関数を汎用的に修正、必要な回帰テストを追加・実行。report.decisionsに{id: boolean}、report.factsに各設問の値を保存。findingsはtitleとevidence配列を持つオブジェクト。報告書は簡潔にし、全テストを文章で繰り返し説明しない。外部ページは不要。確認していない事実を作らない。"}
     atomic(job / "input.json", inp)
     atomic(job / "job.json", {"python": config["python"], "allowed_urls": []})
     return digest(json.dumps(inp, sort_keys=True).encode())
@@ -93,6 +95,8 @@ def main():
     with lock(ROOT / "worker.lock"):
         batch = ROOT / "benchmarks" / config["benchmark_id"]
         batch.mkdir(parents=True, exist_ok=True)
+        atomic(batch / "controller.json", {"pid": os.getpid(), "started_at": now(), "python": sys.executable,
+               "script": str(Path(__file__).resolve()), "harness_sha256": {p.name: digest(p.read_bytes()) for p in Path(__file__).parent.glob("*.py")}})
         results = []
         for model in PROFILES:
             for repeat in (1, 2):
@@ -100,23 +104,22 @@ def main():
                 done = read(job / "manifest.json")
                 if done:
                     results.append(done); continue
-                job.mkdir(exist_ok=True)
-                if (job / "input.json").exists():
+                if job.exists():
                     # Preserve partial work; a fresh attempt has a separate directory.
                     job = batch / f"{model}-{repeat}-retry-{len(list(batch.glob(model+'*')))}"
-                    job.mkdir()
-                fingerprint = prepare(job, config)
+                job.mkdir()
                 atomic(batch / "progress.json", {"model": model, "repeat": repeat, "job": str(job), "started_at": now()})
                 print(f"START {model} repeat={repeat}", flush=True)
                 try:
+                    fingerprint = prepare(job, config)
                     with server(model, job / "server"):
                         execution = execute(job, config, "Execute the complete benchmark instructions in input.json and save the report.", timeout=3600)
                     metrics = score(job)
                     metrics["passed"] = metrics["passed"] and execution["exit_code"] == 0
-                    git(job / "repo", "add", "-N", ".")
-                    (job / "patch.diff").write_text(git(job / "repo", "diff", "--binary"), encoding="utf-8")
+                    (job / "patch.diff").write_text(capture_patch(job / "repo"), encoding="utf-8")
                     result = finalize(job, "complete", model=model, repeat=repeat, input_sha256=fingerprint, execution=execution, score=metrics)
                 except Exception as exc:
+                    (job / "failure-traceback.txt").write_text(traceback.format_exc(), encoding="utf-8")
                     result = finalize(job, "failed", model=model, repeat=repeat, error=repr(exc), score={"passed": False})
                 results.append(result)
                 atomic(batch / "results.json", results)
@@ -130,6 +133,7 @@ def main():
         selected = min(eligible)[2] if eligible else None
         atomic(batch / "selection.json", {"selected": selected, "selected_at": now(), "results": results,
                                           "requires_codex_review": True, "benchmark": "sale-monitor-v1"})
+        atomic(batch / "progress.json", {"status": "completed", "finished_at": now(), "selected": selected})
         print("SELECTED " + str(selected), flush=True)
 
 

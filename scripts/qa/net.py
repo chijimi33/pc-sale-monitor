@@ -9,6 +9,7 @@ from urllib.error import HTTPError
 
 LAST_REQUEST = {}
 DEFERRED = {}
+BLOCKED_HOSTS = ("rakuten.co.jp", "rakuten.ne.jp", "rakuten.com", "rakuten.jp", "r10.to")
 
 
 def validate(url, hosts):
@@ -16,7 +17,7 @@ def validate(url, hosts):
     host = p.hostname or ""
     if p.scheme != "https" or p.username or p.password or p.port not in (None, 443) or host not in hosts:
         raise ValueError("unapproved_public_url")
-    if "rakuten" in host:
+    if "rakuten" in host or any(host == b or host.endswith("." + b) for b in BLOCKED_HOSTS):
         raise ValueError("rakuten_excluded")
     for address in socket.getaddrinfo(host, 443, type=socket.SOCK_STREAM):
         if not ipaddress.ip_address(address[4][0]).is_global:

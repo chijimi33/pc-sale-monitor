@@ -8,7 +8,7 @@ from unittest.mock import patch
 
 QA = Path(__file__).resolve().parents[1] / "scripts/qa"
 sys.path.insert(0, str(QA))
-from common import atomic, digest, finalize, lock, read
+from common import atomic, capture_patch, digest, finalize, git, lock, read
 from broker import Broker
 from net import validate
 from worker import urls
@@ -50,7 +50,7 @@ class HandoffTests(unittest.TestCase):
         with self.assertRaises(ValueError): self.broker.invoke({"op": "evidence", "url": "https://example.com/"})
 
     def test_private_addresses_and_rakuten_blocked(self):
-        for url, hosts in (("https://www.rakuten.co.jp/a", ["www.rakuten.co.jp"]), ("https://127.0.0.1/a", ["127.0.0.1"]), ("http://example.com/", ["example.com"]), ("https://user:pass@example.com/", ["example.com"])):
+        for url, hosts in (("https://www.rakuten.co.jp/a", ["www.rakuten.co.jp"]), ("https://r10.to/a", ["r10.to"]), ("https://127.0.0.1/a", ["127.0.0.1"]), ("http://example.com/", ["example.com"]), ("https://user:pass@example.com/", ["example.com"])):
             with self.subTest(url=url), self.assertRaises(ValueError): validate(url, hosts)
 
     def test_finalize_detects_later_report_change(self):
@@ -74,6 +74,19 @@ class HandoffTests(unittest.TestCase):
     def test_source_url_discovery_excludes_rakuten(self):
         self.assertEqual(urls({"a": ["https://www.ark-pc.co.jp/i/1/", "https://item.rakuten.co.jp/x", "https://raw.githubusercontent.com/a"]}), {"https://www.ark-pc.co.jp/i/1/"})
 
+    def test_patch_excludes_runtime_files_and_is_applicable(self):
+        repo = self.root / "repo"
+        file = repo / "sale_monitor/a.py"; file.write_text("price = 1\n")
+        (repo / "tests/a.py").write_text("# baseline\n")
+        git(repo, "init", "-q"); git(repo, "add", ".")
+        git(repo, "-c", "user.name=Test", "-c", "user.email=test@localhost", "commit", "-qm", "baseline")
+        file.write_text("price = 2\n")
+        (repo / "runtime-cache").write_text("do not publish")
+        patch_file = self.root / "patch.diff"
+        patch_file.write_text(capture_patch(repo), encoding="utf-8")
+        self.assertNotIn("runtime-cache", patch_file.read_text())
+        git(repo, "apply", "--reverse", "--check", str(patch_file))
+
     def test_review_detects_changed_artifact(self):
         atomic(self.root / "report.json", {"summary": "original"})
         finalize(self.root, "awaiting_codex_review")
@@ -92,6 +105,16 @@ class HandoffTests(unittest.TestCase):
             with self.assertRaisesRegex(RuntimeError, "requires_Codex_review"):
                 worker.poll({"enabled": True, "selected_model": "Q3_K_XL", "benchmark_id": "test"})
             snapshot.assert_not_called()
+
+    def test_review_selection_prioritizes_changed_and_rotates(self):
+        candidates = [{"offer_key": "a", "change": "unchanged", "store": "ark"},
+                      {"offer_key": "b", "change": "new", "store": "dospara"},
+                      {"offer_key": "c", "change": "restocked", "store": "tsukumo"},
+                      {"offer_key": "excluded", "change": "new", "store": "rakuten"}]
+        self.assertEqual(worker.select_review(candidates, 0)[0]["offer_key"], "b")
+        self.assertEqual(worker.select_review(candidates, 1)[0]["offer_key"], "c")
+        self.assertEqual(worker.select_review(candidates, 2)[0]["offer_key"], "b")
+        self.assertEqual(worker.select_review([], 0), [])
 
     def test_queued_input_survives_checkout_failure(self):
         atomic(self.root / "benchmarks/test/selection.json", {"selected": "Q3_K_XL"})

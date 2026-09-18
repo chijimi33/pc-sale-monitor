@@ -102,8 +102,16 @@ def run(argv, cwd, timeout=600, env=None):
 def git(repo, *args):
     result = run(["git", "-c", "core.hooksPath=" + os.devnull, *args], repo)
     if result.returncode:
-        raise RuntimeError(result.stderr[-2000:])
+        raise RuntimeError(f"git {args[0] if args else ''} exit={result.returncode}: {(result.stderr or result.stdout)[-2000:]}")
     return result.stdout.strip()
+
+
+def capture_patch(repo):
+    # Runtime/PowerShell caches are artifacts, never proposed source changes.
+    git(repo, "add", "-N", "--", "sale_monitor", "tests")
+    result = run(["git", "-c", "core.hooksPath=" + os.devnull, "diff", "--binary", "--", "sale_monitor", "tests"], repo)
+    if result.returncode: raise RuntimeError(result.stderr[-2000:])
+    return result.stdout
 
 
 def append_event(job, event):

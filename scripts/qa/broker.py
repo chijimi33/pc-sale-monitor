@@ -15,7 +15,14 @@ TOOL = {"name": "qa", "description": "Sale-monitor QA. op=list/read/replace/test
             "op": {"type": "string", "enum": ["list", "read", "replace", "test", "data", "evidence", "report"]},
             "path": {"type": "string"}, "start": {"type": "integer"}, "count": {"type": "integer"},
             "old": {"type": "string"}, "new": {"type": "string"}, "url": {"type": "string"}, "offer_key": {"type": "string"},
-            "report": {"type": "object"}}, "required": ["op"]}}
+            "report": {"type": "object", "properties": {
+                "summary": {"type": "string", "description": "Concise Japanese summary."},
+                "findings": {"type": "array", "items": {"type": "object", "properties": {
+                    "title": {"type": "string"}, "evidence": {"type": "array", "items": {"type": "string"}}},
+                    "required": ["title", "evidence"]}},
+                "unresolved": {"type": "array", "items": {"type": "string"}},
+                "decisions": {"type": "object", "additionalProperties": {"type": "boolean"}},
+                "facts": {"type": "object"}}, "required": ["summary", "findings", "unresolved"]}}, "required": ["op"]}}
 
 
 class Broker:

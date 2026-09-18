@@ -14,9 +14,9 @@ import zipfile
 
 from agent import execute
 from benchmark import POLICY
-from common import ROOT, atomic, digest, environment, finalize, git, inside, lock, now, read, require_root, run
+from common import ROOT, atomic, capture_patch, digest, environment, finalize, git, inside, lock, now, read, require_root, run
 from model import PROFILES, server
-from net import fetch, get_json
+from net import BLOCKED_HOSTS, fetch, get_json
 
 REPOSITORY = "chijimi33/pc-sale-monitor"
 API = "https://api.github.com/repos/" + REPOSITORY
@@ -30,7 +30,7 @@ def urls(value):
         for child in value: found.update(urls(child))
     elif isinstance(value, str) and value.startswith("https://"):
         host = urlsplit(value).hostname or ""
-        if "rakuten" not in host and not host.endswith("github.com") and not host.endswith("githubusercontent.com"):
+        if "rakuten" not in host and not any(host == b or host.endswith("." + b) for b in BLOCKED_HOSTS) and not host.endswith("github.com") and not host.endswith("githubusercontent.com"):
             found.add(value)
     return found
 
@@ -53,6 +53,13 @@ def compact_evidence(value):
     if isinstance(value, list): return [compact_evidence(v) for v in value]
     if isinstance(value, dict): return {k: compact_evidence(v) for k, v in value.items() if k not in ("fields", "specifications")}
     return value
+
+
+def select_review(candidates, cursor):
+    eligible = [c for c in candidates if c.get("store") != "rakuten" and c.get("offer_key")]
+    changed = [c for c in eligible if c.get("change") not in (None, "unchanged")]
+    pool = changed or eligible
+    return [pool[cursor % len(pool)]] if pool else []
 
 
 def snapshot():
@@ -119,7 +126,7 @@ def poll(config):
                                "validation": validation, "feedback": feedback, "attempts": 0, "queued_at": now()})
     atomic(ROOT / "state.json", state)
     if not state["queue"]:
-        atomic(ROOT / "status.json", {"status": "unchanged", "checked_at": now(), "age_hours": age/3600}); return
+        atomic(ROOT / "status.json", {"status": "stale_source" if age > 8*3600 else "unchanged", "checked_at": now(), "age_hours": age/3600}); return
     item = state["queue"][0]
     # Failed/interrupted work remains queued, with bounded retries and an explicit report.
     if item["attempts"] >= 3:
@@ -145,16 +152,23 @@ def poll(config):
         notifications = get_json(item["base_url"] + "notifications.json")
         if notifications.get("generated_at") != item["latest"]["generated_at"]:
             raise ValueError("notifications_timestamp_mismatch")
+        reviews = get_json(item["base_url"] + "review_queue.json")
+        if reviews.get("generated_at") != item["latest"]["generated_at"]:
+            raise ValueError("reviews_timestamp_mismatch")
         candidates = [{"event_id": e["event_id"], "offer_key": e.get("offer_key"), "current_evidence": e.get("current_evidence")} for e in notifications.get("events", [])]
         # Full evidence stays on disk; prompt only the first candidate, rest is durable backlog.
         cursor = state.get("candidate_cursor", 0)
         selected = [candidates[cursor % len(candidates)]] if candidates else []
         candidate = compact_evidence(selected)
+        review_cursor = state.get("review_cursor", 0)
+        review_candidate = select_review(reviews.get("candidates", []), review_cursor)
         atomic(job / "snapshot/notifications.json", notifications)
+        atomic(job / "snapshot/review_queue.json", reviews)
         atomic(job / "snapshot/latest.json", item["latest"])
         atomic(job / "snapshot/validation.json", item["validation"])
         inp = {"policy": POLICY, "current": compact, "previous": previous, "feedback": item["feedback"],
                "candidate": candidate, "remaining_event_ids": [x["event_id"] for x in candidates if x not in selected],
+               "review_candidate": review_candidate, "review_queue_total": len(reviews.get("candidates", [])),
                "coverage_format": "mandatory_field_coverage値は[既知件数,今回取得件数]。分母0の取得率は不明。0%とも100%ともみなさない。",
                "snapshot_age_hours_at_start": (datetime.now(timezone.utc) - datetime.fromisoformat(item["latest"]["generated_at"])).total_seconds()/3600,
                "base_sha": base_sha, "data_sha": item["data_sha"],
@@ -165,9 +179,7 @@ def poll(config):
             inp["previous_attempt"] = {"report": read(prior_job / "report.json"), "manifest": read(prior_job / "manifest.json")}
             prior_input = read(prior_job / "input.json", {})
             if prior_input.get("base_sha") == base_sha and (prior_job / "repo/.git").exists() and not (prior_job / "patch.diff").exists():
-                git(prior_job / "repo", "add", "-N", ".")
-                interrupted_patch = git(prior_job / "repo", "diff", "--binary")
-                (prior_job / "patch.diff").write_text(interrupted_patch + ("\n" if interrupted_patch else ""), encoding="utf-8")
+                (prior_job / "patch.diff").write_text(capture_patch(prior_job / "repo"), encoding="utf-8")
             if prior_input.get("base_sha") == base_sha and (prior_job / "patch.diff").exists():
                 patch_text = (prior_job / "patch.diff").read_text(encoding="utf-8")
                 if patch_text.strip():
@@ -175,15 +187,13 @@ def poll(config):
                     git(job / "repo", "apply", str(prior_job / "patch.diff"))
                     inp["previous_attempt"]["patch_resumed"] = True
         atomic(job / "input.json", inp)
-        permitted = sorted(urls(candidate))
+        permitted = sorted(urls(candidate) | urls(review_candidate))
         atomic(job / "job.json", {"python": config["python"], "data_base_url": item["base_url"],
                                    "allowed_urls": permitted, "evidence_hosts": sorted({urlsplit(u).hostname for u in permitted})})
         with server(model, job / "server"):
             remaining = max(1, 3600 - 660 - int(time.monotonic() - started))
             execution = execute(job, config, "Read input.json, perform the requested verification and save a Japanese report.", timeout=remaining)
-        git(job / "repo", "add", "-N", ".")
-        patch = git(job / "repo", "diff", "--binary")
-        (job / "patch.diff").write_text(patch + ("\n" if patch else ""), encoding="utf-8")
+        (job / "patch.diff").write_text(capture_patch(job / "repo"), encoding="utf-8")
         tests = run([config["python"], "-B", "-m", "unittest", "discover", "-s", "tests", "-q"], job / "repo", env=environment(job))
         atomic(job / "controller-tests.json", {"exit_code": tests.returncode, "stdout": tests.stdout, "stderr": tests.stderr, "at": now()})
         report = read(job / "report.json")
@@ -193,14 +203,13 @@ def poll(config):
         (job / "report.md").write_text("# Qwen検証報告（Codex未承認）\n\n" + report["summary"] + "\n\n```json\n" + json.dumps(report, ensure_ascii=False, indent=2) + "\n```\n", encoding="utf-8")
         state["completed"].append(item["id"]); state["queue"].pop(0)
         state["candidate_cursor"] = cursor + len(candidate)
+        state["review_cursor"] = review_cursor + len(review_candidate)
         atomic(ROOT / "previous-summary.json", compact)
         atomic(ROOT / "status.json", {"status": "awaiting_codex_review", "job_id": job.name, "finished_at": now()})
     except Exception as exc:
         if (job / "repo/.git").exists():
             try:
-                git(job / "repo", "add", "-N", ".")
-                patch = git(job / "repo", "diff", "--binary")
-                (job / "patch.diff").write_text(patch + ("\n" if patch else ""), encoding="utf-8")
+                (job / "patch.diff").write_text(capture_patch(job / "repo"), encoding="utf-8")
             except Exception: pass
         finalize(job, "failed", base_sha=base_sha, run_id=item["latest"]["run_id"], error=repr(exc))
         atomic(ROOT / "status.json", {"status": "failed", "job_id": job.name, "error": repr(exc), "checked_at": now()})
