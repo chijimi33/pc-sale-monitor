@@ -67,6 +67,18 @@ def merge_feedback(queued, current):
     return list({item["id"]: item for item in [*queued, *current]}.values())
 
 
+def earlier_summary(previous, current):
+    if previous and datetime.fromisoformat(previous["generated_at"]) < datetime.fromisoformat(current["generated_at"]):
+        return previous
+    return None
+
+
+def retain_latest_summary(path, current):
+    previous = read(path)
+    if previous is None or earlier_summary(previous, current) is not None:
+        atomic(path, current)
+
+
 def live_execution_config(config):
     live = {**config, "context_window_size": config.get("live_context_window_size", 16384), "live_validation": True}
     context_window(live)  # Validate before reserving an attempt; benchmark config stays unchanged.
@@ -162,7 +174,10 @@ def poll(config):
         base_sha = get_json(API + "/commits/main")["sha"]
         checkout(job / "repo", base_sha)
         compact = summarize(item["latest"], item["validation"])
-        previous = read(ROOT / "previous-summary.json")
+        retained = read(ROOT / "previous-summary.json")
+        previous = earlier_summary(retained, compact)
+        comparison_note = ("The retained summary is from the same or a newer snapshot. Forward change comparison is unavailable for this backlog/repeat input."
+                           if retained and previous is None else None)
         if previous:
             previous = {"run_id": previous["run_id"], "generated_at": previous["generated_at"],
                         "stores": {name: {k: s.get(k) for k in ("status", "current_offers", "eligible_offers", "pending_count", "pending_over_24h")} for name, s in previous["stores"].items()},
@@ -184,7 +199,7 @@ def poll(config):
         atomic(job / "snapshot/review_queue.json", reviews)
         atomic(job / "snapshot/latest.json", item["latest"])
         atomic(job / "snapshot/validation.json", item["validation"])
-        inp = {"policy": POLICY, "current": compact, "previous": previous, "feedback": merge_feedback(item["feedback"], feedback),
+        inp = {"policy": POLICY, "current": compact, "previous": previous, "comparison_note": comparison_note, "feedback": merge_feedback(item["feedback"], feedback),
                "candidate": candidate, "remaining_event_ids": [x["event_id"] for x in candidates if x not in selected],
                "review_candidate": review_candidate, "review_queue_total": len(reviews.get("candidates", [])),
                "coverage_format": "mandatory_field_coverage値は[既知件数,今回取得件数]。分母0の取得率は不明。0%とも100%ともみなさない。",
@@ -224,7 +239,7 @@ def poll(config):
         state["completed"].append(item["id"]); state["queue"].pop(0)
         state["candidate_cursor"] = cursor + len(candidate)
         state["review_cursor"] = review_cursor + len(review_candidate)
-        atomic(ROOT / "previous-summary.json", compact)
+        retain_latest_summary(ROOT / "previous-summary.json", compact)
         atomic(ROOT / "status.json", {"status": "awaiting_codex_review", "job_id": job.name, "finished_at": now()})
     except Exception as exc:
         if (job / "repo/.git").exists():

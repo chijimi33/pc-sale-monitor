@@ -166,6 +166,21 @@ class HandoffTests(unittest.TestCase):
         self.assertEqual(worker.merge_feedback(queued, current), current)
         self.assertEqual(queued, [{"id": "old", "note": "earlier"}])
 
+    def test_backlog_does_not_compare_to_or_replace_a_newer_summary(self):
+        old = {"run_id": "old", "generated_at": "2026-09-18T12:00:00+00:00"}
+        latest = {"run_id": "latest", "generated_at": "2026-09-19T00:00:00+09:00"}
+        newer = {"run_id": "newer", "generated_at": "2026-09-18T16:00:00+00:00"}
+        path = self.root / "previous-summary.json"
+        worker.retain_latest_summary(path, latest)
+        self.assertIsNone(worker.earlier_summary(latest, old))
+        self.assertIsNone(worker.earlier_summary(latest, latest))
+        self.assertIsNone(worker.earlier_summary(None, latest))
+        worker.retain_latest_summary(path, old)
+        self.assertEqual(read(path), latest)
+        self.assertEqual(worker.earlier_summary(old, latest), old)
+        worker.retain_latest_summary(path, newer)
+        self.assertEqual(read(path), newer)
+
     def test_live_context_override_does_not_change_benchmark_config(self):
         config = {"selected_model": "Q4_K_M", "live_context_window_size": 32768}
         self.assertEqual(context_window(config), 16384)
