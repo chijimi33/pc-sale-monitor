@@ -13,6 +13,7 @@ from broker import Broker
 from net import validate
 from worker import urls
 import worker
+import benchmark
 from review import verify
 from benchmark import choose_model, score
 
@@ -167,6 +168,37 @@ class HandoffTests(unittest.TestCase):
     def test_benchmark_counts_rejected_controller_write(self):
         self.broker.call({"op": "replace", "path": "scripts/qa/worker.py", "old": "", "new": "# disallowed"})
         self.assertFalse(score(self.root)["no_prohibited_write_attempt"])
+
+    def test_resumed_comparison_publishes_all_cached_trials(self):
+        config = self.root / "config.json"
+        atomic(config, {"benchmark_id": "cached"})
+        batch = self.root / "benchmarks/cached"
+        for model, seconds in (("Q3_K_XL", 10), ("Q4_K_S", 20), ("Q4_K_M", 30)):
+            for repeat in (1, 2):
+                atomic(batch / f"{model}-{repeat}/manifest.json", {
+                    "model": model, "repeat": repeat, "status": "complete", "input_sha256": "same",
+                    "execution": {"exit_code": 0, "seconds": seconds}, "score": {"passed": True}})
+        # Simulate a stale checkpoint containing only the last newly run trial.
+        atomic(batch / "results.json", [{"model": "stale"}])
+        with patch.object(benchmark, "ROOT", self.root), patch.object(benchmark, "require_root"), patch.object(benchmark, "score", return_value={"passed": True}), patch.object(benchmark, "server") as server, patch.object(sys, "argv", ["benchmark", "--config", str(config)]):
+            benchmark.main()
+            server.assert_not_called()
+        results = read(batch / "results.json")
+        selection = read(batch / "selection.json")
+        self.assertEqual(len(results), 6)
+        self.assertEqual(results, selection["results"])
+        self.assertEqual(selection["selected"], "Q3_K_XL")
+        self.assertEqual(selection["benchmark"], "cached")
+
+    def test_repair_review_detects_self_comparison_and_stale_reuse(self):
+        source = self.root / "repo/sale_monitor/check.py"
+        source.write_text('def qualifies(offer, comparisons, current_run="r"):\n    return True\n')
+        result = score(self.root)
+        self.assertFalse(result["review_cases"][0]["passed"])
+        source.write_text('def qualifies(offer, comparisons, current_run="r"):\n    return False\n')
+        result = score(self.root)
+        self.assertFalse(result["review_cases"][1]["passed"])
+        self.assertFalse(result["review_cases"][2]["passed"])
 
     @unittest.skipUnless(os.name == "nt", "Windows process ownership")
     def test_child_ends_when_controller_exits(self):

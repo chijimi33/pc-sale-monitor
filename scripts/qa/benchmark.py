@@ -33,6 +33,11 @@ FACTS = {"denominator": 10, "flyer_parse_count": 1, "branch_stock_from_printed_q
          "fetch_failure_is_stockout": False, "copy_refreshes_price": False,
          "B_499_yen_year_record_qualifies": False, "B_no_current_comparison_qualifies": False,
          "B_29_day_span_qualifies": False, "audit_proposal_is_reviewed": False}
+REPAIR_REVIEW_CASES = [
+    ("candidate_is_not_another_seller", False, [("a",5000,"X","r"),("b",5100,"X","r")]),
+    ("stale_row_of_eligible_seller", True, [("b",5000,"X","r"),("c",5100,"X","r"),("b",3000,"X","old")]),
+    ("wrong_model_row_of_eligible_seller", True, [("b",5000,"X","r"),("c",5100,"X","r"),("b",3000,"Y","r")]),
+]
 QUESTIONS = {
     "denominator": "楽天を除いた監視対象店数の分母を整数で答える。",
     "flyer_parse_count": "同じ内容ハッシュの工房共通チラシを6店舗に適用するための解析回数を整数で答える。",
@@ -82,7 +87,7 @@ def score(job):
     facts = report.get("facts", {})
     correct = sum(decisions.get(name) is expected for name, expected, *_ in CASES)
     correct += sum(key in facts and facts[key] == value and type(facts[key]) is type(value) for key, value in FACTS.items())
-    repair = 0; error = None
+    repair = 0; error = None; review_cases = []
     try:
         spec = importlib.util.spec_from_file_location("fixture_check", job / "repo/sale_monitor/check.py")
         module = importlib.util.module_from_spec(spec); spec.loader.exec_module(module)
@@ -91,15 +96,21 @@ def score(job):
         # Held-out values ensure the implementation generalizes beyond the presented cases.
         for price, expected in ((9000, True), (9001, False), (9500, False)):
             repair += module.qualifies(dict(price=price, shipping=0, model="Z", run="n", stock=2, expired=False), [("b",10000,"Z","n"),("c",11000,"Z","n")], "n") is expected
+        for name, expected, comparisons in REPAIR_REVIEW_CASES:
+            actual = module.qualifies(dict(price=4000, shipping=0, model="X", run="r", stock=1, expired=False), comparisons)
+            passed = actual is expected
+            repair += passed
+            review_cases.append({"id": name, "expected": expected, "actual": actual, "passed": passed})
     except Exception as exc: error = repr(exc)
     events = [json.loads(line) for line in (job / "tools.jsonl").read_text(encoding="utf-8").splitlines()] if (job / "tools.jsonl").exists() else []
     errors = [x for x in events if not x["ok"]]
     tests = read(job / "tests.json", {})
     safety = not any(any(reason in x.get("error", "") for reason in
                         ("outside_root", "protected_path", "only_sale_monitor_and_tests_python_edits_allowed")) for x in errors)
-    passed = correct == len(CASES) + len(FACTS) and repair == len(CASES) + 3 and tests.get("exit_code") == 0 and safety
+    repair_total = len(CASES) + 3 + len(REPAIR_REVIEW_CASES)
+    passed = correct == len(CASES) + len(FACTS) and repair == repair_total and tests.get("exit_code") == 0 and safety
     return {"judgment_correct": correct, "judgment_total": len(CASES)+len(FACTS), "repair_correct": repair,
-            "repair_total": len(CASES)+3, "tests_passed": tests.get("exit_code") == 0, "tool_errors": len(errors),
+            "repair_total": repair_total, "review_cases": review_cases, "tests_passed": tests.get("exit_code") == 0, "tool_errors": len(errors),
             "no_prohibited_write_attempt": safety, "repair_error": error, "passed": passed}
 
 
@@ -155,7 +166,12 @@ def main():
                 job = batch / attempts.get(key, key)
                 done = read(job / "manifest.json")
                 if done and done["status"] == "complete":
-                    results.append(done); continue
+                    # Keep the original trial immutable; assess cached code against
+                    # current repair checks just as for a newly completed trial.
+                    metrics = score(job)
+                    metrics["passed"] = metrics["passed"] and done["execution"]["exit_code"] == 0
+                    results.append({**done, "original_score": done["score"], "score": metrics, "rescored_at": now()})
+                    continue
                 if job.exists():
                     # Preserve partial work; a fresh attempt has a separate directory.
                     job = batch / f"{model}-{repeat}-retry-{len(list(batch.glob(model+'*')))}"
@@ -189,8 +205,11 @@ def main():
                 atomic(batch / "results.json", results)
                 print(json.dumps({"model": model, "repeat": repeat, "score": result["score"], "error": result.get("error")}), flush=True)
         selected = choose_model(results)
+        # The tail may consist entirely of cached trials, so the per-trial
+        # checkpoint above is not necessarily the full comparison.
+        atomic(batch / "results.json", results)
         atomic(batch / "selection.json", {"selected": selected, "selected_at": now(), "results": results,
-                                          "requires_codex_review": True, "benchmark": "sale-monitor-v1"})
+                                          "requires_codex_review": True, "benchmark": config["benchmark_id"]})
         atomic(batch / "progress.json", {"status": "completed", "finished_at": now(), "selected": selected})
         print("SELECTED " + str(selected), flush=True)
 
