@@ -199,8 +199,8 @@ def poll(config):
         report = read(job / "report.json")
         if execution["exit_code"] or not report or tests.returncode:
             raise RuntimeError(f"agent_or_tests_failed: {execution}, tests={tests.returncode}, report={bool(report)}")
-        finalize(job, "awaiting_codex_review", base_sha=base_sha, run_id=item["latest"]["run_id"], data_sha=item["data_sha"], execution=execution, model=model)
         (job / "report.md").write_text("# Qwen検証報告（Codex未承認）\n\n" + report["summary"] + "\n\n```json\n" + json.dumps(report, ensure_ascii=False, indent=2) + "\n```\n", encoding="utf-8")
+        finalize(job, "awaiting_codex_review", base_sha=base_sha, run_id=item["latest"]["run_id"], data_sha=item["data_sha"], execution=execution, model=model)
         state["completed"].append(item["id"]); state["queue"].pop(0)
         state["candidate_cursor"] = cursor + len(candidate)
         state["review_cursor"] = review_cursor + len(review_candidate)

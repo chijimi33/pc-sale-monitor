@@ -94,6 +94,15 @@ class HandoffTests(unittest.TestCase):
         atomic(self.root / "report.json", {"summary": "changed"})
         with self.assertRaisesRegex(ValueError, "artifact_changed"): verify(self.root)
 
+    def test_manifest_covers_selected_source_evidence(self):
+        atomic(self.root / "snapshot/latest.json", {"run_id": "r"})
+        atomic(self.root / "evidence/page.json", {"source": "verified"})
+        manifest = finalize(self.root, "awaiting_codex_review")
+        self.assertIn("snapshot/latest.json", manifest["files"])
+        self.assertIn("evidence/page.json", manifest["files"])
+        atomic(self.root / "evidence/page.json", {"source": "changed"})
+        with self.assertRaisesRegex(ValueError, "artifact_changed:evidence"): verify(self.root)
+
     def test_disabled_worker_never_calls_network_or_model(self):
         with patch.object(worker, "ROOT", self.root), patch.object(worker, "snapshot") as snapshot:
             worker.poll({"enabled": False})
