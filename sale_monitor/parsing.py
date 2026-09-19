@@ -76,6 +76,10 @@ def stock_status(value: str | None) -> str:
         return "out_of_stock"
     if re.search(r"PreOrder|予約|取寄|取り寄せ|受注", value, re.I):
         return "preorder"
+    # Schema.org explicitly declares availability, but gives no stock count.
+    # A shop's unqualified "在庫限り" label alone still stays unknown.
+    if re.fullmatch(r"(?:https?://schema\.org/)?LimitedAvailability", value.strip(), re.I):
+        return "in_stock"
     if re.search(r"InStock|在庫あり|在庫有|即納|即日出荷|\d+時間以内に出荷|通常\d+.*出荷", value, re.I):
         return "in_stock"
     return "unknown"
@@ -147,7 +151,7 @@ def parse_product(store: str, page: Page, cfg: dict, discovery: dict | None = No
         date = timestamp(expiry)
         if date:
             offer.expires_at = iso(date + timedelta(days=1) - timedelta(seconds=1)) if len(expiry) == 10 else iso(date)
-    evidence_fields = {"json_ld": bool(item), "specifications": data}
+    evidence_fields = {"json_ld": bool(item), "schema_availability": schema_offer.get("availability"), "specifications": data}
     # Scope selectors to the current product, never scrape a page-wide lowest price.
     if store == "ark":
         price_blocks = tree.xpath('//*[@id=$id]/ancestor::li[contains(concat(" ",normalize-space(@class)," ")," itemprice ")][1]', id="item-" + offer.product_id)

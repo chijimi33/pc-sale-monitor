@@ -226,6 +226,35 @@ class Parsers(unittest.TestCase):
         self.assertEqual(o.shipping_yen, 0)
         self.assertEqual(o.jan, "4526541047763")
 
+    def test_limited_schema_availability_preserves_evidence_without_inventing_quantity(self):
+        url = "https://shop.tsukumo.co.jp/goods/4711289500964/"
+        product = {"@type": "Product", "url": url, "name": "Capture card", "sku": "4711289500964", "offers": {"@type": "Offer", "priceCurrency": "JPY", "price": 9000}}
+        for availability in ("https://schema.org/LimitedAvailability", "http://schema.org/LimitedAvailability", "LimitedAvailability"):
+            for label in ("在庫限り", "在庫わずか"):
+                with self.subTest(availability=availability, label=label):
+                    product["offers"]["availability"] = availability
+                    body = '<script type="application/ld+json">' + json.dumps(product) + '</script><p class="stock-status limited">' + label + '</p><li class="free-shipping">送料無料</li>'
+                    parsed = parse_product("tsukumo", Page(url, body.encode(), iso(NOW)), {"default_condition": "new"})
+                    self.assertEqual(parsed.stock, "in_stock")
+                    self.assertIsNone(parsed.listed_quantity)
+                    self.assertEqual(parsed.evidence[0]["fields"]["schema_availability"], availability)
+                    others = [offer(s, 10000, jan=parsed.jan, model=parsed.model, brand=parsed.brand) for s in ("ark", "sofmap")]
+                    self.assertEqual(evaluate(parsed, others, [], NOW)["status"], "accepted")
+                    sold_out = parse_product("tsukumo", Page(url, body.replace(label, "売り切れ").encode(), iso(NOW)), {"default_condition": "new"})
+                    self.assertEqual(sold_out.stock, "out_of_stock")
+
+    def test_limited_label_or_related_schema_does_not_prove_current_stock(self):
+        url = "https://shop.tsukumo.co.jp/goods/4711289500964/"
+        product = {"@type": "Product", "url": url, "name": "Capture card", "sku": "4711289500964", "offers": {"@type": "Offer", "priceCurrency": "JPY", "price": 9000}}
+        related = {"@type": "Product", "url": "https://shop.tsukumo.co.jp/goods/4549576252476/", "name": "Other product", "offers": {"@type": "Offer", "priceCurrency": "JPY", "price": 1000, "availability": "https://schema.org/LimitedAvailability"}}
+        for availability in (None, "https://schema.org/OnlineOnly", "https://example.org/LimitedAvailability", "https://schema.org/NotLimitedAvailability"):
+            with self.subTest(availability=availability):
+                product["offers"]["availability"] = availability
+                body = '<script type="application/ld+json">' + json.dumps([related, product]) + '</script><p class="stock-status limited">在庫限り</p>'
+                parsed = parse_product("tsukumo", Page(url, body.encode(), iso(NOW)), {"default_condition": "new"})
+                self.assertEqual(parsed.stock, "unknown")
+                self.assertEqual(parsed.price_yen, 9000)
+
     def test_ark_conflicting_primary_expiry_requires_review(self):
         body = '''<script type="application/ld+json">{"@type":"Product","name":"MAG A650BNL","sku":"4526541047831","offers":{"@type":"Offer","priceCurrency":"JPY","price":3980,"priceValidUntil":"2026-09-18","availability":"https://schema.org/InStock","itemCondition":"https://schema.org/NewCondition","shippingDetails":{"shippingRate":{"currency":"JPY","value":0}}}}</script><li class="itemprice"><div class="date-diff2">開催期間:10/01 23:59まで</div><div id="item-15601883">3,980円</div></li><li class="itemprice"><div class="date-diff2">開催期間:12/31 23:59まで</div><div id="item-other">980円</div></li>'''
         page = Page("https://www.ark-pc.co.jp/i/15601883/", body.encode(), iso(NOW))
