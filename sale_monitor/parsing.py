@@ -192,6 +192,18 @@ def parse_product(store: str, page: Page, cfg: dict, discovery: dict | None = No
                 "button_disabled": True, "variant_stock": offer.stock}
             offer.stock = "unknown"
             offer.issues.append("purchase_not_available")
+        # BTO detail pages also expose priceIncTax, but it is only a starting
+        # price when the primary PC price panel says 円～. Retain the printed
+        # lower bound as evidence, not as the price of a confirmed configuration.
+        pc_prices = tree.xpath('//input[@id="priceIncTax"]/parent::*[contains(concat(" ",normalize-space(@class)," ")," page_type_pc ")]/div[contains(concat(" ",normalize-space(@class)," ")," productDetail--bottom ")]/div[contains(concat(" ",normalize-space(@class)," ")," productDetail--bottom__contents ")]/dl[contains(concat(" ",normalize-space(@class)," ")," productDetail--bottom__contents--pirce ")]')
+        if len(pc_prices) == 1:
+            currency = first(pc_prices[0], './dd/span[contains(concat(" ",normalize-space(@class)," ")," currency ")]')
+            if currency and re.fullmatch(r"円\s*[～〜~]", currency):
+                evidence_fields["price_basis"] = "starting_price"
+                evidence_fields["printed_price_from_yen"] = integer(first(pc_prices[0], './dd/span[contains(concat(" ",normalize-space(@class)," ")," value ")]'))
+                evidence_fields["price_display"] = clean(pc_prices[0])
+                offer.price_yen = None
+                offer.issues.append("bto_configuration_review_needed")
     if store == "dospara":
         if first(tree, '//*[contains(concat(" ",normalize-space(@class)," ")," free_shipping ")]') == "送料無料":
             offer.shipping_yen = 0

@@ -293,6 +293,38 @@ class Parsers(unittest.TestCase):
         self.assertTrue(related.verified)  # another product must not suppress this one
         self.assertEqual(related.stock, "in_stock")
 
+    def test_koubou_bto_starting_price_is_not_an_exact_offer(self):
+        body = '''<h1>Configured PC</h1><dl><dt>型番</dt><dd>MODEL-PC-FULL</dd><dt>メーカー</dt><dd>iiyama</dd><dt>送料</dt><dd>無料</dd></dl><script>eccube.classCategories={"a":{"b":{"product_code":"MODEL-PC-FULL","price02":299800,"stock_find":true}}};</script><div class="product-detail-container page_type_pc productDetail"><input id="priceIncTax" value="299800"><div class="productDetail--bottom"><div class="productDetail--bottom__contents"><dl class="productDetail--bottom__contents--pirce"><dt>セール価格</dt><dd><span class="value">299,800</span><span class="currency">円～</span></dd></dl></div></div></div>'''
+        def parse(text):
+            return parse_product("koubou", Page("https://www.pc-koubou.jp/products/detail.php?product_id=1203742", text.encode(), iso(NOW)), {"default_condition": "new"})
+        starting = parse(body)
+        self.assertIsNone(starting.price_yen)
+        self.assertEqual(starting.evidence[0]["fields"]["printed_price_from_yen"], 299800)
+        self.assertEqual(starting.evidence[0]["fields"]["price_basis"], "starting_price")
+        self.assertEqual(starting.model, "MODEL-PC-FULL")
+        self.assertIn("bto_configuration_review_needed", starting.issues)
+        self.assertFalse(starting.verified)
+        others = [offer(s, 400000, jan=None, model=starting.model, brand=starting.brand) for s in ("ark", "tsukumo")]
+        decision = evaluate(starting, others, [], NOW)
+        self.assertEqual(decision["status"], "insufficient")
+        self.assertIn("bto_configuration_review_needed", decision["reasons"])
+        prior = {"ever_accepted": True, "facts": {"stock": "in_stock", "accepted": True}}
+        events, state = update_events(starting, decision, prior, NOW)
+        self.assertEqual(events, [])
+        self.assertEqual(state, prior)
+        fixed = parse(body.replace('円～', '円'))
+        self.assertEqual(fixed.price_yen, 299800)
+        self.assertNotIn("bto_configuration_review_needed", fixed.issues)
+        self.assertEqual(evaluate(fixed, others, [], NOW)["status"], "accepted")
+
+    def test_koubou_related_starting_price_does_not_change_primary_fixed_price(self):
+        fixed = '<h1>Cooler</h1><dl><dt>商品型番</dt><dd>MODEL-COOLER</dd></dl><div class="product-detail-container"><input id="priceIncTax" value="6980"></div>'
+        related = '<aside class="page_type_pc"><div class="productDetail--bottom"><div class="productDetail--bottom__contents"><dl class="productDetail--bottom__contents--pirce"><dt>セール価格</dt><dd><span class="value">299,800</span><span class="currency">円～</span></dd></dl></div></div></aside>'
+        parsed = parse_product("koubou", Page("https://www.pc-koubou.jp/products/detail.php?product_id=1183984", (fixed + related).encode(), iso(NOW)), {"default_condition": "new"})
+        self.assertEqual(parsed.price_yen, 6980)
+        self.assertNotIn("bto_configuration_review_needed", parsed.issues)
+        self.assertNotIn("printed_price_from_yen", parsed.evidence[0]["fields"])
+
     def test_pagination_and_sale_scope(self):
         cfg = {"product_patterns": ["/i/"], "sale_patterns": []}
         html = '<li>通常 SSD<a href="/i/1/">SSD</a></li><li>特価 SSD<a href="/i/2/">SSD</a></li><li id="listnavi_next"><a href="/?offset=20">2</a></li>'
