@@ -322,6 +322,27 @@ class Parsers(unittest.TestCase):
         self.assertTrue(related.verified)  # another product must not suppress this one
         self.assertEqual(related.stock, "in_stock")
 
+    def test_koubou_explicit_sold_out_button_overrides_embedded_stock(self):
+        body = '''<h1>Cooler</h1><dl><dt>商品番号</dt><dd>4541995039782</dd><dt>商品型番</dt><dd>CGR-PSDVARGB-B-360</dd><dt>メーカー</dt><dd>COUGAR</dd><dt>送料</dt><dd>無料</dd></dl><input id="priceIncTax" value="6980"><script>eccube.classCategories={"a":{"b":{"product_code":"CGR-PSDVARGB-B-360","price02":6980,"stock_find":true}}};</script><li class="productDetail--main__right--price"><button disabled="disabled">在庫切れです</button></li>'''
+        def parse(text):
+            return parse_product("koubou", Page("https://www.pc-koubou.jp/products/detail.php?product_id=1161910", text.encode(), iso(NOW)), {"default_condition": "new"})
+        sold_out = parse(body)
+        self.assertEqual(sold_out.stock, "out_of_stock")
+        self.assertTrue(sold_out.verified)
+        self.assertEqual(sold_out.evidence[0]["fields"]["purchase_availability"]["variant_stock"], "in_stock")
+        others = [offer(s, 10000, jan=sold_out.jan, model=sold_out.model, brand=sold_out.brand) for s in ("ark", "tsukumo")]
+        decision = evaluate(sold_out, others, [], NOW)
+        self.assertEqual(decision["status"], "insufficient")
+        self.assertIn("stock_out_of_stock", decision["reasons"])
+        events, state = update_events(sold_out, decision, {"ever_accepted": True, "facts": {"stock": "in_stock", "accepted": True}}, NOW)
+        self.assertEqual([e["kind"] for e in events], ["ended"])
+        self.assertTrue(state["ended"])
+        for text in (body.replace('productDetail--main__right--price', 'related-product'),
+                     body.replace('在庫切れです', '購入には確認が必要です'),
+                     body.replace('disabled="disabled">在庫切れです', '>カートに入れる')):
+            with self.subTest(text=text):
+                self.assertEqual(parse(text).stock, "in_stock")
+
     def test_koubou_bto_starting_price_is_not_an_exact_offer(self):
         body = '''<h1>Configured PC</h1><dl><dt>型番</dt><dd>MODEL-PC-FULL</dd><dt>メーカー</dt><dd>iiyama</dd><dt>送料</dt><dd>無料</dd></dl><script>eccube.classCategories={"a":{"b":{"product_code":"MODEL-PC-FULL","price02":299800,"stock_find":true}}};</script><div class="product-detail-container page_type_pc productDetail"><input id="priceIncTax" value="299800"><div class="productDetail--bottom"><div class="productDetail--bottom__contents"><dl class="productDetail--bottom__contents--pirce"><dt>セール価格</dt><dd><span class="value">299,800</span><span class="currency">円～</span></dd></dl></div></div></div>'''
         def parse(text):

@@ -196,6 +196,11 @@ def parse_product(store: str, page: Page, cfg: dict, discovery: dict | None = No
                 "button_disabled": True, "variant_stock": offer.stock}
             offer.stock = "unknown"
             offer.issues.append("purchase_not_available")
+        elif any(clean(button) == "在庫切れです" for button in buttons):
+            evidence_fields["purchase_availability"] = {
+                "source": "disabled_primary_purchase_button", "button_text": "在庫切れです",
+                "button_disabled": True, "variant_stock": offer.stock}
+            offer.stock = "out_of_stock"
         # BTO detail pages also expose priceIncTax, but it is only a starting
         # price when the primary PC price panel says 円～. Retain the printed
         # lower bound as evidence, not as the price of a confirmed configuration.
