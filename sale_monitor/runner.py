@@ -43,6 +43,10 @@ class Collector:
         if isinstance(getattr(self.client, "retry_after", None), dict):
             for host, until in self.state.get("retry_after", {}).items():
                 self.client.retry_after[host] = max(self.client.retry_after.get(host, 0), until)
+        if isinstance(getattr(self.client, "transport_retry_after", None), dict):
+            for host, failure in self.state.get("transport_retry_after", {}).items():
+                if failure["until"] > self.client.transport_retry_after.get(host, {}).get("until", 0):
+                    self.client.transport_retry_after[host] = failure.copy()
         self.new_run = self.state.get("run_id") != run_id
         self.state["run_id"] = run_id
         self.state["started_at"] = iso()
@@ -58,6 +62,8 @@ class Collector:
         self.state["request_count"] = self.client.count
         if isinstance(getattr(self.client, "retry_after", None), dict):
             self.state["retry_after"] = {host: until for host, until in self.client.retry_after.items() if until > time.time()}
+        if isinstance(getattr(self.client, "transport_retry_after", None), dict):
+            self.state["transport_retry_after"] = {host: failure.copy() for host, failure in self.client.transport_retry_after.items() if failure["until"] > time.time()}
         self.disk.save(self.name, self.state)
 
     def enqueue(self, task: dict):
@@ -138,7 +144,7 @@ class Collector:
                 try:
                     self.pages[url] = self.client.get(url)
                 except FetchError as exc:
-                    if str(exc) == "rate_limited_retry_later" or (exc.page is not None and confirmed_empty_search(self.store, exc.page)) or not self.cfg.get("browser_fallback"):
+                    if str(exc) == "rate_limited_retry_later" or str(exc).startswith("transport_retry_later:") or (exc.page is not None and confirmed_empty_search(self.store, exc.page)) or not self.cfg.get("browser_fallback"):
                         raise
                     self.pages[url] = self.client.rendered(url)
             except Exception as exc:

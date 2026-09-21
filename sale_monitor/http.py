@@ -57,11 +57,19 @@ class Client:
         self.timeout = timeout
         self.last_request = {}
         self.retry_after = {}
+        self.transport_retry_after = {}
+        self.transport_failed_urls = {}
         self.count = 0
         self.errors = []
         self.opener = build_opener(SafeRedirect())
 
     def wait_for_host(self, host: str):
+        failure = self.transport_retry_after.get(host)
+        if failure:
+            if failure["until"] > time.time():
+                raise FetchError("transport_retry_later:" + failure["reason"])
+            self.transport_retry_after.pop(host, None)
+            self.transport_failed_urls.pop(host, None)
         remaining = self.retry_after.get(host, 0) - time.time()
         if remaining > 60:
             raise FetchError("rate_limited_retry_later")
@@ -97,8 +105,11 @@ class Client:
                 self.last_request[host] = time.monotonic()
                 request = Request(url, data=data, method=method, headers={"User-Agent": "PCSaleMonitor/0.1 (+https://github.com/chijimi33/pc-sale-monitor)", "Accept-Language": "ja,en;q=0.5", "Cache-Control": "no-cache", **(headers or {})})
                 with self.opener.open(request, timeout=self.timeout) as result:
-                    return Page(result.url, result.read(), iso(), content_type=result.headers.get("Content-Type", ""))
+                    page = Page(result.url, result.read(), iso(), content_type=result.headers.get("Content-Type", ""))
+                self.transport_failed_urls.pop(host, None)
+                return page
             except HTTPError as exc:
+                self.transport_failed_urls.pop(host, None)
                 if exc.code == 404:
                     page = Page(exc.url, exc.read(), iso(), content_type=(exc.headers or {}).get("Content-Type", ""), status=404)
                     raise FetchError("http_404", page=page) from exc
@@ -115,6 +126,14 @@ class Client:
                 raise
             except (OSError, TimeoutError) as exc:
                 if attempt == 2:
+                    # One broken URL is not a host outage. Only defer after
+                    # exhausted retries on three distinct URLs without a
+                    # response in between; keep the original transport cause.
+                    if isinstance(exc, (ConnectionError, TimeoutError)):
+                        failed = self.transport_failed_urls.setdefault(host, set())
+                        failed.add(url)
+                        if len(failed) >= 3:
+                            self.transport_retry_after[host] = {"until": time.time() + 300, "reason": type(exc).__name__}
                     raise FetchError(type(exc).__name__) from exc
                 time.sleep(2 ** (attempt + 1))
         raise FetchError("fetch_failed")

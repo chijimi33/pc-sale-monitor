@@ -49,6 +49,9 @@ def health(state: dict, now) -> dict:
             "known_offers": len(offers), "current_offers": len(current), "eligible_offers": sum(not o.errors(now) for o in current),
             "mandatory_field_coverage": coverage, "pending_count": len(queue), "pending_by_type": dict(queue_types), "oldest_pending_at": iso(min(created)) if created else None,
             "retry_after_epoch_seconds": state.get("retry_after", {}),
+            "transport_retry_after": state.get("transport_retry_after", {}),
+            "request_count": state.get("request_count") if state.get("status") != "job_missing" else None,
+            "request_count_scope": "http_attempts_plus_browser_navigations; browser_subresources_excluded",
             "comparison_no_results": sum(r.get("result") == "no_results" and r.get("observed_run_id") == state.get("run_id") for r in state.get("comparison_searches", {}).values()),
             "pending_over_24h": sum(now - t > timedelta(hours=24) for t in created), "errors": summarize_errors(state.get("errors", [])),
             "discovery_gaps": state.get("discovery_gaps", []), "source_metadata": state.get("source_metadata"), "flyer": state.get("flyer")}

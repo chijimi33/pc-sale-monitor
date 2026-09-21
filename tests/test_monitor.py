@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import datetime, timedelta
+from http.client import RemoteDisconnected
 import json
 from pathlib import Path
 import tempfile
@@ -14,7 +15,7 @@ from sale_monitor.flyers import collect_flyer, extract_candidates
 from sale_monitor.http import Client, FetchError, Page, SafeRedirect
 from sale_monitor.models import BRANCHES, STORES, UTC, Offer, allowed_url, iso, same_product
 from sale_monitor.parsing import canonical, confirmed_empty_search, discover, parse_product
-from sale_monitor.reporting import aggregate, summarize_errors, validation
+from sale_monitor.reporting import aggregate, health, summarize_errors, validation
 from sale_monitor.runner import Collector
 from sale_monitor.storage import Store
 
@@ -540,6 +541,83 @@ class Persistence(unittest.TestCase):
             with patch.object(client.opener, "open") as op:
                 with self.assertRaises(FetchError): client.get("https://a.example/other")
                 op.assert_not_called()
+
+    def test_transport_outage_defers_host_preserves_queue_and_failed_prices(self):
+        cfg = {"stores": {"tsukumo": {"adapter": "html", "seed_urls": []}}}
+        with tempfile.TemporaryDirectory() as folder, patch("sale_monitor.http.time.time", return_value=1000), patch("sale_monitor.http.time.sleep"):
+            client = Client(delay=0)
+            root = Path(folder)
+            c = Collector(root, "tsukumo", cfg, "run1", client)
+            previous = offer("tsukumo", url="https://shop.tsukumo.co.jp/goods/0/", observed_run_id="old")
+            c.state["offers"][previous.key] = previous.to_dict()
+            for n in range(5):
+                c.enqueue({"type": "product", "url": f"https://shop.tsukumo.co.jp/goods/{n}/", "kind": "sale"})
+            with patch.object(client.opener, "open", side_effect=RemoteDisconnected("private exception detail")) as op:
+                state = c.collect()
+            self.assertEqual(op.call_count, 9)
+            self.assertEqual(state["request_count"], 9)
+            self.assertEqual(len(state["queue"]), 5)
+            self.assertEqual(len(state["errors"]), 5)
+            self.assertEqual(sum(e["reason"] == "RemoteDisconnected" for e in state["errors"]), 3)
+            self.assertEqual(sum(e["reason"] == "transport_retry_later:RemoteDisconnected" for e in state["errors"]), 2)
+            self.assertEqual(state["status"], "partial")
+            self.assertFalse(state["cycle_complete"])
+            retained = state["offers"][previous.key]
+            self.assertEqual(retained["stock"], "in_stock")
+            self.assertEqual(retained["observed_run_id"], "old")
+            self.assertIn("latest_fetch_failed", retained["issues"])
+            self.assertNotIn("private exception detail", json.dumps(state))
+            self.assertEqual(health(state, NOW)["request_count"], 9)
+            self.assertEqual(health(state, NOW)["current_offers"], 0)
+            self.assertIsNone(health({**state, "status": "job_missing"}, NOW)["request_count"])
+            self.assertIsNone(health({}, NOW)["request_count"])
+            resumed = Collector(root, "tsukumo", cfg, "run2")
+            self.assertEqual(resumed.client.transport_retry_after["shop.tsukumo.co.jp"], {"until": 1300, "reason": "RemoteDisconnected"})
+            with patch.object(resumed.client.opener, "open") as op, patch("playwright.sync_api.sync_playwright") as browser:
+                with self.assertRaisesRegex(FetchError, "transport_retry_later:RemoteDisconnected"):
+                    resumed.client.get("https://shop.tsukumo.co.jp/goods/new/")
+                resumed.client.browser = True
+                with self.assertRaises(FetchError):
+                    resumed.client.rendered("https://shop.tsukumo.co.jp/goods/new/")
+                op.assert_not_called()
+                browser.assert_not_called()
+            response = MagicMock(); response.__enter__.return_value = response
+            response.url = "https://other.example/ok"; response.read.return_value = b"ok"; response.headers = {}
+            with patch.object(resumed.client.opener, "open", return_value=response):
+                self.assertEqual(resumed.client.get(response.url).body, b"ok")
+            with patch("sale_monitor.http.time.time", return_value=1301), patch.object(resumed.client.opener, "open", return_value=response):
+                self.assertEqual(resumed.client.get("https://shop.tsukumo.co.jp/recovered").body, b"ok")
+                resumed.save()
+            self.assertEqual(resumed.state["transport_retry_after"], {})
+
+    def test_single_broken_url_and_successful_response_do_not_defer_host(self):
+        client = Client(delay=0)
+        with patch("sale_monitor.http.time.sleep"), patch.object(client.opener, "open", side_effect=RemoteDisconnected()):
+            for _ in range(4):
+                with self.assertRaises(FetchError): client.get("https://a.example/broken")
+        self.assertEqual(client.transport_retry_after, {})
+        response = MagicMock(); response.__enter__.return_value = response
+        response.url = "https://a.example/ok"; response.read.return_value = b"ok"; response.headers = {}
+        with patch.object(client.opener, "open", return_value=response):
+            client.get(response.url)
+        self.assertNotIn("a.example", client.transport_failed_urls)
+        with patch("sale_monitor.http.time.sleep"), patch.object(client.opener, "open", side_effect=RemoteDisconnected()):
+            for n in range(2):
+                with self.assertRaises(FetchError): client.get(f"https://a.example/new/{n}")
+        self.assertEqual(client.transport_retry_after, {})
+        with patch.object(client.opener, "open", side_effect=HTTPError("https://a.example/deny", 403, "denied", {}, None)):
+            with self.assertRaisesRegex(FetchError, "http_403"): client.get("https://a.example/deny")
+        self.assertNotIn("a.example", client.transport_failed_urls)
+
+    def test_transient_retry_recovery_remains_available_without_host_deferral(self):
+        client = Client(delay=0)
+        response = MagicMock(); response.__enter__.return_value = response
+        response.url = "https://a.example/ok"; response.read.return_value = b"ok"; response.headers = {}
+        with patch("sale_monitor.http.time.sleep"), patch.object(client.opener, "open", side_effect=[RemoteDisconnected(), TimeoutError(), response]) as op:
+            self.assertEqual(client.get(response.url).body, b"ok")
+        self.assertEqual(op.call_count, 3)
+        self.assertEqual(client.transport_retry_after, {})
+        self.assertEqual(client.transport_failed_urls, {})
 
     def test_comparison_backlog_does_not_starve_sale_price_refresh(self):
         cfg = {"stores": {"ark": {"adapter": "html", "seed_urls": []}}}
