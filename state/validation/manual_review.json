@@ -1,5 +1,5 @@
 {
-  "audited_event_count": 2,
+  "audited_event_count": 3,
   "audits": [
     {
       "delivery_status": "unconfirmed",
@@ -165,13 +165,108 @@
       ],
       "source_run_id": "35056906624-1",
       "status": "passed"
+    },
+    {
+      "event_id": "f9237c3d654ce1ecbab7896366f8d125",
+      "offer_key": "aecd43669121833aaaf88379",
+      "product": "GameSir G7 Pro Black",
+      "source_run_id": "35616531735-1",
+      "source_data_sha": "f3ee55fe8663d4c66629cbd97722dbb8cd273d55",
+      "reviewed_at": "2026-09-21T20:09:20.491202+00:00",
+      "status": "passed",
+      "delivery_status": "unconfirmed",
+      "findings": [],
+      "scope": "Payment-basis decision in the pinned collection independently checked against three later primary pages. Fresh source checks are separately dated and are not inserted into that collection. No claim of market-wide lowest price, points verification or delivery.",
+      "price_check": {
+        "candidate_payment_yen": 9980,
+        "lowest_other_payment_yen": 11810,
+        "difference_yen": 1830,
+        "difference_percent": 15.4953,
+        "independent_other_sellers": 2,
+        "rule": "A",
+        "status": "supported",
+        "points_basis": "not_verified"
+      },
+      "evidence": [
+        {
+          "store": "koubou",
+          "url": "https://www.pc-koubou.jp/products/detail.php?product_id=1171083",
+          "observed_at": "2026-09-21T20:04:08.937965+00:00",
+          "price_yen": 9980,
+          "shipping_yen": 0,
+          "stock": "in_stock",
+          "jan": "6936685220409",
+          "model": "GameSir G7 Pro Black",
+          "condition": "new",
+          "expires_at": null,
+          "body_sha256": "2f202bf3e7ffabbf16ee5e271308ed8a96edf70ba6f6b9b7ab5d4c3a5a5e0b4e",
+          "content_hash": "93b75c0619023be4c2b540d5498372e431908ce3027db5fbd0d96e1030c2dddb",
+          "condition_basis": "Configured new-catalog rule; standard product listing without used/outlet designation (inference)",
+          "verification": "Codex inspected primary product price, identity, availability and free shipping; optional warranty and related products excluded."
+        },
+        {
+          "store": "tsukumo",
+          "url": "https://shop.tsukumo.co.jp/goods/6936685220409/",
+          "observed_at": "2026-09-21T20:04:10.008055+00:00",
+          "price_yen": 11810,
+          "shipping_yen": 0,
+          "stock": "in_stock",
+          "jan": "6936685220409",
+          "model": null,
+          "condition": "new",
+          "expires_at": null,
+          "body_sha256": "08d00664edc09088122682a654d29ea23aeee83d7e566d6cc1e980a03f42a7bd",
+          "content_hash": "3af9f8108a4fa07278a56ebdeab01ce09104743235b225f9e4f8b13a09e8a0fa",
+          "condition_basis": "Primary Product JSON-LD NewCondition",
+          "verification": "Codex inspected primary product price, identity, availability and free shipping; optional warranty and related products excluded."
+        },
+        {
+          "store": "ark",
+          "url": "https://www.ark-pc.co.jp/i/50286934/",
+          "observed_at": "2026-09-21T20:04:10.476566+00:00",
+          "price_yen": 12989,
+          "shipping_yen": 0,
+          "stock": "in_stock",
+          "jan": "6936685220409",
+          "model": null,
+          "condition": "new",
+          "expires_at": "2026-09-25T14:59:59+00:00",
+          "body_sha256": "f47ec01248b9ece779f18bcbf962859fba2fbf6ced6b74f651a3e8bc735681f1",
+          "content_hash": "7035240425862a1d8b1bd1b4b7fd54e5ae73bfb109e2ba93303decf4d7d1542d",
+          "condition_basis": "Primary Product JSON-LD NewCondition",
+          "verification": "Codex inspected primary product price, identity, availability and free shipping; optional warranty and related products excluded."
+        }
+      ],
+      "seller_evidence": [
+        {
+          "store": "koubou",
+          "source_url": "https://www.pc-koubou.jp/shop_guide/tokusyouhou.php",
+          "checked_at": "2026-09-21T20:07:25.463897+00:00",
+          "sha256": "62990c2219716c1eabea8527209bd47909f10e0554a9e4139ab7849415415b2d",
+          "seller": "株式会社ユニットコム"
+        },
+        {
+          "store": "tsukumo",
+          "source_url": "https://shop.tsukumo.co.jp/shopping-help/service/tokusho.html",
+          "checked_at": "2026-09-21T20:07:25.118495+00:00",
+          "sha256": "f1130043bdbc1b2975f7a61fa423dad05890e8d30438cf463fa394f8577dddae",
+          "seller": "株式会社ヤマダデンキ"
+        },
+        {
+          "store": "ark",
+          "source_url": "https://www.ark-pc.co.jp/info/law.html",
+          "checked_at": "2026-09-21T20:08:06.183030+00:00",
+          "sha256": "2f09c25a6171ff77f56848a1272743b36fa10f88a90c2abbc1ea5b3428d75f50",
+          "seller": "株式会社アーク"
+        }
+      ]
     }
   ],
   "counting_policy": "Distinct events with unresolved findings are not counted as completed reviews. This record does not confirm delivery.",
   "false_positive_count": 0,
   "needs_review_count": 1,
-  "reviewed_at": "2026-09-16T08:14:36.855725+00:00",
-  "reviewed_count": 1,
+  "reviewed_at": "2026-09-21T20:09:20.491202+00:00",
+  "reviewed_count": 2,
   "reviewer": "ChatGPT/Codex",
   "schema_version": 1
 }
