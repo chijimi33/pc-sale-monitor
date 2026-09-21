@@ -8,7 +8,7 @@ from urllib.parse import parse_qsl, urlencode, urljoin, urlsplit, urlunsplit
 
 from lxml import html
 
-from .http import Page
+from .http import FetchError, Page
 from .models import JST, Offer, allowed_url, digest, iso, timestamp, valid_jan
 
 SALE = re.compile(r"特価|セール|タイムセール|値下げ|お買い得|在庫限り|数量限定|限定価格|処分|sale|clearance", re.I)
@@ -113,6 +113,11 @@ def json_products(tree) -> list[dict]:
 
 
 def parse_product(store: str, page: Page, cfg: dict, discovery: dict | None = None) -> Offer:
+    location = urlsplit(page.url)
+    # Sofmap redirects unavailable product requests to an HTTP-200 error page.
+    # Keep the original product task pending; the error URL is not a new item.
+    if store == "sofmap" and location.hostname in ("www.sofmap.com", "sofmap.com") and location.path.startswith("/error/"):
+        raise FetchError("product_error_page", page=page)
     tree = document(page)
     data = fields(tree)
     offer = Offer(store, product_id(page.url), canonical(page.url), seller_id=store,

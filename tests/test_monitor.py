@@ -396,6 +396,52 @@ class Parsers(unittest.TestCase):
 
 
 class Persistence(unittest.TestCase):
+    def test_product_error_redirect_retains_original_tasks_and_old_prices_as_history(self):
+        cfg = {"stores": {"sofmap": {"adapter": "html", "seed_urls": [], "default_condition": "new"}}}
+        error_url = "https://www.sofmap.com/error/exec/_/isprdt=true"
+        original_urls = [f"https://www.sofmap.com/product_detail.aspx?sku={sku}" for sku in (1, 2)]
+        class Fake:
+            count = 0
+            def get(self, url):
+                self.count += 1
+                return Page(error_url, b"<html><title>error</title></html>", iso(NOW))
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            c = Collector(root, "sofmap", cfg, "run1", Fake())
+            old = offer("sofmap", url=original_urls[0], observed_run_id="old")
+            c.state["offers"][old.key] = old.to_dict()
+            created = iso(NOW - timedelta(days=2))
+            for url in original_urls:
+                c.enqueue({"type": "product", "url": url, "kind": "sale", "created_at": created})
+            state = c.collect()
+            self.assertEqual(state["status"], "partial")
+            self.assertFalse(state["cycle_complete"])
+            self.assertEqual({q["url"] for q in state["queue"].values()}, set(original_urls))
+            self.assertTrue(all(q["created_at"] == created for q in state["queue"].values()))
+            self.assertTrue(all(q["last_error"] == "product_error_page" for q in state["queue"].values()))
+            self.assertEqual(set(state["offers"]), {old.key})
+            retained = state["offers"][old.key]
+            self.assertEqual(retained["price_yen"], old.price_yen)
+            self.assertEqual(retained["stock"], "in_stock")
+            self.assertEqual(retained["observed_run_id"], "old")
+            self.assertIn("latest_fetch_failed", retained["issues"])
+            report = aggregate(root, root / "public", "run1", NOW)
+            self.assertEqual(report["stores"]["sofmap"]["current_offers"], 0)
+            self.assertEqual(report["stores"]["sofmap"]["pending_over_24h"], 2)
+            self.assertEqual(Store(root).load("public/evidence.json", {})["decisions"], [])
+            self.assertEqual(Store(root).load("public/notifications.json", {})["events"], [])
+
+    def test_sofmap_error_page_is_rejected_before_related_product_metadata(self):
+        body = b'<h1>Related product</h1><script type="application/ld+json">{"@type":"Product","name":"Related","sku":"4537694358347","offers":{"price":9000,"priceCurrency":"JPY"}}</script>'
+        page = Page("https://www.sofmap.com/error/exec/_/isprdt=true", body, iso(NOW))
+        with self.assertRaisesRegex(FetchError, "product_error_page") as caught:
+            parse_product("sofmap", page, {"default_condition": "new"})
+        self.assertIs(caught.exception.page, page)
+        normal = Page("https://www.sofmap.com/product_detail.aspx?sku=123&error=0", body, iso(NOW))
+        parsed = parse_product("sofmap", normal, {"default_condition": "new"})
+        self.assertEqual(parsed.price_yen, 9000)
+        self.assertEqual(parsed.product_id, "123")
+
     def test_error_summary_preserves_all_failures_in_separate_details(self):
         errors = [{"reason": "rate_limited_retry_later", "url": f"https://www.ark-pc.co.jp/i/{n}/"} for n in range(500)]
         errors.extend([errors[0].copy(), {"reason": "http_403"}, {"reason": "http_403"}])
