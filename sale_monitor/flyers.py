@@ -96,7 +96,12 @@ def collect_flyer(client: Client, state: Store, cfg: dict, review_root: Path) ->
     raw_text = clean(scope)
     record = {"edition": edition, "version": edition[:12], "url": page.url, "assets": assets, "checked_at": page.observed_at,
               "period": None, "period_text": raw_text[:6000], "branches": list(BRANCHES), "status": "review_needed"}
-    reviewed = Store(review_root).load(edition + ".json", None)
+    # Reviews are persistent monitoring data. Keep the repository directory as
+    # a fallback for existing editions, but never substitute an older review
+    # when a state-branch record is present and fails the checks below.
+    reviewed = state.load(f"flyers/reviews/{edition}.json", None)
+    if reviewed is None:
+        reviewed = Store(review_root).load(edition + ".json", None)
     offers = []
     if reviewed and reviewed.get("edition") == edition and reviewed.get("reviewed_at") and reviewed.get("reviewer"):
         record["period"] = reviewed.get("period")
@@ -113,6 +118,10 @@ def collect_flyer(client: Client, state: Store, cfg: dict, review_root: Path) ->
                 record["review_issues"].append("product_asset_not_reviewed")
                 continue
             key = row.get("jan") or row.get("model") or digest(row.get("title"))
+            if row.get("variant"):
+                # Capacity and software bundles may share a printed model.
+                # Price is deliberately excluded so a price change keeps its ID.
+                key = digest([key, row["variant"]])
             offer = Offer("koubou", digest([edition, key, row.get("sale_date")])[:24], page.url, channel="store_flyer", seller_id="koubou",
                           title=row.get("title", ""), model=row.get("model"), jan=row.get("jan"), brand=row.get("brand"), condition=row.get("condition"), variant=row.get("variant"),
                           price_yen=row.get("price_yen"), shipping_yen=0, observed_at=page.observed_at, stock="unknown", verified=True,
@@ -125,6 +134,10 @@ def collect_flyer(client: Client, state: Store, cfg: dict, review_root: Path) ->
                 offer.price_yen = None
                 if "starting_price_not_final_price" not in offer.issues:
                     offer.issues.append("starting_price_not_final_price")
+            if row.get("price_basis") == "configuration_example":
+                offer.price_yen = None
+                if "bto_configuration_review_needed" not in offer.issues:
+                    offer.issues.append("bto_configuration_review_needed")
             offer.branches = [branch for branch in BRANCHES if not offer.branch_overrides.get(branch, {}).get("excluded")]
             if any(v.get("price_yen") is not None and v["price_yen"] != offer.price_yen or v.get("conditions") for v in offer.branch_overrides.values()):
                 offer.issues.append("store_specific_conditions_review_needed")
@@ -132,7 +145,10 @@ def collect_flyer(client: Client, state: Store, cfg: dict, review_root: Path) ->
             if start is None or start > utcnow():
                 offer.issues.append("sale_not_started_or_date_unknown")
             offer.evidence = [{"url": page.url, "checked_at": page.observed_at, "method": "reviewed_common_flyer", "fields": {"edition": edition, "assets": [a for a in assets if a["content_hash"] == row["source_asset_hash"]], "reviewed_at": reviewed["reviewed_at"], "sale_date": row.get("sale_date"), "listed_quantity_scope": "common_flyer_not_store_inventory"}}]
-            offer.evidence[0]["fields"].update({key: row[key] for key in ("price_basis", "printed_price_from_yen", "review_notes") if key in row})
+            offer.evidence[0]["fields"].update({key: row[key] for key in (
+                "price_basis", "printed_price_from_yen", "printed_configuration_price_yen",
+                "source_entry_id", "source_model_text", "shared_quantity_group", "review_notes",
+            ) if key in row})
             # A store-specific confirmation is allowed only with its own timestamp
             # and evidence. Shared printed quantity cannot satisfy this condition.
             from .models import fresh

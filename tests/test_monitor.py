@@ -863,6 +863,72 @@ class Persistence(unittest.TestCase):
 
 
 class Flyers(unittest.TestCase):
+    def test_persistent_review_keeps_variants_separate_and_ids_stable(self):
+        from hashlib import sha256
+        from sale_monitor.models import digest
+        body = b"same-model-different-bundles"
+        content_hash = sha256(body).hexdigest()
+        edition = digest([content_hash])
+        class Fake:
+            def get(self, url):
+                return Page(url, body if url.endswith(".jpg") else b'<main><img src="/flyer.jpg"></main>', iso(NOW))
+        with tempfile.TemporaryDirectory() as folder, patch("sale_monitor.flyers.extract_asset", return_value={"text": "", "status": "review_needed"}) as parse:
+            root = Path(folder); disk = Store(root)
+            row = {"title": "PC", "brand": "Brand", "model": "PC-A", "source_asset_hash": content_hash,
+                   "sale_date": "2026-09-12", "price_yen": 100000, "listed_quantity": 150}
+            review = {"edition": edition, "reviewer": "test", "reviewed_at": iso(NOW),
+                      "reviewed_asset_hashes": [content_hash], "products": [
+                          dict(row, variant="base"), dict(row, variant="Office bundle", price_yen=129000)]}
+            disk.save(f"flyers/reviews/{edition}.json", review)
+            keys = set()
+            for branch in BRANCHES:
+                offers, record = collect_flyer(Fake(), disk, {"index_url": "https://a.example/"}, root/"reviews")
+                self.assertEqual(record["status"], "reviewed")
+                self.assertEqual(len({o.key for o in offers}), 2)
+                self.assertFalse(same_product(*offers))
+                keys.update(o.key for o in offers)
+                for item in offers:
+                    self.assertEqual(item.branches, list(BRANCHES))
+                    self.assertEqual(item.stock, "unknown")
+                    self.assertEqual(item.branch_overrides, {})
+            self.assertEqual(len(keys), 2)
+            self.assertEqual(parse.call_count, 1)
+            review["products"][0]["price_yen"] = 90000
+            disk.save(f"flyers/reviews/{edition}.json", review)
+            offers, _ = collect_flyer(Fake(), disk, {"index_url": "https://a.example/"}, root/"reviews")
+            self.assertEqual({o.key for o in offers}, keys)
+            self.assertEqual(offers[0].price_yen, 90000)
+            # A wrong-edition state record cannot borrow an older config review.
+            Store(root/"reviews").save(edition+".json", review)
+            disk.save(f"flyers/reviews/{edition}.json", dict(review, edition="other"))
+            offers, record = collect_flyer(Fake(), disk, {"index_url": "https://a.example/"}, root/"reviews")
+            self.assertEqual(offers, [])
+            self.assertEqual(record["status"], "review_needed")
+
+    def test_configuration_example_is_not_a_confirmed_price(self):
+        from hashlib import sha256
+        from sale_monitor.models import digest
+        body = b"configuration-example"
+        content_hash = sha256(body).hexdigest()
+        edition = digest([content_hash])
+        class Fake:
+            def get(self, url):
+                return Page(url, body if url.endswith(".jpg") else b'<main><img src="/flyer.jpg"></main>', iso(NOW))
+        with tempfile.TemporaryDirectory() as folder, patch("sale_monitor.flyers.extract_asset", return_value={"text": "", "status": "review_needed"}):
+            root = Path(folder); disk = Store(root)
+            row = {"title": "BTO PC", "model": "PC-A", "condition": "new", "source_asset_hash": content_hash,
+                   "sale_date": "2026-09-12", "price_basis": "configuration_example", "price_yen": 159800,
+                   "printed_configuration_price_yen": 159800, "source_entry_id": "101",
+                   "branch_overrides": {BRANCHES[0]: {"stock": "in_stock", "source_url": "https://a.example/store", "checked_at": iso()}}}
+            disk.save(f"flyers/reviews/{edition}.json", {"edition": edition, "reviewer": "test", "reviewed_at": iso(NOW),
+                "reviewed_asset_hashes": [content_hash], "products": [row]})
+            offers, _ = collect_flyer(Fake(), disk, {"index_url": "https://a.example/"}, root/"reviews")
+            self.assertIsNone(offers[0].price_yen)
+            self.assertIsNone(offers[0].payment)
+            self.assertIn("bto_configuration_review_needed", evaluate(offers[0], [], [], NOW)["reasons"])
+            self.assertEqual(offers[0].evidence[0]["fields"]["printed_configuration_price_yen"], 159800)
+            self.assertEqual(offers[0].evidence[0]["fields"]["source_entry_id"], "101")
+
     def test_monthly_credit_ad_is_not_a_product_price(self):
         self.assertEqual(extract_candidates("ゲーミングPCも月々3,000円から!"), [])
         self.assertEqual(extract_candidates("分割支払手数料0円"), [])

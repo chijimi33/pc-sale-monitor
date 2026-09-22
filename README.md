@@ -90,7 +90,9 @@ Yahoo!はGitHubリポジトリの **Settings → Secrets and variables → Actio
 
 枚方・大阪日本橋・東大阪・なんばアウトレット別館・堺・岸和田へ同じ版を適用します。店舗別に画像を取得・OCRしません。共通掲載数量は `listed_quantity`、店舗独自の証拠は `branch_overrides` に分離します。通販と店舗は別販売条件です。
 
-OCRはTesseractの日本語・英語モデルを使用し、Actionsでインストールします。PDFの文字層があれば直接抽出します。読取疑義は `review_queue` に残し、確認した内容だけを `config/flyer_reviews/<edition>.json` へ登録します。例は `docs/flyer-review.example.json` です。版だけでなく確認した画像のハッシュを商品ごとに記録し、一部の画像だけの確認は `partially_reviewed` と表示します。ハッシュが変わると古い確認内容は適用されません。分割払いの月額や手数料は商品価格候補にしません。
+OCRはTesseractの日本語・英語モデルを使用し、Actionsでインストールします。PDFの文字層があれば直接抽出します。読取疑義は `review_queue` に残し、確認した内容だけをデータブランチの `state/flyers/reviews/<edition>.json` へ登録します。既存の `config/flyer_reviews/<edition>.json` はデータブランチに同じ版の記録がない場合の参照先として維持します。例は `docs/flyer-review.example.json` です。版だけでなく確認した画像のハッシュを商品ごとに記録し、一部の画像だけの確認は `partially_reviewed` と表示します。ハッシュが変わると古い確認内容は適用されません。分割払いの月額や手数料は商品価格候補にしません。
+
+同じ型番でも容量・Officeセット等が違う場合は `variant` を指定して別の販売条件として保存します。商品IDに価格を含めないため、価格変更は同じ条件の履歴になります。BTOの構成例は `price_basis: configuration_example` とし、掲載金額を `printed_configuration_price_yen` に保存して確定価格はnullにします。確認済み画像でも、店舗在庫や完全型番等が未確認ならその理由を残します。
 
 店舗在庫が未確認の場合は「店舗在庫要確認」です。掲載数量だけでは在庫ありと判定しません。店舗別価格・独自条件の差異がある場合、共通価格をその店舗へ誤適用しないよう、該当店舗を除外して別途確認します。
 
