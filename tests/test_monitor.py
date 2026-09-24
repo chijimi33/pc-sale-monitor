@@ -636,6 +636,86 @@ class Persistence(unittest.TestCase):
                 resumed.save()
             self.assertEqual(resumed.state["transport_retry_after"], {})
 
+    def test_page_failure_expires_for_later_search_without_refreshing_old_prices(self):
+        home = "https://shop.tsukumo.co.jp/"
+        cfg = {"stores": {"tsukumo": {"adapter": "html", "seed_urls": [home]}}}
+        with tempfile.TemporaryDirectory() as folder, patch("sale_monitor.http.time.time", return_value=1000) as clock, patch("sale_monitor.http.time.sleep"):
+            client = Client(delay=0)
+            c = Collector(Path(folder), "tsukumo", cfg, "run1", client)
+            old = offer("tsukumo", observed_run_id="old", issues=["latest_fetch_failed"])
+            c.state["offers"][old.key] = old.to_dict()
+            origin = iso(NOW-timedelta(days=2))
+            task = {"type": "search", "query": "SSD", "kind": "comparison", "created_at": origin}
+            c.enqueue(task)
+            with patch.object(client.opener, "open", side_effect=RemoteDisconnected()) as op:
+                with self.assertRaisesRegex(FetchError, "RemoteDisconnected"):
+                    c.process(task)
+                clock.return_value = 1299
+                with self.assertRaises(FetchError):
+                    c.process({**task, "query": "CPU"})
+                self.assertEqual(op.call_count, 3)
+            response = MagicMock(); response.__enter__.return_value = response
+            response.url = home; response.headers = {}
+            response.read.return_value = b'<form action="/search"><input name="keyword"></form>'
+            clock.return_value = 1300
+            with patch.object(client.opener, "open", return_value=response) as op:
+                c.process({**task, "query": "CPU"})
+                c.page(home)
+                self.assertEqual(op.call_count, 1)
+            c.save()
+            persisted = Store(Path(folder)).load("stores/tsukumo.json", {})
+            self.assertEqual(len(persisted["queue"]), 2)
+            self.assertTrue(all(t["created_at"] == origin for t in persisted["queue"].values()))
+            self.assertEqual(persisted["offers"][old.key], old.to_dict())
+            self.assertEqual(health(persisted, NOW)["current_offers"], 0)
+            self.assertEqual(client.count, 4)
+
+    def test_page_failure_expiry_respects_server_and_renewed_host_waits(self):
+        url = "https://www.ark-pc.co.jp/i/one/"
+        cfg = {"stores": {"ark": {"adapter": "html", "seed_urls": [], "browser_fallback": True}}}
+        with tempfile.TemporaryDirectory() as folder, patch("sale_monitor.http.time.time", return_value=1000) as clock:
+            client = Client(browser=True, delay=0)
+            c = Collector(Path(folder), "ark", cfg, "run1", client)
+            error = HTTPError(url, 429, "slow down", {"Retry-After": "900"}, None)
+            with patch.object(client.opener, "open", side_effect=error) as op, patch.object(client, "rendered") as render:
+                with self.assertRaisesRegex(FetchError, "rate_limited_retry_later"):
+                    c.page(url)
+                clock.return_value = 1899
+                with self.assertRaises(FetchError): c.page(url)
+                self.assertEqual(op.call_count, 1)
+                render.assert_not_called()
+            # Another URL may extend the host cooldown after the page was cached.
+            client.transport_retry_after["www.ark-pc.co.jp"] = {"until": 2300, "reason": "TimeoutError"}
+            clock.return_value = 1900
+            with patch.object(client.opener, "open") as op, patch.object(client, "rendered") as render:
+                with self.assertRaisesRegex(FetchError, "transport_retry_later:TimeoutError"):
+                    c.page(url)
+                clock.return_value = 2299
+                with self.assertRaises(FetchError): c.page(url)
+                op.assert_not_called()
+                render.assert_not_called()
+            response = MagicMock(); response.__enter__.return_value = response
+            response.url = url; response.read.return_value = b"recovered"; response.headers = {}
+            clock.return_value = 2300
+            with patch.object(client.opener, "open", return_value=response) as op:
+                self.assertEqual(c.page(url).body, b"recovered")
+                self.assertEqual(op.call_count, 1)
+
+    def test_page_failure_for_denied_or_missing_page_stays_cached(self):
+        cfg = {"stores": {"ark": {"adapter": "html", "seed_urls": []}}}
+        for code in (403, 404):
+            with self.subTest(code=code), tempfile.TemporaryDirectory() as folder, patch("sale_monitor.http.time.time", return_value=1000) as clock:
+                client = Client(delay=0)
+                c = Collector(Path(folder), "ark", cfg, "run1", client)
+                url = "https://www.ark-pc.co.jp/i/missing/"
+                body = Page(url, b"missing", iso(NOW), status=code)
+                with patch.object(client, "get", side_effect=FetchError(f"http_{code}", body)) as get:
+                    with self.assertRaises(FetchError): c.page(url)
+                    clock.return_value = 9999
+                    with self.assertRaises(FetchError) as cached: c.page(url)
+                    self.assertIs(cached.exception.page, body)
+                    get.assert_called_once_with(url)
+
     def test_single_broken_url_and_successful_response_do_not_defer_host(self):
         client = Client(delay=0)
         with patch("sale_monitor.http.time.sleep"), patch.object(client.opener, "open", side_effect=RemoteDisconnected()):

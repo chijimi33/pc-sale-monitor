@@ -55,6 +55,7 @@ class Collector:
         self.attempted = set()
         self.pages = {}
         self.page_failures = {}
+        self.page_failure_retry_at = {}
 
     def save(self):
         self.state["checkpoint_at"] = iso()
@@ -137,8 +138,14 @@ class Collector:
 
     def page(self, url: str):
         if url in self.page_failures:
-            failure = self.page_failures[url]
-            raise failure if isinstance(failure, FetchError) else FetchError(failure)
+            until = self.page_failure_retry_at.get(url)
+            if until is None or time.time() < until:
+                failure = self.page_failures[url]
+                raise failure if isinstance(failure, FetchError) else FetchError(failure)
+            # A later task using the same page may recover after the cooldown.
+            # The client still enforces any newer host-wide waiting deadline.
+            self.page_failures.pop(url)
+            self.page_failure_retry_at.pop(url)
         if url not in self.pages:
             try:
                 try:
@@ -148,7 +155,17 @@ class Collector:
                         raise
                     self.pages[url] = self.client.rendered(url)
             except Exception as exc:
-                self.page_failures[url] = exc if isinstance(exc, FetchError) else type(exc).__name__
+                failure = exc if isinstance(exc, FetchError) else type(exc).__name__
+                self.page_failures[url] = failure
+                reason = str(failure)
+                if reason in {"RemoteDisconnected", "TimeoutError", "ConnectionResetError", "ConnectionAbortedError", "ConnectionRefusedError", "BrokenPipeError",
+                              "rate_limited_retry_later", "http_429", "http_500", "http_502", "http_503", "http_504"} or reason.startswith("transport_retry_later:"):
+                    host = urlsplit(url).hostname
+                    # Deduplicate immediate failures without caching a temporary
+                    # outage for the entire run. Never shorten Retry-After.
+                    self.page_failure_retry_at[url] = max(time.time() + 300,
+                        getattr(self.client, "retry_after", {}).get(host, 0),
+                        getattr(self.client, "transport_retry_after", {}).get(host, {}).get("until", 0))
                 raise
         return self.pages[url]
 
