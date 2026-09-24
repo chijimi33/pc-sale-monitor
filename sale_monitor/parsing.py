@@ -116,8 +116,11 @@ def parse_product(store: str, page: Page, cfg: dict, discovery: dict | None = No
     location = urlsplit(page.url)
     # Sofmap redirects unavailable product requests to an HTTP-200 error page.
     # Keep the original product task pending; the error URL is not a new item.
-    if store == "sofmap" and location.hostname in ("www.sofmap.com", "sofmap.com") and location.path.startswith("/error/"):
-        raise FetchError("product_error_page", page=page)
+    if store == "sofmap" and location.hostname in ("www.sofmap.com", "sofmap.com"):
+        if location.path == "/contents_sys/server_too_busy.html":
+            raise FetchError("product_service_unavailable", page=page)
+        if location.path.startswith("/error/"):
+            raise FetchError("product_error_page", page=page)
     tree = document(page)
     data = fields(tree)
     offer = Offer(store, product_id(page.url), canonical(page.url), seller_id=store,

@@ -442,6 +442,52 @@ class Persistence(unittest.TestCase):
         self.assertEqual(parsed.price_yen, 9000)
         self.assertEqual(parsed.product_id, "123")
 
+    def test_sofmap_busy_redirect_remains_pending_until_product_recovers(self):
+        cfg = {"stores": {"sofmap": {"adapter": "html", "seed_urls": [], "default_condition": "new"}}}
+        original = "https://www.sofmap.com/product_detail.aspx?sku=123"
+        busy = "https://www.sofmap.com/contents_sys/server_too_busy.html?aspxerrorpath=%2Fproduct_detail.aspx"
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            client = Client(delay=0)
+            c = Collector(root, "sofmap", cfg, "run1", client)
+            previous = offer("sofmap", url=original, product_id="123", observed_run_id="old")
+            c.state["offers"][previous.key] = previous.to_dict()
+            created = iso(NOW - timedelta(days=2))
+            c.enqueue({"type": "product", "url": original, "created_at": created})
+            with patch.object(client, "get", return_value=Page(busy, b'<h2>Error : 503 Service Unavailable.</h2>', iso(NOW))):
+                state = c.collect()
+            self.assertFalse(state["cycle_complete"])
+            task = next(iter(state["queue"].values()))
+            self.assertEqual((task["url"], task["created_at"], task["last_error"]), (original, created, "product_service_unavailable"))
+            self.assertEqual(set(state["offers"]), {previous.key})
+            self.assertEqual(state["offers"][previous.key]["stock"], "in_stock")
+            self.assertEqual(state["offers"][previous.key]["price_yen"], previous.price_yen)
+            self.assertIn("latest_fetch_failed", state["offers"][previous.key]["issues"])
+            report = aggregate(root, root / "public", "run1", NOW)
+            self.assertEqual(report["stores"]["sofmap"]["current_offers"], 0)
+            self.assertEqual(report["stores"]["sofmap"]["pending_over_24h"], 1)
+            self.assertEqual(Store(root).load("public/evidence.json", {})["decisions"], [])
+            self.assertEqual(Store(root).load("public/notifications.json", {})["events"], [])
+            resumed = Collector(root, "sofmap", cfg, "run2", client)
+            body = b'<h1>Recovered product</h1><script type="application/ld+json">{"@type":"Product","name":"Recovered","offers":{"price":8500,"priceCurrency":"JPY","availability":"https://schema.org/InStock"}}</script>'
+            with patch.object(client, "get", return_value=Page(original, body, iso(NOW))):
+                recovered = resumed.collect()
+            self.assertEqual(recovered["queue"], {})
+            current = recovered["offers"][previous.key]
+            self.assertEqual((current["price_yen"], current["observed_run_id"]), (8500, "run2"))
+            self.assertNotIn("latest_fetch_failed", current["issues"])
+
+    def test_sofmap_busy_endpoint_guard_precedes_metadata_and_ignores_product_query(self):
+        body = b'<h1>Product</h1><script type="application/ld+json">{"@type":"Product","name":"Product","offers":{"price":9000,"priceCurrency":"JPY"}}</script>'
+        for suffix in ("", "?aspxerrorpath=%2Fproduct_detail.aspx"):
+            page = Page("https://www.sofmap.com/contents_sys/server_too_busy.html" + suffix, body, iso(NOW))
+            with self.subTest(url=page.url):
+                with self.assertRaisesRegex(FetchError, "product_service_unavailable") as caught:
+                    parse_product("sofmap", page, {})
+                self.assertIs(caught.exception.page, page)
+        normal = Page("https://www.sofmap.com/product_detail.aspx?sku=123&return=/contents_sys/server_too_busy.html", body, iso(NOW))
+        self.assertEqual(parse_product("sofmap", normal, {}).price_yen, 9000)
+
     def test_error_summary_preserves_all_failures_in_separate_details(self):
         errors = [{"reason": "rate_limited_retry_later", "url": f"https://www.ark-pc.co.jp/i/{n}/"} for n in range(500)]
         errors.extend([errors[0].copy(), {"reason": "http_403"}, {"reason": "http_403"}])
