@@ -8,6 +8,7 @@ import shutil
 from .engine import evaluate, update_events
 from .models import STORES, Offer, digest, fresh, iso, timestamp, utcnow
 from .storage import Store, atomic_json, read_json
+from .scheduling import plan_comparisons
 
 
 def errors_by_url(errors: list[dict]) -> list[dict]:
@@ -50,6 +51,7 @@ def health(state: dict, now) -> dict:
             "mandatory_field_coverage": coverage, "pending_count": len(queue), "pending_by_type": dict(queue_types), "oldest_pending_at": iso(min(created)) if created else None,
             "retry_after_epoch_seconds": state.get("retry_after", {}),
             "transport_retry_after": state.get("transport_retry_after", {}),
+            "scheduler": state.get("scheduler", {}),
             "request_count": state.get("request_count") if state.get("status") != "job_missing" else None,
             "request_count_scope": "http_attempts_plus_browser_navigations; browser_subresources_excluded",
             "comparison_no_results": sum(r.get("result") == "no_results" and r.get("observed_run_id") == state.get("run_id") for r in state.get("comparison_searches", {}).values()),
@@ -131,17 +133,15 @@ def aggregate(root: Path, public: Path, run_id: str, now=None) -> dict:
         if state:
             state["journal"] = []
             disk.save(f"stores/{name}.json", state)
-    # Persist exact-identity searches for the next collection cycle. These are
-    # candidates already discovered on sale lists, never full-catalogue crawling.
-    for name in STORES:
-        requests = {}
-        for offer in current:
-            if offer.store == name or offer.discovery_kind == "comparison" or not offer.identity:
-                continue
-            query = offer.jan or " ".join(filter(None, (offer.brand, offer.model)))
-            priority = {"new": 0, "price_down": 1, "restocked": 2}.get(changes.get(offer.key), 3)
-            requests.setdefault(offer.identity, {"query": query, "identity": offer.identity, "priority": priority})
-        disk.save(f"requests/{name}.json", sorted(requests.values(), key=lambda q: (q["priority"], q["identity"])))
+    # Spending every store's collection time on an unusable candidate cannot
+    # establish an A/B decision. Keep that candidate visible while its own
+    # missing fields are resolved. Existing unfinished work is never discarded.
+    requests, comparison_plan = plan_comparisons(current, changes, STORES, now)
+    comparison_plan["run_id"] = run_id
+    comparison_plan["generated_at"] = iso(now)
+    for name, items in requests.items():
+        disk.save(f"requests/{name}.json", items)
+    disk.save("comparison_plan.json", comparison_plan)
     public.mkdir(parents=True, exist_ok=True)
     events = [e for e in registry["events"].values() if timestamp(e["occurred_at"]) and now - timestamp(e["occurred_at"]) <= timedelta(days=7)]
     events.sort(key=lambda e: (e["occurred_at"], e["event_id"]))
@@ -157,9 +157,11 @@ def aggregate(root: Path, public: Path, run_id: str, now=None) -> dict:
     index = {"schema_version": 1, "generated_at": iso(now), "run_id": run_id, "mode": "parallel_validation", "monitored_store_count": 10,
              "excluded_stores": ["rakuten"], "complete_stores": complete, "collection_completion_rate": complete/10,
              "stores": statuses, "notification_count": len(notification), "review_count": len(reviews),
-             "files": {"notifications": "notifications.json", "reviews": "review_queue.json", "flyer_review": "flyer_review.json", "evidence": "evidence.json", "validation": "validation.json", "collection_errors": "collection_errors.json"},
+             "comparison_planning": comparison_plan["summary"],
+             "files": {"notifications": "notifications.json", "reviews": "review_queue.json", "flyer_review": "flyer_review.json", "evidence": "evidence.json", "validation": "validation.json", "collection_errors": "collection_errors.json", "comparison_plan": "comparison_plan.json"},
              "delivery_guarantee": "at_least_once_best_effort; publication_and_delivery_are_distinct", "full_rescan_needed": False}
     atomic_json(public / "notifications.json", {"generated_at": iso(now), "events": notification})
+    atomic_json(public / "comparison_plan.json", comparison_plan)
     atomic_json(public / "collection_errors.json", {"generated_at": iso(now), "run_id": run_id, "stores": collection_errors})
     atomic_json(public / "review_queue.json", {"generated_at": iso(now), "candidates": reviews, "flyer": disk.load("flyers/latest.json", None)})
     flyer = disk.load("flyers/latest.json", None)

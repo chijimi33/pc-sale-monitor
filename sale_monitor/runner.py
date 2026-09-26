@@ -12,6 +12,7 @@ from .http import Client, FetchError
 from .models import STORES, Offer, allowed_url, digest, fresh, iso, timestamp, utcnow
 from .parsing import canonical, confirmed_empty_search, discover, parse_product, search_form
 from .storage import Store
+from .scheduling import select_task
 
 
 def task_order(task: dict) -> tuple:
@@ -48,6 +49,9 @@ class Collector:
                 if failure["until"] > self.client.transport_retry_after.get(host, {}).get("until", 0):
                     self.client.transport_retry_after[host] = failure.copy()
         self.new_run = self.state.get("run_id") != run_id
+        scheduler = self.state.setdefault("scheduler", {"cursor": 0})
+        if self.new_run:
+            scheduler["selected_by_lane"] = {}
         self.state["run_id"] = run_id
         self.state["started_at"] = iso()
         self.state["status"] = "running"
@@ -265,7 +269,7 @@ class Collector:
             pending = [(k, v) for k, v in self.state["queue"].items() if k not in self.attempted]
             if not pending:
                 break
-            task_id, task = min(pending, key=lambda kv: task_order(kv[1]))
+            task_id, task = select_task(pending, self.state["scheduler"], task_order, utcnow())
             self.attempted.add(task_id)
             try:
                 self.process(task)
