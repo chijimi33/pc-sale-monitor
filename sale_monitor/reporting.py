@@ -54,6 +54,8 @@ def health(state: dict, now) -> dict:
             "scheduler": state.get("scheduler", {}),
             "waiting_dependencies": state.get("waiting_dependencies", []),
             "retry_activity": state.get("retry_activity", {}),
+            "comparison_search_pages": sum(r.get("observed_run_id") == state.get("run_id")
+                                            for r in state.get("comparison_searches", {}).values()),
             "request_count": state.get("request_count") if state.get("status") != "job_missing" else None,
             "request_count_scope": "http_attempts_plus_browser_navigations; browser_subresources_excluded",
             "comparison_no_results": sum(r.get("result") == "no_results" and r.get("observed_run_id") == state.get("run_id") for r in state.get("comparison_searches", {}).values()),

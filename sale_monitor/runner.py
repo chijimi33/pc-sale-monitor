@@ -14,6 +14,7 @@ from .parsing import canonical, confirmed_empty_search, discover, parse_product,
 from .storage import Store
 from .scheduling import select_task
 from .retrying import runnable, transient
+from . import koubou_search
 
 
 def task_order(task: dict) -> tuple:
@@ -23,7 +24,7 @@ def task_order(task: dict) -> tuple:
         # priority. Descendants keep the original request time so a comparison
         # can finish without moving to the back of the next cycle's queue.
         stage = 2
-        step = {"product": 0, "list": 1, "yahoo": 1, "search": 2}.get(kind, 3)
+        step = {"product": 0, "list": 1, "yahoo": 1, "koubou_search": 1, "search": 2}.get(kind, 3)
     else:
         stage = 0 if kind in ("list", "dospara_list", "amazon_discovery") else 1
         step = 0
@@ -144,7 +145,7 @@ class Collector:
                 self.enqueue({"type": "search", "query": query["query"], "kind": "comparison", "priority": query.get("priority", 3)})
         self.save()
 
-    def page(self, url: str):
+    def page(self, url: str, *, allow_browser: bool = True):
         if url in self.page_failures:
             until = self.page_failure_retry_at.get(url)
             if until is None or time.time() < until:
@@ -159,7 +160,7 @@ class Collector:
                 try:
                     self.pages[url] = self.client.get(url)
                 except FetchError as exc:
-                    if str(exc) == "rate_limited_retry_later" or str(exc).startswith("transport_retry_later:") or (exc.page is not None and confirmed_empty_search(self.store, exc.page)) or not self.cfg.get("browser_fallback"):
+                    if not allow_browser or str(exc) == "rate_limited_retry_later" or str(exc).startswith("transport_retry_later:") or (exc.page is not None and confirmed_empty_search(self.store, exc.page)) or not self.cfg.get("browser_fallback"):
                         raise
                     self.pages[url] = self.client.rendered(url)
             except Exception as exc:
@@ -176,8 +177,29 @@ class Collector:
                 raise
         return self.pages[url]
 
+    def process_koubou_search(self, task: dict, query: str, offset: int = 0):
+        url = koubou_search.search_url(query, offset)
+        products, next_offset, details = koubou_search.parse_search(
+            self.page(url, allow_browser=False), query, offset)
+        origin = {"created_at": task.get("created_at") or iso(), "priority": task.get("priority", 3)}
+        for product in products:
+            self.enqueue({"type": "product", **product, **origin})
+        if next_offset is not None:
+            self.enqueue({"type": "koubou_search", "kind": "comparison", "query": query,
+                          "start": next_offset, "url": koubou_search.search_url(query, next_offset), **origin})
+        self.state.setdefault("comparison_searches", {})[url] = {**details, "observed_run_id": self.run_id,
+            "original_task_url": task.get("url"), "created_at": origin["created_at"]}
+        self.state["list_pages"] += 1
+        self.state["listed_candidates"] += len(products)
+
     def process(self, task: dict):
         kind = task["type"]
+        if self.store == "koubou" and task.get("kind") == "comparison":
+            query = (task.get("query") if kind in ("search", "koubou_search") else
+                     koubou_search.legacy_query(task["url"]) if kind == "list" else None)
+            if query:
+                self.process_koubou_search(task, query, task.get("start", 0))
+                return
         if kind == "dospara_list":
             items, links = adapters.dospara_list(self.client, task["url"])
             for item in items:
@@ -237,6 +259,10 @@ class Collector:
                 products, pagination, campaigns = discover(page, self.cfg, sale_page=True, comparison=task.get("kind") == "comparison")
             if not products and not campaigns and task.get("kind") != "comparison":
                 self.state["discovery_gaps"].append({"url": task["url"], "reason": "no_sale_candidates_parser_review"})
+            if self.store == "koubou" and task.get("kind") == "comparison" and not products:
+                # A filtered/unsupported search URL must not silently complete
+                # from an empty JavaScript shell, nor lose its filter conditions.
+                raise FetchError("comparison_search_response_unverified")
             self.state["list_pages"] += 1
             self.state["listed_candidates"] += len(products)
             for product in products:
