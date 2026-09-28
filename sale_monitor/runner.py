@@ -13,6 +13,7 @@ from .models import STORES, Offer, allowed_url, digest, fresh, iso, timestamp, u
 from .parsing import canonical, confirmed_empty_search, discover, parse_product, search_form
 from .storage import Store
 from .scheduling import select_task
+from .retrying import runnable, transient
 
 
 def task_order(task: dict) -> tuple:
@@ -52,6 +53,9 @@ class Collector:
         scheduler = self.state.setdefault("scheduler", {"cursor": 0})
         if self.new_run:
             scheduler["selected_by_lane"] = {}
+            self.state["retry_activity"] = {"retries_started": 0, "recovered_tasks": 0, "wait_seconds": 0}
+            self.state["recovered_errors"] = []
+        self.state.setdefault("retry_activity", {"retries_started": 0, "recovered_tasks": 0, "wait_seconds": 0})
         self.state["run_id"] = run_id
         self.state["started_at"] = iso()
         self.state["status"] = "running"
@@ -162,8 +166,7 @@ class Collector:
                 failure = exc if isinstance(exc, FetchError) else type(exc).__name__
                 self.page_failures[url] = failure
                 reason = str(failure)
-                if reason in {"RemoteDisconnected", "TimeoutError", "ConnectionResetError", "ConnectionAbortedError", "ConnectionRefusedError", "BrokenPipeError",
-                              "rate_limited_retry_later", "http_429", "http_500", "http_502", "http_503", "http_504"} or reason.startswith("transport_retry_later:"):
+                if transient(reason):
                     host = urlsplit(url).hostname
                     # Deduplicate immediate failures without caching a temporary
                     # outage for the entire run. Never shorten Retry-After.
@@ -265,14 +268,36 @@ class Collector:
             self.state["errors"] = [{"reason": "YAHOO_CLIENT_ID_missing"}]
             self.save()
             return self.state
-        while time.monotonic() < deadline:
-            pending = [(k, v) for k, v in self.state["queue"].items() if k not in self.attempted]
+        while (tick := time.monotonic()) < deadline:
+            wall_now = time.time()
+            pending, waits = runnable(self.state["queue"], self.attempted, self.cfg, self.client,
+                                      self.page_failure_retry_at, wall_now)
+            self.state["waiting_dependencies"] = waits
             if not pending:
-                break
+                if not waits:
+                    break
+                # A dependency wait is not a request attempt or a resolved task.
+                # Preserve it across interruption and use the remaining run time
+                # to recover, instead of exhausting every task during cooldown.
+                self.save()
+                delay = min(w["until_epoch_seconds"] for w in waits) - wall_now
+                if delay >= deadline - tick:
+                    break
+                delay = min(delay, 30)
+                time.sleep(delay)
+                self.state["retry_activity"]["wait_seconds"] += delay
+                continue
             task_id, task = select_task(pending, self.state["scheduler"], task_order, utcnow())
             self.attempted.add(task_id)
+            if task.get("retry_at_epoch_seconds") is not None:
+                self.state["retry_activity"]["retries_started"] += 1
             try:
                 self.process(task)
+                if task.get("last_error"):
+                    self.state["retry_activity"]["recovered_tasks"] += 1
+                    self.state.setdefault("recovered_errors", []).append({"task_id": task_id,
+                        "reason": task["last_error"], "attempts": task.get("attempts", 0), "recovered_at": iso()})
+                    self.state["errors"] = [e for e in self.state["errors"] if e.get("task_id") != task_id]
                 self.state["done"].append(task_id)
                 del self.state["queue"][task_id]
             except Exception as exc:
@@ -280,6 +305,11 @@ class Collector:
                 # credentials and raw exception messages never enter the feed.
                 reason = str(exc) if isinstance(exc, FetchError) and "http" not in str(exc)[5:] and len(str(exc)) < 100 else type(exc).__name__
                 task.update(attempts=task.get("attempts", 0)+1, last_error=reason, last_attempt_at=iso())
+                task.pop("retry_at_epoch_seconds", None)
+                if transient(reason):
+                    task["retry_at_epoch_seconds"] = time.time() + 300
+                # Error counts describe unresolved tasks, not repeated attempts.
+                self.state["errors"] = [e for e in self.state["errors"] if e.get("task_id") != task_id]
                 self.state["errors"].append({"task_id": task_id, "reason": reason, "url": task.get("url")})
                 if task["type"] == "product":
                     for row in self.state["offers"].values():
@@ -295,6 +325,8 @@ class Collector:
             except Exception as exc:
                 self.state["flyer"] = {"status": "fetch_failed", "reason": type(exc).__name__, "checked_at": iso()}
         self.state["cycle_complete"] = not self.state["queue"]
+        _, self.state["waiting_dependencies"] = runnable(self.state["queue"], self.attempted, self.cfg,
+            self.client, self.page_failure_retry_at, time.time())
         self.state["status"] = "complete" if self.state["cycle_complete"] and not self.state.get("discovery_gaps") else "partial"
         self.state["completed_at"] = iso()
         self.save()

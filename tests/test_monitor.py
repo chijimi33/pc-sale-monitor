@@ -645,13 +645,15 @@ class Persistence(unittest.TestCase):
             for n in range(5):
                 c.enqueue({"type": "product", "url": f"https://shop.tsukumo.co.jp/goods/{n}/", "kind": "sale"})
             with patch.object(client.opener, "open", side_effect=RemoteDisconnected("private exception detail")) as op:
-                state = c.collect()
+                state = c.collect(seconds=1)
             self.assertEqual(op.call_count, 9)
             self.assertEqual(state["request_count"], 9)
             self.assertEqual(len(state["queue"]), 5)
-            self.assertEqual(len(state["errors"]), 5)
+            self.assertEqual(len(state["errors"]), 3)
             self.assertEqual(sum(e["reason"] == "RemoteDisconnected" for e in state["errors"]), 3)
-            self.assertEqual(sum(e["reason"] == "transport_retry_later:RemoteDisconnected" for e in state["errors"]), 2)
+            self.assertEqual(sum(e["reason"] == "transport_retry_later:RemoteDisconnected" for e in state["errors"]), 0)
+            self.assertEqual(sum(w["affected_tasks"] for w in state["waiting_dependencies"]), 5)
+            self.assertEqual(sum(t["attempts"] == 0 for t in state["queue"].values()), 2)
             self.assertEqual(state["status"], "partial")
             self.assertFalse(state["cycle_complete"])
             retained = state["offers"][previous.key]
