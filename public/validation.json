@@ -4,32 +4,32 @@
     "decision": "measure_free_gaps_before_paid_comparison",
     "free_current_conditions_coverage": {
       "condition": 0.0,
-      "evidence": 0.008877355913684786,
-      "identity": 0.07907675498497678,
-      "price": 0.008877355913684786,
-      "seller": 0.038104343075662385,
+      "evidence": 0.008467631794591642,
+      "identity": 0.07921332969134116,
+      "price": 0.008467631794591642,
+      "seller": 0.037831193662933624,
       "shipping": 0.0005462988254575252,
-      "stock": 0.027861240098333788
+      "stock": 0.028134389511062553
     }
   },
   "coverage": {
     "amazon": {
       "condition": 0.0,
-      "evidence": 0.008877355913684786,
-      "identity": 0.07907675498497678,
-      "price": 0.008877355913684786,
-      "seller": 0.038104343075662385,
+      "evidence": 0.008467631794591642,
+      "identity": 0.07921332969134116,
+      "price": 0.008467631794591642,
+      "seller": 0.037831193662933624,
       "shipping": 0.0005462988254575252,
-      "stock": 0.027861240098333788
+      "stock": 0.028134389511062553
     },
     "ark": {
       "condition": 1.0,
-      "evidence": 0.7067517363915361,
-      "identity": 0.9794863511549022,
-      "price": 0.9670489420125989,
+      "evidence": 0.7087087087087087,
+      "identity": 0.9788978167356546,
+      "price": 0.9662365067770473,
       "seller": 1.0,
-      "shipping": 0.8018090776934259,
-      "stock": 0.9759328056856728
+      "shipping": 0.7997727457186916,
+      "stock": 0.9751643535427319
     },
     "bic": {
       "condition": null,
@@ -59,31 +59,31 @@
       "stock": null
     },
     "koubou": {
-      "condition": 0.736545823012835,
-      "evidence": 0.8739022742625535,
-      "identity": 0.8290925467237109,
-      "price": 0.8723260526908354,
+      "condition": 0.7366812227074235,
+      "evidence": 0.8737991266375545,
+      "identity": 0.8294759825327511,
+      "price": 0.8716157205240175,
       "seller": 1.0,
-      "shipping": 0.8009457329430308,
-      "stock": 0.7311416347669444
+      "shipping": 0.8017467248908297,
+      "stock": 0.731004366812227
     },
     "sofmap": {
-      "condition": 0.8956521739130435,
-      "evidence": 0.9130434782608695,
-      "identity": 0.9391304347826087,
-      "price": 0.9130434782608695,
+      "condition": 0.8947368421052632,
+      "evidence": 0.9122807017543859,
+      "identity": 0.9385964912280702,
+      "price": 0.9122807017543859,
       "seller": 1.0,
       "shipping": 0.0,
-      "stock": 0.9304347826086956
+      "stock": 0.9298245614035088
     },
     "tsukumo": {
-      "condition": 0.9950450896838767,
-      "evidence": 0.9033792488355961,
-      "identity": 0.9968288573976811,
-      "price": 0.9968288573976811,
+      "condition": 0.9950602647698084,
+      "evidence": 0.9052558782849239,
+      "identity": 0.9968385694526773,
+      "price": 0.9968385694526773,
       "seller": 1.0,
-      "shipping": 0.8456049945495987,
-      "stock": 0.9938559112080071
+      "shipping": 0.8432128037937167,
+      "stock": 0.9936771389053547
     },
     "yahoo": {
       "condition": null,
@@ -107,7 +107,7 @@
   "cutover_ready": false,
   "earliest_cutover_at": "2026-09-20T19:28:10.260709+00:00",
   "manual_review": {
-    "audited_event_count": 3,
+    "audited_event_count": 4,
     "audits": [
       {
         "delivery_status": "unconfirmed",
@@ -368,18 +368,107 @@
         "source_data_sha": "f3ee55fe8663d4c66629cbd97722dbb8cd273d55",
         "source_run_id": "35616531735-1",
         "status": "passed"
+      },
+      {
+        "delivery_status": "unconfirmed",
+        "event_id": "76993c9313bbc85a63a5df9071497a3a",
+        "evidence": [
+          {
+            "body_sha256": "b5f50a181d7d1b597d347d71a37df8a6592464213581091e8471a6040fc6fa87",
+            "condition": "new",
+            "condition_basis": "JSON-LD NewCondition; visible primary network price and free-shipping label.",
+            "jan": "0199291179974",
+            "model": "DUAL-RTX5060TI-O16G-WHITE",
+            "observed_at": "2026-09-29T13:28:45.037645+00:00",
+            "price_yen": 124999,
+            "shipping_yen": 0,
+            "stock": "in_stock",
+            "store": "tsukumo",
+            "url": "https://shop.tsukumo.co.jp/goods/0199291179974/",
+            "verification": "Codex independently inspected primary JSON-LD, visible product text, identifiers and purchase controls. Fresh observation is separate from the pinned collection."
+          },
+          {
+            "body_sha256": "7d4f77a1aebf78c4a3beb515d274bd09cb546c6032ccf317e6465e354d37a92d",
+            "condition": "new",
+            "condition_basis": "Configured standard new-catalog inference, not explicit itemCondition. Primary base price, enabled purchase control, matching product_code/price02/stock_find; optional warranty and service bundle excluded.",
+            "jan": "0199291179974",
+            "model": "DUAL-RTX5060TI-O16G-WHITE",
+            "observed_at": "2026-09-29T13:28:45.717210+00:00",
+            "price_yen": 140990,
+            "shipping_yen": 0,
+            "stock": "in_stock",
+            "store": "koubou",
+            "url": "https://www.pc-koubou.jp/products/detail.php?product_id=1177118",
+            "verification": "Codex independently inspected primary JSON-LD, visible product text, identifiers and purchase controls. Fresh observation is separate from the pinned collection."
+          },
+          {
+            "body_sha256": "eb00cf7cb0453c70a29ad6c9677ededf509737c7d4d7212dfce7616d6e89db41",
+            "condition": "new",
+            "condition_basis": "JSON-LD NewCondition and primary item price; matching JAN/model, visible free-shipping row and InStock.",
+            "jan": "0199291179974",
+            "model": "DUAL-RTX5060TI-O16G-WHITE",
+            "observed_at": "2026-09-29T13:28:46.314488+00:00",
+            "price_yen": 168800,
+            "shipping_yen": 0,
+            "stock": "in_stock",
+            "store": "ark",
+            "url": "https://www.ark-pc.co.jp/i/20107744/",
+            "verification": "Codex independently inspected primary JSON-LD, visible product text, identifiers and purchase controls. Fresh observation is separate from the pinned collection."
+          }
+        ],
+        "findings": [],
+        "offer_key": "e4fbf4b75384cd8015f3c041",
+        "price_check": {
+          "candidate_payment_yen": 124999,
+          "difference_percent": 11.3419,
+          "difference_yen": 15991,
+          "independent_other_sellers": 2,
+          "lowest_other_payment_yen": 140990,
+          "points_basis": "not_verified",
+          "rule": "A",
+          "status": "supported"
+        },
+        "product": "ASUS DUAL-RTX5060TI-O16G-WHITE",
+        "reviewed_at": "2026-09-29T13:35:49.605316+00:00",
+        "scope": "Current payment-basis eligibility independently checked against the three primary pages at separately recorded later times. No claim about market-wide lowest price, unknown expiry, points or delivery. Later source prices are not inserted into the pinned collection. Optional service/warranty is not the base product.",
+        "seller_evidence": [
+          {
+            "checked_at": "2026-09-29T13:30:03.676733+00:00",
+            "seller": "株式会社ユニットコム",
+            "sha256": "398e9c34a2cfaa8d891d309c734feb34117de80291289e21b3ea8757230ec72b",
+            "source_url": "https://www.pc-koubou.jp/shop_guide/tokusyouhou.php",
+            "store": "koubou"
+          },
+          {
+            "checked_at": "2026-09-29T13:30:03.902080+00:00",
+            "seller": "株式会社ヤマダデンキ",
+            "sha256": "f1130043bdbc1b2975f7a61fa423dad05890e8d30438cf463fa394f8577dddae",
+            "source_url": "https://shop.tsukumo.co.jp/shopping-help/service/tokusho.html",
+            "store": "tsukumo"
+          },
+          {
+            "checked_at": "2026-09-29T13:30:04.133588+00:00",
+            "seller": "株式会社アーク",
+            "sha256": "cb3e11f26339a59fde99695daa9e5a031239d5d92429de6f788dc73ca639d2c0",
+            "source_url": "https://www.ark-pc.co.jp/info/law.html",
+            "store": "ark"
+          }
+        ],
+        "source_data_sha": "7dc9b061dced9be4a4994a3f2459325f7f1763ea",
+        "source_run_id": "36556909239-1",
+        "status": "passed"
       }
     ],
     "counting_policy": "Distinct events with unresolved findings are not counted as completed reviews. This record does not confirm delivery.",
     "false_positive_count": 0,
     "needs_review_count": 1,
-    "reviewed_at": "2026-09-21T20:09:20.491202+00:00",
-    "reviewed_count": 2,
+    "reviewed_at": "2026-09-29T13:35:49.605316+00:00",
+    "reviewed_count": 3,
     "reviewer": "ChatGPT/Codex",
     "schema_version": 1
   },
   "measured_four_hour_windows": 25,
-  "measured_runs": 92,
+  "measured_runs": 93,
   "reasons": [
     "insufficient_scheduled_runs",
     "ten_store_coverage_incomplete",
