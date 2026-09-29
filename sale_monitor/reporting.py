@@ -52,6 +52,7 @@ def health(state: dict, now) -> dict:
             "retry_after_epoch_seconds": state.get("retry_after", {}),
             "transport_retry_after": state.get("transport_retry_after", {}),
             "scheduler": state.get("scheduler", {}),
+            "comparison_refresh": state.get("comparison_refresh", {}),
             "waiting_dependencies": state.get("waiting_dependencies", []),
             "retry_activity": state.get("retry_activity", {}),
             "comparison_search_pages": sum(r.get("observed_run_id") == state.get("run_id")

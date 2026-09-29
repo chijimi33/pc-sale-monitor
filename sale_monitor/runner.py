@@ -12,7 +12,7 @@ from .http import Client, FetchError
 from .models import STORES, Offer, allowed_url, digest, fresh, iso, timestamp, utcnow
 from .parsing import canonical, confirmed_empty_search, discover, parse_product, search_form
 from .storage import Store
-from .scheduling import select_task
+from .scheduling import plan_comparison_refresh, select_task
 from .retrying import runnable, transient
 from . import koubou_search
 
@@ -116,6 +116,7 @@ class Collector:
         self.state.setdefault("changes", {})[offer.key] = priority
 
     def seed(self):
+        requests = self.disk.load(f"requests/{self.store}.json", None)
         if self.new_run or self.state.get("cycle_complete"):
             # Keep unfinished work (and its original age), while allowing fresh
             # list discovery even when one old URL repeatedly fails.
@@ -133,12 +134,18 @@ class Collector:
                     self.enqueue({"type": "yahoo", "query": query, "start": 1})
             elif adapter == "amazon":
                 self.enqueue({"type": "amazon_discovery"})
-            for row in self.state["offers"].values():
+            refresh, refresh_details = plan_comparison_refresh(self.state["offers"], requests)
+            self.state["comparison_refresh"] = refresh_details
+            for key, row in self.state["offers"].items():
                 if row.get("channel") != "online" or adapter in ("dospara", "yahoo"):
                     continue
                 # Recheck known sale products and exact comparison matches only.
+                # Existing queued work is retained even when its old identity is
+                # no longer requested; it must still complete normal verification.
+                if row.get("discovery_kind") == "comparison" and key not in refresh:
+                    continue
                 self.enqueue({"type": "product", "url": row["url"], "kind": row.get("discovery_kind", "sale"), "source": row.get("discovery_url"), "title": row.get("title", "")})
-        for query in self.disk.load(f"requests/{self.store}.json", []):
+        for query in requests or []:
             if self.cfg["adapter"] == "yahoo":
                 self.enqueue({"type": "yahoo", "query": query["query"], "start": 1, "kind": "comparison", "priority": query.get("priority", 3)})
             elif self.cfg["adapter"] == "html":

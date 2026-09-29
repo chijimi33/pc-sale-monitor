@@ -13,6 +13,42 @@ from .models import Offer, timestamp
 LANES = ("discovery", "sale", "comparison", "sale")
 
 
+def plan_comparison_refresh(offers: dict, requests) -> tuple[set[str], dict]:
+    """Select new refresh work, without resolving or editing existing work.
+
+    A broad model search may discover many other catalog products. Once their
+    identities are known, refresh only those needed by the current comparison
+    requests. Unknown identities remain work to verify, never implicit no-hits.
+    Missing/legacy request metadata cannot prove that an item is unnecessary.
+    """
+    usable = isinstance(requests, list) and all(
+        isinstance(r, dict) and isinstance(r.get("identity"), str) and r["identity"].strip()
+        for r in requests)
+    identities = {r["identity"] for r in requests} if usable else None
+    selected, counts = set(), Counter()
+    for key, row in offers.items():
+        if row.get("channel") != "online" or row.get("discovery_kind") != "comparison":
+            continue
+        identity = Offer.from_dict(row).identity
+        reason = ("request_plan_unverified" if identities is None else
+                  "identity_unresolved" if not identity else
+                  "requested_identity" if identity in identities else "not_requested_identity")
+        counts[reason] += 1
+        if reason != "not_requested_identity":
+            selected.add(key)
+    return selected, {
+        "policy": "requested_comparison_identity_or_unresolved",
+        "request_plan_verified": usable,
+        "requested_identity_count": len(identities) if identities is not None else None,
+        "known_comparison_offers": sum(counts.values()),
+        "selected_for_refresh": len(selected),
+        "not_newly_refreshed": counts["not_requested_identity"],
+        "reasons": dict(counts),
+        "existing_queue_policy": "retained_with_original_age_and_attempts",
+        "historical_offer_policy": "retained_not_current_without_new_observation",
+    }
+
+
 def lane(task: dict) -> str:
     if task.get("kind") == "comparison":
         return "comparison"
