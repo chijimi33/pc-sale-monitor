@@ -13,7 +13,7 @@ from .models import Offer, timestamp
 LANES = ("discovery", "sale", "comparison", "sale")
 
 
-def plan_comparison_refresh(offers: dict, requests) -> tuple[set[str], dict]:
+def plan_comparison_refresh(offers: dict, requests, candidate_identities=()) -> tuple[set[str], dict]:
     """Select new refresh work, without resolving or editing existing work.
 
     A broad model search may discover many other catalog products. Once their
@@ -25,6 +25,7 @@ def plan_comparison_refresh(offers: dict, requests) -> tuple[set[str], dict]:
         isinstance(r, dict) and isinstance(r.get("identity"), str) and r["identity"].strip()
         for r in requests)
     identities = {r["identity"] for r in requests} if usable else None
+    candidates = set(candidate_identities)
     selected, counts = set(), Counter()
     for key, row in offers.items():
         if row.get("channel") != "online" or row.get("discovery_kind") != "comparison":
@@ -32,14 +33,16 @@ def plan_comparison_refresh(offers: dict, requests) -> tuple[set[str], dict]:
         identity = Offer.from_dict(row).identity
         reason = ("request_plan_unverified" if identities is None else
                   "identity_unresolved" if not identity else
-                  "requested_identity" if identity in identities else "not_requested_identity")
+                  "requested_identity" if identity in identities else
+                  "sale_candidate_identity" if identity in candidates else "not_requested_identity")
         counts[reason] += 1
         if reason != "not_requested_identity":
             selected.add(key)
     return selected, {
-        "policy": "requested_comparison_identity_or_unresolved",
+        "policy": "requested_or_known_sale_candidate_identity_or_unresolved",
         "request_plan_verified": usable,
         "requested_identity_count": len(identities) if identities is not None else None,
+        "sale_candidate_identity_count": len(candidates),
         "known_comparison_offers": sum(counts.values()),
         "selected_for_refresh": len(selected),
         "not_newly_refreshed": counts["not_requested_identity"],
@@ -63,6 +66,15 @@ def select_task(pending: list[tuple[str, dict]], scheduler: dict, order, now):
         candidates = [pair for pair in pending if lane(pair[1]) == LANES[index]]
         if not candidates:
             continue
+
+        if LANES[index] == "comparison":
+            # Three opportunities for currently needed work, then one for old
+            # work. Persist the cursor so interruptions cannot starve either.
+            needed = [p for p in candidates if p[1].get("requested")]
+            other = [p for p in candidates if not p[1].get("requested")]
+            comparison_cursor = scheduler.get("comparison_cursor", 0) % 4
+            candidates = (needed if comparison_cursor < 3 else other) or needed or other
+            scheduler["comparison_cursor"] = (comparison_cursor + 1) % 4
 
         def ranked(pair):
             created = timestamp(pair[1].get("created_at"))

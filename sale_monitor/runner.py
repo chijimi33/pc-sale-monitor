@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from copy import deepcopy
 from datetime import timedelta
 from pathlib import Path
 import os
@@ -86,6 +87,8 @@ class Collector:
                 existing["priority"] = task["priority"]
             if task.get("created_at") and task["created_at"] < existing["created_at"]:
                 existing["created_at"] = task["created_at"]
+            if task.get("requested"):
+                existing["requested"] = True
         elif task_id not in self.state["done"]:
             self.state["queue"][task_id] = {"created_at": iso(), "attempts": 0, **task}
 
@@ -104,7 +107,7 @@ class Collector:
             row = offer.to_dict()
         self.state["offers"][offer.key] = row
         observation_id = digest([offer.key, offer.observed_at, row])
-        self.state["journal"].append({"observation_id": observation_id, "run_id": self.run_id, "offer": row})
+        self.state["journal"].append({"observation_id": observation_id, "run_id": self.run_id, "offer": deepcopy(row)})
         if previous is None:
             priority = "new"
         elif previous.get("stock") == "out_of_stock" and offer.stock == "in_stock":
@@ -117,10 +120,16 @@ class Collector:
 
     def seed(self):
         requests = self.disk.load(f"requests/{self.store}.json", None)
+        candidates = self.disk.load("requests/candidate_identities.json", [])
+        candidates = {x for x in candidates if isinstance(x, str)} if isinstance(candidates, list) else set()
+        priorities = {r["identity"]: r.get("priority", 3) for r in requests or []
+                      if isinstance(r, dict) and isinstance(r.get("identity"), str)}
         if self.new_run or self.state.get("cycle_complete"):
             # Keep unfinished work (and its original age), while allowing fresh
             # list discovery even when one old URL repeatedly fails.
             self.state.update(done=[], changes={}, cycle_started_at=iso(), cycle_complete=False, list_pages=0, listed_candidates=0, discovery_gaps=[])
+            for task in self.state["queue"].values():
+                task.pop("requested", None)
             adapter = self.cfg["adapter"]
             if adapter == "html":
                 for url in self.cfg.get("seed_urls", []):
@@ -134,7 +143,7 @@ class Collector:
                     self.enqueue({"type": "yahoo", "query": query, "start": 1})
             elif adapter == "amazon":
                 self.enqueue({"type": "amazon_discovery"})
-            refresh, refresh_details = plan_comparison_refresh(self.state["offers"], requests)
+            refresh, refresh_details = plan_comparison_refresh(self.state["offers"], requests, candidates)
             self.state["comparison_refresh"] = refresh_details
             for key, row in self.state["offers"].items():
                 if row.get("channel") != "online" or adapter in ("dospara", "yahoo"):
@@ -144,12 +153,16 @@ class Collector:
                 # no longer requested; it must still complete normal verification.
                 if row.get("discovery_kind") == "comparison" and key not in refresh:
                     continue
-                self.enqueue({"type": "product", "url": row["url"], "kind": row.get("discovery_kind", "sale"), "source": row.get("discovery_url"), "title": row.get("title", "")})
+                task = {"type": "product", "url": row["url"], "kind": row.get("discovery_kind", "sale"), "source": row.get("discovery_url"), "title": row.get("title", "")}
+                identity = Offer.from_dict(row).identity
+                if task["kind"] == "comparison" and (identity in priorities or identity in candidates):
+                    task.update(requested=True, priority=priorities.get(identity, 3))
+                self.enqueue(task)
         for query in requests or []:
             if self.cfg["adapter"] == "yahoo":
-                self.enqueue({"type": "yahoo", "query": query["query"], "start": 1, "kind": "comparison", "priority": query.get("priority", 3)})
+                self.enqueue({"type": "yahoo", "query": query["query"], "start": 1, "kind": "comparison", "priority": query.get("priority", 3), "requested": True})
             elif self.cfg["adapter"] == "html":
-                self.enqueue({"type": "search", "query": query["query"], "kind": "comparison", "priority": query.get("priority", 3)})
+                self.enqueue({"type": "search", "query": query["query"], "kind": "comparison", "priority": query.get("priority", 3), "requested": True})
         self.save()
 
     def page(self, url: str, *, allow_browser: bool = True):

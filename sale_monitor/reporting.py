@@ -9,6 +9,7 @@ from .engine import evaluate, update_events
 from .models import STORES, Offer, digest, fresh, iso, timestamp, utcnow
 from .storage import Store, atomic_json, read_json
 from .scheduling import plan_comparisons
+from .comparison_integrity import known_comparators, missing_comparators
 
 
 def errors_by_url(errors: list[dict]) -> list[dict]:
@@ -104,12 +105,22 @@ def aggregate(root: Path, public: Path, run_id: str, now=None) -> dict:
             if offer.observed_run_id == run_id and fresh(offer.observed_at, now) and "latest_fetch_failed" not in offer.issues:
                 current.append(offer)
     historical = [row for row in disk.history() if row.get("run_id") != run_id]
+    known = known_comparators(states, historical, now)
+    current_by_key = {(o.store, o.key): o for o in current}
+    held_offer_keys = set()
     registry = disk.load("events/registry.json", {"states": {}, "events": {}})
     decisions = []
     reviews = []
     for offer in current:
         payment = evaluate(offer, current, historical, now)
         points = evaluate(offer, current, historical, now, points=True)
+        for basis in (payment, points):
+            if basis["status"] == "accepted":
+                missing = missing_comparators(offer, known, current_by_key, now, points=basis["basis"] == "points")
+                if missing:
+                    basis.update(status="insufficient", provisional_rule=basis["rule"], rule=None,
+                                 reasons=["known_comparator_not_verified_this_run"], missing_comparators=missing)
+                    held_offer_keys.add(offer.key)
         decision = payment if payment["status"] == "accepted" or points["status"] != "accepted" else points
         decisions.append({"offer": offer.to_dict(), "payment": payment, "points": points})
         if offer.discovery_kind != "comparison":
@@ -146,6 +157,15 @@ def aggregate(root: Path, public: Path, run_id: str, now=None) -> dict:
     comparison_plan["generated_at"] = iso(now)
     for name, items in requests.items():
         disk.save(f"requests/{name}.json", items)
+    # A held or temporarily unobserved sale can recover in the next collection.
+    # Keep its known comparators fresh without starting new broad searches.
+    candidate_identities = sorted({o.identity for state in states.values()
+        for row in state.get("offers", {}).values()
+        for o in [Offer.from_dict(row)]
+        if o.channel == "online" and o.discovery_kind != "comparison" and o.identity})
+    disk.save("requests/candidate_identities.json", candidate_identities)
+    comparison_plan["summary"]["refresh_candidate_identities"] = len(candidate_identities)
+    comparison_plan["summary"]["known_comparator_hold_offers"] = len(held_offer_keys)
     disk.save("comparison_plan.json", comparison_plan)
     public.mkdir(parents=True, exist_ok=True)
     events = [e for e in registry["events"].values() if timestamp(e["occurred_at"]) and now - timestamp(e["occurred_at"]) <= timedelta(days=7)]
