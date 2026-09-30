@@ -4,32 +4,32 @@
     "decision": "measure_free_gaps_before_paid_comparison",
     "free_current_conditions_coverage": {
       "condition": 0.0,
-      "evidence": 0.01036793526362372,
-      "identity": 0.04577064104185106,
-      "price": 0.01036793526362372,
-      "seller": 0.02857504109242635,
-      "shipping": 0.0007586294095334429,
-      "stock": 0.020356555822480717
+      "evidence": 0.009289617486338797,
+      "identity": 0.10259562841530055,
+      "price": 0.009289617486338797,
+      "seller": 0.050546448087431695,
+      "shipping": 0.0006830601092896175,
+      "stock": 0.035655737704918034
     }
   },
   "coverage": {
     "amazon": {
       "condition": 0.0,
-      "evidence": 0.01036793526362372,
-      "identity": 0.04577064104185106,
-      "price": 0.01036793526362372,
-      "seller": 0.02857504109242635,
-      "shipping": 0.0007586294095334429,
-      "stock": 0.020356555822480717
+      "evidence": 0.009289617486338797,
+      "identity": 0.10259562841530055,
+      "price": 0.009289617486338797,
+      "seller": 0.050546448087431695,
+      "shipping": 0.0006830601092896175,
+      "stock": 0.035655737704918034
     },
     "ark": {
       "condition": 1.0,
-      "evidence": 0.7048097846477077,
-      "identity": 0.9776393787048848,
-      "price": 0.9643580700832896,
+      "evidence": 0.6803876168424663,
+      "identity": 0.9766743847011405,
+      "price": 0.9627819226481433,
       "seller": 1.0,
-      "shipping": 0.7912508441509717,
-      "stock": 0.9733623471148796
+      "shipping": 0.79041248606466,
+      "stock": 0.9722150758940057
     },
     "bic": {
       "condition": null,
@@ -59,31 +59,31 @@
       "stock": null
     },
     "koubou": {
-      "condition": 0.7762264150943397,
-      "evidence": 0.8618867924528302,
-      "identity": 0.8316981132075472,
-      "price": 0.8613207547169811,
+      "condition": 0.7539244802715316,
+      "evidence": 0.872719558761137,
+      "identity": 0.8343232923207468,
+      "price": 0.871234620280017,
       "seller": 1.0,
-      "shipping": 0.7911320754716981,
-      "stock": 0.7709433962264151
+      "shipping": 0.8008061094611795,
+      "stock": 0.7488332626219771
     },
     "sofmap": {
-      "condition": 0.856,
-      "evidence": 0.936,
-      "identity": 0.96,
-      "price": 0.936,
+      "condition": 0.8706896551724138,
+      "evidence": 0.9224137931034483,
+      "identity": 0.9482758620689655,
+      "price": 0.9224137931034483,
       "seller": 1.0,
       "shipping": 0.0,
-      "stock": 0.944
+      "stock": 0.9310344827586207
     },
     "tsukumo": {
-      "condition": 0.995457023441759,
-      "evidence": 0.9047792113392695,
-      "identity": 0.9970924950027258,
-      "price": 0.9970924950027258,
+      "condition": 0.9950313027924078,
+      "evidence": 0.9037066481168637,
+      "identity": 0.9967206598429892,
+      "price": 0.9967206598429892,
       "seller": 1.0,
-      "shipping": 0.8429947301471924,
-      "stock": 0.9935489732872979
+      "shipping": 0.8458710126204909,
+      "stock": 0.9938388154625857
     },
     "yahoo": {
       "condition": null,
@@ -467,8 +467,22 @@
     "reviewer": "ChatGPT/Codex",
     "schema_version": 1
   },
-  "measured_four_hour_windows": 27,
-  "measured_runs": 98,
+  "manual_review_verified": {
+    "declared_count_mismatches": [],
+    "duplicate_event_ids": [],
+    "false_positive_count": 0,
+    "invalid_records": [],
+    "needs_review_count": 1,
+    "passed_event_ids": [
+      "76993c9313bbc85a63a5df9071497a3a",
+      "d2d76764ad56bfe39f2488f53e76bd4e",
+      "f9237c3d654ce1ecbab7896366f8d125"
+    ],
+    "policy": "distinct_final_records_with_source_evidence",
+    "reviewed_count": 3
+  },
+  "measured_four_hour_windows": 25,
+  "measured_runs": 99,
   "reasons": [
     "insufficient_scheduled_runs",
     "ten_store_coverage_incomplete",
@@ -485,6 +499,42 @@
     "manual_false_positive_audit_pending",
     "manual_audit_unresolved_findings"
   ],
-  "recent_runs": 34,
+  "recent_runs": 35,
+  "run_provenance": {
+    "event_counts": {
+      "push": 9,
+      "schedule": 26
+    },
+    "policy": "github_api_schedule_original_created_at_four_hour_windows",
+    "sampled_run_ids": [
+      "35868333314-1",
+      "35910831909-1",
+      "35931007011-1",
+      "35957073055-1",
+      "36006308447-1",
+      "36051762885-1",
+      "36071485613-1",
+      "36096344268-1",
+      "36142907021-1",
+      "36200421573-1",
+      "36219229487-1",
+      "36243873834-1",
+      "36265240456-1",
+      "36277416558-1",
+      "36296694114-1",
+      "36324119814-1",
+      "36345516480-1",
+      "36357282519-1",
+      "36381479213-1",
+      "36453163845-1",
+      "36502676661-1",
+      "36556909239-1",
+      "36609376348-1",
+      "36646551094-1",
+      "36673642025-1"
+    ],
+    "unique_scheduled_runs": 26,
+    "unknown_run_ids": []
+  },
   "started_at": "2026-09-13T19:28:10.260709+00:00"
 }
