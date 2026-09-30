@@ -56,6 +56,7 @@ Yahoo!はGitHubリポジトリの **Settings → Secrets and variables → Actio
 | `state/flyers/editions/<hash>.json` | チラシ版、対象店舗、開催期間・確認状態 |
 | `state/requests/<store>.json` | 特価候補だけを対象とする次回の比較検索 |
 | `state/metrics/<run>.json` | 巡回範囲・必須項目取得率・未処理滞留の測定 |
+| `state/validation/run_provenance.json` | GitHub APIで確認した実行イベント・作成日時・試行番号。過去分も出典付きで補完し、未確認を定期実行へ推測しない |
 | `public/latest.json` | 軽量な最新索引、10店の取得状況 |
 | `public/collection_errors.json` | URL別の取得失敗件数・巡回漏れの詳細。索引には原因別の件数とURL例を掲載 |
 | `public/notifications.json` | 現在も根拠が有効な通知候補と固定ID |
@@ -103,12 +104,14 @@ OCRはTesseractの日本語・英語モデルを使用し、Actionsでインス�
 
 `python -m sale_monitor.cli validate` で現状を確認します。切替は自動実行しません。まず収集範囲、不足項目、滞留、誤判定を点検し、以下の初期ゲートを満たした後に既存ChatGPTタスクを切り替えます。
 
-1. 公開後7日以上、直近7日に40個以上の異なる4時間枠で測定がある。同じ枠の再実行は最新1回だけを取得率の集計に使う。
+1. 公開後7日以上、直近7日に40個以上の異なる4時間枠で、GitHub APIで確認した `schedule` 実行の測定がある。枠は元のActions実行の作成日時で区切り、同じ実行の再試行は新しい枠に数えない。同じ枠では最新1回を取得率集計に使う。push・手動実行・種別不明は定期測定へ数えず、直近の種別不明が残れば切替を保留する。
 2. 10店の巡回が完了し、必須項目の取得率95%以上、24時間を超える未処理がない。
-3. 最低20件の人またはChatGPTによる証拠照合で誤通知0件を確認し、`state/validation/manual_review.json` に `reviewed_at`、`reviewed_count`、`false_positive_count` を記録する。未解決の指摘は `needs_review_count` と個別の根拠に記録し、確認済み件数へ加えない。未解決が1件でもあれば切替を保留する。
+3. 最低20件の人またはChatGPTによる証拠照合で誤通知0件を確認し、`state/validation/manual_review.json` に個別の `audits` と集計を保存する。重複しないevent ID、確認者・確認日時・元のrun・商品、出典URL・観測日時・ハッシュ、合格時の数値判定根拠を確認して件数を再集計する。申告件数だけ・Qwenの提案・証拠不足・将来日時は合格件数にならない。未解決所見は `needs_review_count` が0でも検出し、件数の不一致や記録不備があれば切替を保留する。公開の `manual_review` は原記録を保持し、`manual_review_verified` に再集計と不足理由を示す。
 4. JSONの取得と既存タスクでの読取を確認する。
 
 40枠・95%・20件は初期運用の検証ゲートです。A/Bの数値基準を変更するものではありません。Yahoo!未設定やサイト側取得障害が残る間は切替不可として原因を表示します。Amazonの無料取得率もここで測定し、必要性が判明してからKeepa APIを比較します。有料契約は作成していません。
+
+実行種別の補完は公開前に `scripts/capture_run_provenance.py` で行います。APIの一時障害時も保存済みの確認記録を保持し、未確認runをJSONに明示します。個別監査の構造検査は、原ページを実際に照合するCodexのレビューや配信確認の代わりにはなりません。
 
 ## 参照
 

@@ -10,6 +10,7 @@ from .models import STORES, Offer, digest, fresh, iso, timestamp, utcnow
 from .storage import Store, atomic_json, read_json
 from .scheduling import plan_comparisons
 from .comparison_integrity import known_comparators, missing_comparators
+from .validation_integrity import audit_counts, scheduled_samples, verified_provenance
 
 
 def errors_by_url(errors: list[dict]) -> list[dict]:
@@ -179,7 +180,8 @@ def aggregate(root: Path, public: Path, run_id: str, now=None) -> dict:
         event["current_evidence"] = accepted.get(key)
     notification = [e for e in events if e["currently_actionable"] and e["delivery_status"] != "delivered"]
     complete = sum(s["status"] == "complete" for s in statuses.values())
-    index = {"schema_version": 1, "generated_at": iso(now), "run_id": run_id, "mode": "parallel_validation", "monitored_store_count": 10,
+    provenance = verified_provenance(run_id, disk.load("validation/run_provenance.json", {}))
+    index = {"schema_version": 1, "generated_at": iso(now), "run_id": run_id, "run_provenance": provenance, "mode": "parallel_validation", "monitored_store_count": 10,
              "excluded_stores": ["rakuten"], "complete_stores": complete, "collection_completion_rate": complete/10,
              "stores": statuses, "notification_count": len(notification), "review_count": len(reviews),
              "comparison_planning": comparison_plan["summary"],
@@ -209,19 +211,19 @@ def aggregate(root: Path, public: Path, run_id: str, now=None) -> dict:
 def validation(root: Path, now=None) -> dict:
     now = now or utcnow()
     snapshots = [read_json(p, {}) for p in (root / "metrics").glob("*.json")]
-    snapshots = [s for s in snapshots if timestamp(s.get("generated_at"))]
+    snapshots = [s for s in snapshots if timestamp(s.get("generated_at")) and timestamp(s["generated_at"]) <= now]
     snapshots.sort(key=lambda s: s["generated_at"])
     start = timestamp(snapshots[0]["generated_at"]) if snapshots else now
     recent = [s for s in snapshots if timedelta(0) <= now - timestamp(s["generated_at"]) <= timedelta(days=7)]
-    # Manual reruns and code pushes are diagnostics, not additional hours of
-    # parallel operation. Use the latest observation in each four-hour window.
-    windows = {int(timestamp(s["generated_at"]).timestamp()) // (4 * 3600): s for s in recent}
-    sampled = list(windows.values())
+    catalog = read_json(root / "validation" / "run_provenance.json", {})
+    sampled, provenance = scheduled_samples(recent, catalog, now)
     reasons = []
     if now - start < timedelta(days=7):
         reasons.append("seven_days_not_elapsed")
     if len(sampled) < 40:
         reasons.append("insufficient_scheduled_runs")
+    if provenance["unknown_run_ids"]:
+        reasons.append("run_provenance_unverified")
     if any(s.get("complete_stores", 0) < 10 for s in recent):
         reasons.append("ten_store_coverage_incomplete")
     if any(v.get("pending_over_24h", 0) for s in recent for v in s["stores"].values()):
@@ -238,10 +240,15 @@ def validation(root: Path, now=None) -> dict:
         if not total or any(not total[k] or known[k]/total[k] < .95 for k in total):
             reasons.append("mandatory_coverage_below_95_percent:" + name)
     audit = read_json(root / "validation" / "manual_review.json", {})
-    if not audit.get("reviewed_at") or audit.get("false_positive_count") != 0 or audit.get("reviewed_count", 0) < 20:
+    verified_audit = audit_counts(audit, now)
+    reviewed_at = timestamp(audit.get("reviewed_at"))
+    if not reviewed_at or reviewed_at > now or verified_audit["false_positive_count"] != 0 or verified_audit["reviewed_count"] < 20:
         reasons.append("manual_false_positive_audit_pending")
-    if audit.get("needs_review_count", 0):
+    if verified_audit["needs_review_count"] or audit.get("needs_review_count", 0):
         reasons.append("manual_audit_unresolved_findings")
+    if verified_audit["invalid_records"] or verified_audit["declared_count_mismatches"]:
+        reasons.append("manual_audit_record_integrity")
     return {"started_at": iso(start), "earliest_cutover_at": iso(start + timedelta(days=7)), "measured_runs": len(snapshots),
-            "recent_runs": len(recent), "measured_four_hour_windows": len(sampled), "coverage": coverage, "manual_review": audit, "cutover_ready": not reasons, "reasons": reasons,
+            "recent_runs": len(recent), "measured_four_hour_windows": len(sampled), "run_provenance": provenance,
+            "coverage": coverage, "manual_review": audit, "manual_review_verified": verified_audit, "cutover_ready": not reasons, "reasons": reasons,
             "amazon_keepa_comparison": {"adoption": "not_enabled", "free_current_conditions_coverage": coverage.get("amazon"), "decision": "measure_free_gaps_before_paid_comparison"}}

@@ -564,13 +564,26 @@ class Persistence(unittest.TestCase):
             root = Path(folder); disk = Store(root)
             disk.save("metrics/start.json", {"generated_at": iso(NOW-timedelta(days=8)), "stores": {}})
             states = {store: {"mandatory_field_coverage": {key: {"known": 20, "total": 20} for key in ("identity", "seller", "condition", "price", "shipping", "stock", "evidence")}, "pending_over_24h": 0} for store in STORES}
+            provenance = {"runs": {}}
             for i in range(40):
-                disk.save(f"metrics/run-{i}.json", {"generated_at": iso(NOW-timedelta(hours=4*i)), "complete_stores": 10, "stores": states})
-            disk.save("validation/manual_review.json", {"reviewed_at": iso(NOW), "reviewed_count": 20, "false_positive_count": 0})
+                rid = str(1000+i)
+                when = iso(NOW-timedelta(hours=4*i))
+                disk.save(f"metrics/{rid}-1.json", {"run_id": rid+"-1", "generated_at": when, "complete_stores": 10, "stores": states})
+                provenance["runs"][rid] = {"source": "github_actions_api", "repository": "chijimi33/pc-sale-monitor", "run_id": rid,
+                    "event": "schedule", "max_attempt": 1, "created_at": when, "checked_at": iso(NOW),
+                    "workflow_path": ".github/workflows/monitor.yml", "api_url": f"https://api.github.com/repos/chijimi33/pc-sale-monitor/actions/runs/{rid}"}
+            disk.save("validation/run_provenance.json", provenance)
+            audit = {"reviewed_at": iso(NOW), "reviewer": "ChatGPT/Codex", "reviewed_count": 20, "false_positive_count": 0, "needs_review_count": 0,
+                "audits": [{"event_id": f"event-{i}", "offer_key": f"offer-{i}", "source_run_id": "1000-1", "reviewed_at": iso(NOW), "status": "passed",
+                    "price_check": {"status": "supported", "rule": "A"}, "findings": [],
+                    "evidence": [{"store": "ark", "url": f"https://www.ark-pc.co.jp/i/{i}/", "observed_at": iso(NOW), "body_sha256": "a"*64}]} for i in range(20)]}
+            disk.save("validation/manual_review.json", audit)
             report = validation(root, NOW)
             self.assertEqual(report["measured_four_hour_windows"], 40)
             self.assertTrue(report["cutover_ready"], report["reasons"])
-            disk.save("validation/manual_review.json", {"reviewed_at": iso(NOW), "reviewed_count": 20, "false_positive_count": 0, "needs_review_count": 1})
+            audit["audits"][0]["findings"] = [{"status": "open", "reason": "unresolved condition"}]
+            # Even dishonest zero declarations cannot hide a real open finding.
+            disk.save("validation/manual_review.json", audit)
             report = validation(root, NOW)
             self.assertFalse(report["cutover_ready"])
             self.assertIn("manual_audit_unresolved_findings", report["reasons"])

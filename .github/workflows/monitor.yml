@@ -85,6 +85,8 @@ jobs:
           pattern: state-*
           path: incoming
           merge-multiple: true
+      - name: Verify run events for validation
+        run: python scripts/capture_run_provenance.py --state state-repo/state --run-id "$RUN_ID"
       - run: python -m sale_monitor.cli aggregate --incoming incoming --state state-repo/state --public state-repo/public --run-id "$RUN_ID"
       - run: python scripts/state_branch.py publish
       - uses: actions/upload-artifact@v4
