@@ -1,6 +1,6 @@
 {
   "changes": {},
-  "checkpoint_at": "2026-09-30T10:52:01.084625+00:00",
+  "checkpoint_at": "2026-09-30T15:28:45.629116+00:00",
   "comparison_refresh": {
     "existing_queue_policy": "retained_with_original_age_and_attempts",
     "historical_offer_policy": "retained_not_current_without_new_observation",
@@ -9,16 +9,21 @@
     "policy": "requested_or_known_sale_candidate_identity_or_unresolved",
     "reasons": {},
     "request_plan_verified": true,
-    "requested_identity_count": 171,
-    "sale_candidate_identity_count": 1183,
+    "requested_identity_count": 170,
+    "sale_candidate_identity_count": 1184,
     "selected_for_refresh": 0
   },
-  "completed_at": "2026-09-30T10:52:01.084617+00:00",
+  "completed_at": "2026-09-30T15:28:45.629100+00:00",
   "cycle_complete": false,
-  "cycle_started_at": "2026-09-30T10:18:50.238983+00:00",
+  "cycle_started_at": "2026-09-30T14:55:35.475031+00:00",
   "discovery_gaps": [],
   "done": [],
   "errors": [
+    {
+      "reason": "TimeoutError",
+      "task_id": "17580440faaf47b81782b3ab",
+      "url": null
+    },
     {
       "reason": "TimeoutError",
       "task_id": "63a856972410ee40e0c0c603",
@@ -1378,14 +1383,14 @@
       "type": "search"
     },
     "17580440faaf47b81782b3ab": {
-      "attempts": 112,
+      "attempts": 113,
       "created_at": "2026-09-13T22:24:10.680336+00:00",
       "kind": "comparison",
-      "last_attempt_at": "2026-09-30T06:03:54.058038+00:00",
+      "last_attempt_at": "2026-09-30T15:03:19.096158+00:00",
       "last_error": "TimeoutError",
       "priority": 0,
       "query": "0192876826362",
-      "retry_at_epoch_seconds": 1790748534.0580595,
+      "retry_at_epoch_seconds": 1790780899.0961804,
       "type": "search"
     },
     "1780c0cab01911ce2477231c": {
@@ -1429,15 +1434,15 @@
       "type": "search"
     },
     "1826f8b0f5942c93446fa814": {
-      "attempts": 97,
+      "attempts": 99,
       "created_at": "2026-09-13T22:24:10.680355+00:00",
       "kind": "comparison",
-      "last_attempt_at": "2026-09-30T10:52:01.036465+00:00",
+      "last_attempt_at": "2026-09-30T15:28:45.590274+00:00",
       "last_error": "TimeoutError",
       "priority": 0,
       "query": "0197105418684",
       "requested": true,
-      "retry_at_epoch_seconds": 1790765821.0364861,
+      "retry_at_epoch_seconds": 1790782425.590297,
       "type": "search"
     },
     "1871dd634191b5a5db6ccf94": {
@@ -2844,7 +2849,6 @@
       "last_error": "TimeoutError",
       "priority": 0,
       "query": "4711377429245",
-      "requested": true,
       "type": "search"
     },
     "3489f798519531042de13283": {
@@ -5565,12 +5569,12 @@
       "type": "search"
     },
     "63a856972410ee40e0c0c603": {
-      "attempts": 125,
+      "attempts": 128,
       "created_at": "2026-09-13T19:18:38.982618+00:00",
       "depth": 0,
-      "last_attempt_at": "2026-09-30T10:45:39.542882+00:00",
+      "last_attempt_at": "2026-09-30T15:22:23.892309+00:00",
       "last_error": "TimeoutError",
-      "retry_at_epoch_seconds": 1790765439.5429027,
+      "retry_at_epoch_seconds": 1790782043.8923304,
       "sale_page": false,
       "type": "list",
       "url": "https://www.biccamera.com/bc/main/"
@@ -14826,12 +14830,12 @@
   "retry_activity": {
     "recovered_tasks": 0,
     "retries_started": 6,
-    "wait_seconds": 1499.239449262619
+    "wait_seconds": 1499.0440771579742
   },
   "retry_after": {},
-  "run_id": "36701519108-1",
+  "run_id": "36732611921-1",
   "scheduler": {
-    "comparison_cursor": 3,
+    "comparison_cursor": 2,
     "cursor": 3,
     "selected_by_lane": {
       "comparison": 3,
@@ -14839,7 +14843,7 @@
     }
   },
   "schema_version": 1,
-  "started_at": "2026-09-30T10:18:50.238514+00:00",
+  "started_at": "2026-09-30T14:55:35.474403+00:00",
   "status": "partial",
   "store": "bic",
   "transport_retry_after": {},
@@ -14848,13 +14852,13 @@
       "affected_tasks": 1460,
       "host": "www.biccamera.com",
       "reason": "shared_page_retry",
-      "until_epoch_seconds": 1790765821.0364473
+      "until_epoch_seconds": 1790782425.5902574
     },
     {
       "affected_tasks": 1,
       "host": "www.biccamera.com",
       "reason": "TimeoutError",
-      "until_epoch_seconds": 1790765821.0364861
+      "until_epoch_seconds": 1790782425.590297
     }
   ]
 }
