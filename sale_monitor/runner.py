@@ -89,6 +89,10 @@ class Collector:
                 existing["created_at"] = task["created_at"]
             if task.get("requested"):
                 existing["requested"] = True
+            if task.get("discovery_origin"):
+                prior = existing.get("discovery_origin")
+                if not prior or task["discovery_origin"]["created_at"] < prior["created_at"]:
+                    existing["discovery_origin"] = deepcopy(task["discovery_origin"])
         elif task_id not in self.state["done"]:
             self.state["queue"][task_id] = {"created_at": iso(), "attempts": 0, **task}
 
@@ -261,8 +265,13 @@ class Collector:
                 raise FetchError("search_form_not_found")
             self.enqueue({"type": "list", "url": url, "sale_page": False, "kind": "comparison", "depth": 0, "priority": task.get("priority", 3), "created_at": task.get("created_at") or iso()})
         elif kind == "list":
+            # Explicit, reviewed entry changes apply only to sale discovery.
+            # Keep the old queued task and age until replacement discovery
+            # succeeds; an HTTP/parse failure must still leave it pending.
+            replacement = self.cfg.get("list_url_replacements", {}).get(task["url"]) if task.get("sale_page") and task.get("kind") != "comparison" else None
+            fetch_url = replacement or task["url"]
             try:
-                page = self.page(task["url"])
+                page = self.page(fetch_url)
             except FetchError as exc:
                 if task.get("kind") != "comparison" or exc.page is None or not confirmed_empty_search(self.store, exc.page):
                     raise
@@ -275,8 +284,10 @@ class Collector:
                 return
             products, pagination, campaigns = discover(page, self.cfg, sale_page=task.get("sale_page", False), comparison=task.get("kind") == "comparison")
             if not products and task.get("sale_page") and self.cfg.get("browser_fallback") and page.method != "browser":
-                page = self.client.rendered(task["url"])
+                page = self.client.rendered(fetch_url)
                 products, pagination, campaigns = discover(page, self.cfg, sale_page=True, comparison=task.get("kind") == "comparison")
+            if replacement and not products:
+                raise FetchError("discovery_replacement_unverified")
             if not products and not campaigns and task.get("kind") != "comparison":
                 self.state["discovery_gaps"].append({"url": task["url"], "reason": "no_sale_candidates_parser_review"})
             if self.store == "koubou" and task.get("kind") == "comparison" and not products:
@@ -285,15 +296,29 @@ class Collector:
                 raise FetchError("comparison_search_response_unverified")
             self.state["list_pages"] += 1
             self.state["listed_candidates"] += len(products)
+            discovery_origin = task.get("discovery_origin")
+            if replacement:
+                discovery_origin = {"url": task["url"], "created_at": task["created_at"]}
+            origin = {"created_at": task["created_at"]} if task.get("kind") == "comparison" and task.get("created_at") else {}
+            if discovery_origin:
+                discovery_origin = {**discovery_origin, "created_at": min(discovery_origin["created_at"], task["created_at"])}
+                origin = {"created_at": discovery_origin["created_at"], "discovery_origin": discovery_origin}
             for product in products:
-                origin = {"created_at": task["created_at"]} if task.get("kind") == "comparison" and task.get("created_at") else {}
                 self.enqueue({"type": "product", **product, "priority": task.get("priority", 3), **origin})
             for url in pagination:
-                self.enqueue({**task, "url": url})
+                self.enqueue({**task, "url": url, **origin})
             # Follow explicitly linked sale pages, including nested sale portals.
             # The queue deduplicates cycles; ordinary category links stay excluded.
             for url in campaigns:
-                self.enqueue({"type": "list", "url": url, "sale_page": True, "depth": task.get("depth", 0) + 1})
+                campaign_origin = origin if discovery_origin else {}
+                self.enqueue({"type": "list", "url": url, "sale_page": True, "depth": task.get("depth", 0) + 1, **campaign_origin})
+            if replacement:
+                self.state.setdefault("discovery_replacements", {})[task["url"]] = {
+                    "original_task": deepcopy(task), "replacement_url": page.url,
+                    "observed_at": page.observed_at, "observed_run_id": self.run_id,
+                    "http_status": page.status, "content_hash": digest(page.text),
+                    "product_count": len(products), "pagination": pagination,
+                    "campaigns": campaigns, "result": "discovered_products_enqueued"}
         elif kind == "product":
             if self.store == "amazon":
                 offer = adapters.amazon_product(self.client, task)
