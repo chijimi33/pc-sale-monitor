@@ -15,5 +15,5 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
-      - name: Compare urllib and system curl without updating monitor state
-        run: python -B -X utf8 tools/transport_probe.py
+      - name: Compare production Client and curl on failed URLs without updating monitor state
+        run: python -B -X utf8 -m tools.transport_probe --collector-client
