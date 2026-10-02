@@ -35,6 +35,15 @@ def main():
     network = sub.add_parser("transport-study")
     network.add_argument("--output", type=Path, required=True)
     network.add_argument("--methods", nargs="+", choices=["urllib", "pooled", "browser"], default=["urllib", "pooled"])
+    capture_check = sub.add_parser("verify-capture")
+    capture_check.add_argument("--input", type=Path, required=True)
+    capture_check.add_argument("--allow-partial", action="store_true")
+    capture_replay = sub.add_parser("replay-capture")
+    capture_replay.add_argument("--input", type=Path, required=True)
+    capture_replay.add_argument("--output", type=Path, required=True)
+    capture_replay.add_argument("--allow-partial", action="store_true")
+    smoke = sub.add_parser("capture-smoke")
+    smoke.add_argument("--output", type=Path, required=True)
     restore = sub.add_parser("restore")
     restore.add_argument("--export", type=Path, required=True)
     restore.add_argument("--backend", choices=["json", "journal", "sqlite"], required=True)
@@ -51,7 +60,19 @@ def main():
     timing.add_argument("--input", type=Path, required=True)
     timing.add_argument("--output", type=Path, required=True)
     args = parser.parse_args()
-    if args.command == "prepare":
+    if args.command == "verify-capture":
+        from .capture import verify_capture
+        result = verify_capture(args.input, allow_partial=args.allow_partial)
+        print(json.dumps({"complete": result["manifest"]["complete"], "receipts": len(result["receipts"]),
+                          "verified_bytes": result["verified_bytes"]}))
+    elif args.command == "replay-capture":
+        from .capture import replay_capture
+        result = replay_capture(args.input, args.output, allow_partial=args.allow_partial)
+        print(json.dumps({k: result[k] for k in ("mode", "http_requests", "parsed_pages", "source_complete")}))
+    elif args.command == "capture-smoke":
+        from .capture import smoke_capture
+        print(json.dumps(smoke_capture(args.output)))
+    elif args.command == "prepare":
         from .inputs import prepare
         result = prepare(args.output, args.saved_pages)
         print(json.dumps({"input_hash": result["input_hash"], "snapshots": list(result["snapshots"])}))

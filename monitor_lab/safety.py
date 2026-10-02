@@ -73,11 +73,16 @@ def environment():
             "github_event": os.environ.get("GITHUB_EVENT_NAME")}
 
 
-def implementation_hash():
+def implementation_hash(*, normalize_line_endings=False):
     repo = Path(__file__).resolve().parents[1]
     files = [p for directory in ("monitor_lab", "sale_monitor", "config")
              for p in (repo / directory).rglob("*") if p.suffix in {".py", ".json"} and p.is_file()]
-    return digest({str(p.relative_to(repo)).replace("\\", "/"): hashlib.sha256(p.read_bytes()).hexdigest() for p in files})
+    def checksum(path):
+        body = path.read_bytes()
+        if normalize_line_endings:
+            body = body.replace(b"\r\n", b"\n")
+        return hashlib.sha256(body).hexdigest()
+    return digest({str(p.relative_to(repo)).replace("\\", "/"): checksum(p) for p in files})
 
 
 def experiment_id():

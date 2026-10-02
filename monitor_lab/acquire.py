@@ -35,6 +35,9 @@ class Receipt:
     content_type: str = ""
     elapsed_seconds: float = 0.0
     evidence_mode: str = "live"
+    body_file: str | None = None
+    body_bytes: int | None = None
+    body_incomplete: bool = False
 
 
 class NoRedirect(HTTPRedirectHandler):
@@ -174,13 +177,14 @@ def challenge(body):
 
 class Coordinator:
     def __init__(self, transport, *, budget=2100, delay=1, hosts=None,
-                 clock=time.time, monotonic=time.monotonic, sleep=time.sleep):
+                 clock=time.time, monotonic=time.monotonic, sleep=time.sleep, capture=None):
         self.transport, self.delay, self.hosts = transport, delay, hosts if hosts is not None else {}
         self.clock, self.monotonic, self.sleep = clock, monotonic, sleep
         self.deadline = monotonic() + budget
         self.last = {}
         self.sequence = []
         self.requests = 0
+        self.capture = capture
 
     def fetch(self, url):
         start = self.monotonic()
@@ -220,6 +224,8 @@ class Coordinator:
             headers = {k.lower(): v for k, v in headers.items()}
             receipt.status, receipt.content_type = status, headers.get("content-type", "")
             receipt.body_sha256 = hashlib.sha256(body).hexdigest()
+            receipt.body_bytes = len(body)
+            receipt.body_incomplete = len(body) > MAX_BODY
             retry = headers.get("retry-after")
             if status in (401, 403) or challenge(body):
                 receipt.error = "authentication_or_challenge"
@@ -235,7 +241,16 @@ class Coordinator:
         except Exception as exc:
             receipt.error = "transport:" + type(exc).__name__
             self.hosts[host] = {"until": self.clock() + 60, "reason": receipt.error}
+            if isinstance(exc, http.client.IncompleteRead):
+                body = exc.partial[:MAX_BODY + 1]
+                receipt.body_sha256 = hashlib.sha256(body).hexdigest()
+                receipt.body_bytes = len(body)
+                receipt.body_incomplete = True
         receipt.elapsed_seconds = self.monotonic() - start
         receipt.observed_at = iso(datetime.fromtimestamp(self.clock(), timezone.utc))
+        # Evidence I/O failures must remain failures; never relabel them as a
+        # remote transport problem or publish a result with missing evidence.
+        if self.capture is not None and receipt.body_sha256 is not None:
+            receipt.body_file = self.capture(receipt, body)
         page = None if receipt.error else Page(url, body, receipt.observed_at, receipt.method, receipt.content_type)
         return page, receipt

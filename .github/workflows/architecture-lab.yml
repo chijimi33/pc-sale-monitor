@@ -21,6 +21,19 @@ jobs:
           python-version: '3.12'
       - run: pip install -e .
       - run: python -m unittest discover -s monitor_lab/tests -v
+      - name: Create and replay a synthetic evidence bundle without network requests
+        run: |
+          python -m monitor_lab capture-smoke --output "$RUNNER_TEMP/pc-sale-monitor-lab/evidence-smoke"
+          python -m monitor_lab verify-capture --input "$RUNNER_TEMP/pc-sale-monitor-lab/evidence-smoke"
+          python -m monitor_lab replay-capture --input "$RUNNER_TEMP/pc-sale-monitor-lab/evidence-smoke" --output "$RUNNER_TEMP/pc-sale-monitor-lab/evidence-smoke-replay"
+      - name: Retain synthetic bundle for a cross-platform download check
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: architecture-lab-smoke-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/pc-sale-monitor-lab/evidence-smoke
+          if-no-files-found: error
+          retention-days: 7
 
   acquisition:
     needs: invariants
@@ -39,3 +52,11 @@ jobs:
           python-version: '3.12'
       - name: Twelve sequential tasks with shared host deadlines
         run: python -m monitor_lab transport-study --output "$RUNNER_TEMP/pc-sale-monitor-lab/acquisition" --methods urllib pooled
+      - name: Retain complete or interrupted acquisition evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: architecture-lab-acquisition-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/pc-sale-monitor-lab/acquisition
+          if-no-files-found: error
+          retention-days: 7
