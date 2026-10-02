@@ -2,6 +2,7 @@ name: Isolated architecture lab
 on:
   pull_request:
     paths: ['monitor_lab/**', '.github/workflows/architecture-lab.yml']
+    types: [opened, synchronize, reopened, labeled]
   workflow_dispatch:
 
 permissions:
@@ -9,6 +10,7 @@ permissions:
 
 jobs:
   invariants:
+    if: github.event.action != 'labeled' || github.event.label.name == 'lab:acquire-once'
     runs-on: ubuntu-latest
     timeout-minutes: 10
     env:
@@ -37,9 +39,17 @@ jobs:
 
   acquisition:
     needs: invariants
-    # The first draft-PR observation is sufficient. Ordinary code updates only
-    # repeat the invariant tests, not live store traffic.
-    if: github.event_name == 'workflow_dispatch' || github.event.action == 'opened'
+    # Live traffic requires opening a same-repository PR, manual dispatch, or
+    # deliberately adding this label. Keeping the label during updates does not
+    # repeat acquisition; remove and re-add it for another bounded observation.
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      (github.event.pull_request.head.repo.full_name == github.repository &&
+       (github.event.action == 'opened' ||
+        (github.event.action == 'labeled' && github.event.label.name == 'lab:acquire-once')))
+    concurrency:
+      group: architecture-lab-acquisition
+      cancel-in-progress: false
     runs-on: ubuntu-latest
     timeout-minutes: 10
     env:
