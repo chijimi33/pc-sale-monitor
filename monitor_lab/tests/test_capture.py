@@ -137,9 +137,10 @@ class CaptureTest(unittest.TestCase):
     def test_receipt_mismatch_fails_even_if_index_is_recomputed(self):
         root = self.root / "mismatch"
         smoke_capture(root)
-        receipts = read(root / "receipts.partial.json")
+        receipts_file = read(root / "capture-manifest.json")["records"]["receipts"]
+        receipts = read(root / receipts_file)
         receipts[0]["body_sha256"] = "0" * 64
-        write(root / "receipts.partial.json", receipts)
+        write(root / receipts_file, receipts)
         index = read(root / "capture-manifest.json")
         for row in index["files"]:
             body = (root / row["path"]).read_bytes()

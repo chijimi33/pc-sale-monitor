@@ -44,6 +44,9 @@ def main():
     capture_replay.add_argument("--allow-partial", action="store_true")
     smoke = sub.add_parser("capture-smoke")
     smoke.add_argument("--output", type=Path, required=True)
+    recovery = sub.add_parser("recover-capture")
+    recovery.add_argument("--input", type=Path, required=True)
+    recovery.add_argument("--output", type=Path, required=True)
     restore = sub.add_parser("restore")
     restore.add_argument("--export", type=Path, required=True)
     restore.add_argument("--backend", choices=["json", "journal", "sqlite"], required=True)
@@ -60,7 +63,10 @@ def main():
     timing.add_argument("--input", type=Path, required=True)
     timing.add_argument("--output", type=Path, required=True)
     args = parser.parse_args()
-    if args.command == "verify-capture":
+    if args.command == "recover-capture":
+        from .capture import recover_capture
+        print(json.dumps(recover_capture(args.input, args.output)))
+    elif args.command == "verify-capture":
         from .capture import verify_capture
         result = verify_capture(args.input, allow_partial=args.allow_partial)
         print(json.dumps({"complete": result["manifest"]["complete"], "receipts": len(result["receipts"]),
