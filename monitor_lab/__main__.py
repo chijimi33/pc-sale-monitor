@@ -1,0 +1,89 @@
+from __future__ import annotations
+
+import argparse
+import json
+from pathlib import Path
+
+
+def main():
+    parser = argparse.ArgumentParser(description="Isolated PC sale architecture lab; production outputs are forbidden.")
+    sub = parser.add_subparsers(dest="command", required=True)
+    prepare = sub.add_parser("prepare")
+    prepare.add_argument("--output", type=Path, required=True)
+    prepare.add_argument("--saved-pages", type=Path)
+    compare = sub.add_parser("run")
+    compare.add_argument("--architecture", choices=["A", "B", "C"], required=True)
+    compare.add_argument("--input", type=Path, required=True)
+    compare.add_argument("--snapshot", choices=["transport_failure", "tsukumo_recovery", "ark_repaired"], required=True)
+    compare.add_argument("--mode", choices=["replay", "live"], required=True)
+    compare.add_argument("--output", type=Path, required=True)
+    compare.add_argument("--backend", choices=["json", "journal", "sqlite"])
+    compare.add_argument("--transport", choices=["urllib", "pooled", "browser"], default="urllib")
+    compare.add_argument("--budget", type=int, default=2100)
+    compare.add_argument("--cycles", type=int, default=1)
+    compare.add_argument("--max-tasks", type=int, default=20)
+    bench = sub.add_parser("benchmark")
+    bench.add_argument("--source", type=Path, required=True)
+    bench.add_argument("--output", type=Path, required=True)
+    bench.add_argument("--repeats", type=int, default=3)
+    bench.add_argument("--count", type=int, default=100)
+    worker = sub.add_parser("storage-worker")
+    worker.add_argument("--source", type=Path, required=True)
+    worker.add_argument("--output", type=Path, required=True)
+    worker.add_argument("--backend", choices=["json", "journal", "sqlite"], required=True)
+    worker.add_argument("--count", type=int, default=100)
+    network = sub.add_parser("transport-study")
+    network.add_argument("--output", type=Path, required=True)
+    network.add_argument("--methods", nargs="+", choices=["urllib", "pooled", "browser"], default=["urllib", "pooled"])
+    restore = sub.add_parser("restore")
+    restore.add_argument("--export", type=Path, required=True)
+    restore.add_argument("--backend", choices=["json", "journal", "sqlite"], required=True)
+    restore.add_argument("--output", type=Path, required=True)
+    legacy = sub.add_parser("export-legacy")
+    legacy.add_argument("--experiment", type=Path, required=True)
+    legacy.add_argument("--output", type=Path, required=True)
+    legacy.add_argument("--project-observations", action="store_true")
+    matrix = sub.add_parser("suite")
+    matrix.add_argument("--input", type=Path, required=True)
+    matrix.add_argument("--output", type=Path, required=True)
+    matrix.add_argument("--repeats", type=int, default=2)
+    timing = sub.add_parser("capture-timing")
+    timing.add_argument("--input", type=Path, required=True)
+    timing.add_argument("--output", type=Path, required=True)
+    args = parser.parse_args()
+    if args.command == "prepare":
+        from .inputs import prepare
+        result = prepare(args.output, args.saved_pages)
+        print(json.dumps({"input_hash": result["input_hash"], "snapshots": list(result["snapshots"])}))
+    elif args.command == "run":
+        from .pipeline import run
+        result = run(args.input, args.snapshot, args.architecture, args.mode, args.output, backend=args.backend,
+                     transport=args.transport, budget=args.budget, cycles=args.cycles, max_tasks=args.max_tasks)
+        print(json.dumps({k: result[k] for k in ("experiment_id", "observations", "decidable_candidates", "accepted_candidates", "wall_seconds")}, ensure_ascii=False))
+    elif args.command == "capture-timing":
+        from .operations import capture_timing
+        result = capture_timing(args.input, args.output)
+        print(json.dumps(result))
+    elif args.command == "suite":
+        from .suite import suite
+        result = suite(args.input, args.output, args.repeats)
+        print(json.dumps({"runs": len(result["results"]), "all_assertions_passed": result["all_assertions_passed"]}))
+    elif args.command == "restore":
+        from .migration import restore_export
+        print(json.dumps(restore_export(args.export, args.backend, args.output)))
+    elif args.command == "export-legacy":
+        from .migration import export_legacy
+        result = export_legacy(args.experiment, args.output, project_observations=args.project_observations)
+        print(json.dumps({k: v for k, v in result.items() if k != "files"}))
+    elif args.command == "transport-study":
+        from .study import study
+        result = study(args.output, args.methods, emit=lambda row: print("LAB_RECEIPT " + json.dumps(row, ensure_ascii=False), flush=True))
+        print("LAB_STUDY " + json.dumps({k: v for k, v in result.items() if k != "receipts"}, ensure_ascii=False))
+    else:
+        from .benchmark import benchmark, worker
+        result = worker(args.backend, args.source, args.output, args.count) if args.command == "storage-worker" else benchmark(args.source, args.output, args.repeats, args.count)
+        print(json.dumps(result.get("summary", {"roundtrip_equal": result.get("roundtrip_equal")}), ensure_ascii=False))
+
+
+if __name__ == "__main__":
+    main()

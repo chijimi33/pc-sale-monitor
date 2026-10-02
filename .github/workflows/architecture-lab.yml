@@ -1,0 +1,41 @@
+name: Isolated architecture lab
+on:
+  pull_request:
+    paths: ['monitor_lab/**', '.github/workflows/architecture-lab.yml']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  invariants:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      PYTHONDONTWRITEBYTECODE: '1'
+      PYTHONUTF8: '1'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: pip install -e .
+      - run: python -m unittest discover -s monitor_lab/tests -v
+
+  acquisition:
+    needs: invariants
+    # The first draft-PR observation is sufficient. Ordinary code updates only
+    # repeat the invariant tests, not live store traffic.
+    if: github.event_name == 'workflow_dispatch' || github.event.action == 'opened'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      PYTHONDONTWRITEBYTECODE: '1'
+      PYTHONUTF8: '1'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Twelve sequential tasks with shared host deadlines
+        run: python -m monitor_lab transport-study --output "$RUNNER_TEMP/pc-sale-monitor-lab/acquisition" --methods urllib pooled
