@@ -19,7 +19,7 @@ def select_resource(tasks, hosts, now, cursor=0, policy="dependent"):
     groups = defaultdict(list)
     waiting = defaultdict(list)
     for identity, task in tasks.items():
-        if task.get("lab_status", "pending") in {"complete", "external_wait"}:
+        if task.get("lab_status", "pending") in {"complete", "external_wait", "evidence_wait"}:
             continue
         if not task.get("url"):
             continue

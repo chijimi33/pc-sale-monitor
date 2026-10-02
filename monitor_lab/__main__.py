@@ -35,6 +35,15 @@ def main():
     network = sub.add_parser("transport-study")
     network.add_argument("--output", type=Path, required=True)
     network.add_argument("--methods", nargs="+", choices=["urllib", "pooled", "browser"], default=["urllib", "pooled"])
+    queue = sub.add_parser("queue-study")
+    queue.add_argument("--input", type=Path, required=True)
+    queue.add_argument("--capture", type=Path, required=True)
+    queue.add_argument("--snapshot", choices=["transport_failure", "tsukumo_recovery", "ark_repaired"], required=True)
+    queue.add_argument("--output", type=Path, required=True)
+    queue.add_argument("--architecture", choices=["A", "B", "C"], default="B")
+    queue.add_argument("--method", choices=["urllib", "pooled"], default="urllib")
+    queue.add_argument("--budget", type=int, default=120)
+    queue.add_argument("--max-tasks", type=int, default=20)
     capture_check = sub.add_parser("verify-capture")
     capture_check.add_argument("--input", type=Path, required=True)
     capture_check.add_argument("--allow-partial", action="store_true")
@@ -63,7 +72,12 @@ def main():
     timing.add_argument("--input", type=Path, required=True)
     timing.add_argument("--output", type=Path, required=True)
     args = parser.parse_args()
-    if args.command == "recover-capture":
+    if args.command == "queue-study":
+        from .queue_study import queue_study
+        result = queue_study(args.input, args.snapshot, args.capture, args.output, architecture=args.architecture,
+                             method=args.method, budget=args.budget, max_tasks=args.max_tasks)
+        print(json.dumps({key: result[key] for key in ("observations", "http_requests", "replayed_actual_attempts", "evidence_gaps")}))
+    elif args.command == "recover-capture":
         from .capture import recover_capture
         print(json.dumps(recover_capture(args.input, args.output)))
     elif args.command == "verify-capture":

@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 from copy import deepcopy
-from dataclasses import asdict
 from datetime import datetime, timezone
 import hashlib
 from pathlib import Path
@@ -17,6 +16,7 @@ from .evidence import decide, normalize
 from .inputs import import_state, verify
 from .operations import publish
 from .safety import digest, environment, experiment_id, guard, implementation_hash, read, write
+from .scheduler import collect
 from .stores import BACKENDS, SQLite
 
 
@@ -106,7 +106,6 @@ def run(inputs, label, architecture, mode, output, *, backend=None, transport="u
     run_id = meta["experiment_id"]
     start = time.perf_counter()
     counters_before = process_counters()
-    shared_deadline = time.monotonic() + budget
     with BACKENDS[chosen](output / "store") as store:
         state = store.snapshot()
         if not state["transactions"]:
@@ -125,69 +124,46 @@ def run(inputs, label, architecture, mode, output, *, backend=None, transport="u
             store.commit("import:" + manifest["snapshots"][label]["data_sha"], changes)
         state = store.snapshot()
         hosts = deepcopy(state["records"].get("hosts", {}))
-        client = Coordinator(TRANSPORTS[transport](), budget=max(.001, shared_deadline - time.monotonic()), hosts=hosts)
-        client.deadline = shared_deadline
-        receipts, completed_times = [], {}
-        processed = 0
+        client = Coordinator(TRANSPORTS[transport](), budget=budget, hosts=hosts)
         replay_now = max(timestamp(p["observed_at"]) for p in pages)
+
+        if mode == "replay":
+            def saved_page(url):
+                fixture = next(p for p in pages if p["url"] == url)
+                body = (Path(inputs) / fixture["path"]).read_bytes()
+                page = Page(url, body, fixture["observed_at"], "saved_primary_html")
+                receipt = Receipt(url, fixture["status"], fixture["observed_at"], fixture["body_sha256"],
+                                  "saved_primary_html", environment(), evidence_mode="replay")
+                return page, receipt
+            client.fetch = saved_page
+
+        def on_page(task, page, receipt_dict, tasks, cycle, records):
+            observation = normalize(task["lab_store"], page, cfg["stores"][task["lab_store"]], run_id, receipt_dict)
+            changes = [("observations", observation.offer.key, observation.to_dict())]
+            if task["lab_role"] == "candidate":
+                task["lab_identity"] = observation.offer.identity
+                task["lab_query"] = observation.offer.jan or observation.offer.model
+                added, _ = dependencies(task, pages, tasks, page.observed_at, records.get("identity_catalog", {}))
+                for _, key, value in added:
+                    if not tasks.get(key, {}).get("lab_selected"):
+                        value["lab_ready_cycle"] = cycle + (architecture == "A")
+                changes += added
+            return changes
+
         try:
-            for cycle in range(cycles):
-                state = store.snapshot()
-                tasks = state["records"]["tasks"]
-                selected = [k for k, t in tasks.items() if t.get("lab_selected") and t.get("lab_kind") == "product" and t["lab_status"] != "complete"]
-                selected.sort(key=lambda k: (tasks[k]["lab_role"] != "candidate", tasks[k]["created_at"], k))
-                seen = set()
-                while selected and processed < max_tasks and time.monotonic() < client.deadline:
-                    key = selected.pop(0)
-                    if key in seen:
-                        continue
-                    seen.add(key)
-                    task = deepcopy(tasks[key])
-                    if task["lab_status"] == "complete":
-                        continue
-                    fixture = next((p for p in pages if p["url"] == task["url"]), None)
-                    if fixture is None:
-                        raise ValueError("Live request outside the fixed allowlist")
-                    processed += 1
-                    if mode == "replay":
-                        body = (Path(inputs) / fixture["path"]).read_bytes()
-                        page = Page(task["url"], body, fixture["observed_at"], "saved_primary_html")
-                        receipt = Receipt(task["url"], fixture["status"], fixture["observed_at"], fixture["body_sha256"],
-                                          "saved_primary_html", environment(), evidence_mode="replay")
-                    else:
-                        page, receipt = client.fetch(task["url"])
-                    receipt_dict = asdict(receipt)
-                    receipts.append(receipt_dict)
-                    task["lab_attempts"].append(receipt_dict)
-                    task["lab_last_error"] = receipt.error
-                    changes = [("hosts", h, v) for h, v in client.hosts.items()]
-                    if page:
-                        observation = normalize(task["lab_store"], page, cfg["stores"][task["lab_store"]], run_id, receipt_dict)
-                        task["lab_status"] = "complete"
-                        changes.append(("observations", observation.offer.key, observation.to_dict()))
-                        if task["lab_role"] == "candidate":
-                            task["lab_identity"] = observation.offer.identity
-                            task["lab_query"] = observation.offer.jan or observation.offer.model
-                            added, keys = dependencies(task, pages, tasks, page.observed_at, state["records"].get("identity_catalog", {}))
-                            changes += added
-                            tasks.update({k: v for _, k, v in added})
-                            if architecture != "A":
-                                selected.extend(k for k in keys if tasks[k].get("lab_kind") == "product" and tasks[k].get("lab_selected") and k not in seen)
-                        completed_times[key] = time.perf_counter() - start
-                    else:
-                        task["lab_status"] = "waiting"
-                    tasks[key] = task
-                    changes.append(("tasks", key, task))
-                    # Observation and completion are a single durable transaction.
-                    store.commit(f"acquire:{run_id}:{cycle}:{key}:{len(task['lab_attempts'])}", changes)
+            collection = collect(store, client, run_id, {p['url'] for p in pages}, on_page,
+                                 architecture=architecture, cycles=cycles, max_tasks=max_tasks, budget=budget)
         finally:
             client.transport.close()
+        receipts = collection['receipts']
+        completed_times = collection['completed_task_seconds']
         state = store.snapshot()
-        observations = list(state["records"].get("observations", {}).values())
+        observations = sorted(state["records"].get("observations", {}).values(),
+                              key=lambda row: (row['offer']['store'], row['offer']['url']))
         offers = [Offer.from_dict(o["offer"]) for o in observations]
         decisions = []
         changes = []
-        for task in state["records"]["tasks"].values():
+        for task in sorted(state["records"]["tasks"].values(), key=lambda row: (row.get('lab_store', ''), row.get('url', ''))):
             if task.get("lab_role") != "candidate":
                 continue
             candidate = next((o for o in offers if o.url == task["url"]), None)
@@ -233,6 +209,7 @@ def run(inputs, label, architecture, mode, output, *, backend=None, transport="u
                    "same_cycle_planner_enabled": architecture != "A",
                    "all_selected_comparators_observed": len(offers) == 6,
                    "completed_task_seconds": completed_times, "emitted_storage_bytes": store.emitted_bytes,
+                   "scheduling": collection['scheduling'],
                    "logical_mutation_bytes": store.logical_bytes,
                    "scope": "Two products, six saved primary pages from October 1 used against each pinned backlog. Page fixtures are supplemental controlled inputs, not a reconstruction of the snapshot's original HTTP outcomes. Whole-store throughput and full coverage not measured.",
                    "scheduled_stability_samples": 0, "formal_audits_added": 0, "cutover": False}
@@ -245,7 +222,8 @@ def run(inputs, label, architecture, mode, output, *, backend=None, transport="u
         store.export(output / "state-export.json")
         if isinstance(store, SQLite):
             store.backup(output / "backup.sqlite3")
-        publish(store, output / "publication", run_id, {"schema_version": 1, "mode": "isolated_lab",
+        payload = {"schema_version": 1, "mode": "isolated_lab",
                 "monitored_store_count": 10, "excluded_stores": ["rakuten"], "offers": [o.to_dict() for o in offers],
-                "decisions": decisions, "notifications": list(state["records"].get("events", {}).values())})
+                "decisions": decisions, "notifications": sorted(state["records"].get("events", {}).values(), key=lambda row: row['event_id'])}
+        publish(store, output / "publication", run_id + '-' + digest(payload)[:24], payload)
         return summary
