@@ -12,6 +12,7 @@ from sale_monitor.models import Offer, timestamp
 from sale_monitor.parsing import parse_product
 from sale_monitor.validation_integrity import audit_counts, verified_provenance
 from .evidence import decide, normalize
+from .events import load_registry
 from .inputs import SNAPSHOTS, import_state, verify
 from .operations import schedule_report
 from .safety import digest, environment, guard, read, write
@@ -41,6 +42,7 @@ def suite(inputs, output, repeats=2):
         configurations.append(("C", 1, "sqlite"))
     for label in SNAPSHOTS:
         files, original_tasks, _ = import_state(inputs, label)
+        _, original_events, _ = load_registry(files)
         for repeat in range(repeats):
             same = []
             for arch, cycles, backend in configurations:
@@ -55,7 +57,10 @@ def suite(inputs, output, repeats=2):
                         if not field.startswith("lab_"):
                             assert tasks[key][field] == value, f"Original task {field} changed"
                 assert state["records"]["source_files"] == files, "Source references changed"
-                assert all(v["delivery_status"] == "not_sent_lab_only" for v in state["records"].get("events", {}).values())
+                for identity, event in original_events.items():
+                    assert state['records']['events'][identity] == event, 'Original event or delivery state changed'
+                assert all(v['delivery_status'] == 'not_sent_lab_only' for k, v in state['records'].get('events', {}).items()
+                           if k not in original_events)
                 assert result["formal_audits_added"] == result["scheduled_stability_samples"] == 0
                 if arch == "A" and cycles == 1:
                     assert result["observations"] == 2 and result["accepted_candidates"] == 0

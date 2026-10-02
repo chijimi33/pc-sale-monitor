@@ -7,11 +7,11 @@ import math
 from urllib.parse import urlsplit
 
 from sale_monitor.models import allowed_url
-from .queueing import select_resource
+from .queueing import resource_url, select_resource
 
 
 def collect(store, client, run_id, allowed_urls, on_page, *, architecture, cycles, max_tasks,
-            budget, hook=lambda stage: None):
+            budget, hook=lambda stage: None, elapsed_before_collection=0):
     """Reserve bounded work before acquisition; checkpoint outcomes atomically.
 
     A reservation whose outcome was not committed remains explicitly unknown on
@@ -20,6 +20,8 @@ def collect(store, client, run_id, allowed_urls, on_page, *, architecture, cycle
     """
     if architecture not in {'A', 'B', 'C'} or cycles not in (1, 2) or not 1 <= max_tasks <= 20 or not 0 < budget <= 2100:
         raise ValueError('Experiment limit exceeded')
+    if not math.isfinite(elapsed_before_collection) or elapsed_before_collection < 0:
+        raise ValueError('Invalid preparation duration')
     options = {'architecture': architecture, 'cycles': cycles, 'max_tasks': max_tasks, 'budget_seconds': budget}
     records = store.snapshot()['records']
     tasks = records['tasks']
@@ -31,7 +33,7 @@ def collect(store, client, run_id, allowed_urls, on_page, *, architecture, cycle
             records.setdefault(namespace, {})[key] = deepcopy(value)
 
     if control is None:
-        now = client.clock()
+        now = client.clock() - elapsed_before_collection
         control = {'schema': 1, 'options': options, 'started_at_epoch': now, 'deadline_epoch': now + budget,
                    'budget_seconds': budget, 'cycle': 0, 'cursor': 0, 'reserved_resources': 0,
                    'active': None, 'confirmed_http_requests': 0, 'last_by_host': {}, 'request_sequence': [], 'wait_count': 0}
@@ -76,7 +78,8 @@ def collect(store, client, run_id, allowed_urls, on_page, *, architecture, cycle
 
     def selected_tasks():
         return {key: task for key, task in tasks.items() if task.get('lab_selected')
-                and task.get('lab_kind') == 'product'
+                and task.get('lab_kind') in {'product', 'list', 'search'}
+                and resource_url(task)
                 and task.get('lab_status') not in {'complete', 'external_wait', 'evidence_wait'}
                 and task.get('lab_ready_cycle', 0) <= control['cycle']}
 
@@ -116,7 +119,7 @@ def collect(store, client, run_id, allowed_urls, on_page, *, architecture, cycle
             commit('schedule:waited:' + wait_id, [('scheduler_waits', wait_id, wait)])
             continue
         keys = selection['task_ids']
-        url = tasks[keys[0]]['url']
+        url = resource_url(tasks[keys[0]])
         if url not in allowed_urls or not allowed_url(url):
             raise ValueError('Acquisition outside the fixed allowlist')
         slot = control['reserved_resources'] + 1
@@ -136,6 +139,7 @@ def collect(store, client, run_id, allowed_urls, on_page, *, architecture, cycle
         changes = []
         processing_error = None
         for key in keys:
+            before_task = deepcopy(tasks[key])
             task = deepcopy(tasks[key])
             history = 'lab_evidence_gaps' if receipt.error == 'evidence_exhausted' else 'lab_attempts'
             task.setdefault(history, []).append(deepcopy(receipt_dict))
@@ -152,6 +156,12 @@ def collect(store, client, run_id, allowed_urls, on_page, *, architecture, cycle
                     for namespace, child_key, value in added:
                         if namespace == 'tasks':
                             tasks[child_key] = deepcopy(value)
+                    # A dependency expansion may propagate lineage back to a
+                    # current task. Preserve those changes alongside mutations
+                    # made directly by the callback, rather than overwriting it.
+                    modified = {field: value for field, value in task.items()
+                                if field not in before_task or value != before_task[field]}
+                    task = {**deepcopy(tasks[key]), **modified}
                     task['lab_status'] = 'complete'
                     completed_times[key] = client.monotonic() - started
             elif receipt.error == 'evidence_exhausted':

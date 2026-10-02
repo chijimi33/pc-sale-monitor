@@ -22,6 +22,7 @@ def main():
     compare.add_argument("--budget", type=int, default=2100)
     compare.add_argument("--cycles", type=int, default=1)
     compare.add_argument("--max-tasks", type=int, default=20)
+    compare.add_argument("--discovery-input", type=Path)
     bench = sub.add_parser("benchmark")
     bench.add_argument("--source", type=Path, required=True)
     bench.add_argument("--output", type=Path, required=True)
@@ -99,7 +100,8 @@ def main():
     elif args.command == "run":
         from .pipeline import run
         result = run(args.input, args.snapshot, args.architecture, args.mode, args.output, backend=args.backend,
-                     transport=args.transport, budget=args.budget, cycles=args.cycles, max_tasks=args.max_tasks)
+                     transport=args.transport, budget=args.budget, cycles=args.cycles, max_tasks=args.max_tasks,
+                     discovery_input=args.discovery_input)
         print(json.dumps({k: result[k] for k in ("experiment_id", "observations", "decidable_candidates", "accepted_candidates", "wall_seconds")}, ensure_ascii=False))
     elif args.command == "capture-timing":
         from .operations import capture_timing

@@ -11,10 +11,9 @@ import hashlib
 from pathlib import Path
 from urllib.parse import urlsplit
 
-from sale_monitor.http import Page
 from sale_monitor.models import timestamp
 from .acquire import Receipt
-from .capture import verify_capture
+from .capture import captured_page, verify_capture
 from .evidence import normalize
 from .inputs import import_state, verify
 from .pipeline import existing_task_id, make_task
@@ -99,10 +98,7 @@ class CapturedClient:
                 self.hosts[host] = {'blocked': True, 'reason': receipt.error, 'status': receipt.status}
         if receipt.error or receipt.status != 200 or receipt.body_incomplete:
             return None, receipt
-        body = (self.root / receipt.body_file).read_bytes()
-        if hashlib.sha256(body).hexdigest() != receipt.body_sha256:
-            raise ValueError('Capture changed during simulation')
-        return Page(url, body, receipt.observed_at, 'captured_queue_simulation', receipt.content_type), receipt
+        return captured_page(self.root, row, method='captured_queue_simulation'), receipt
 
 
 def queue_study(inputs, label, capture, output, *, architecture='B', method='urllib', budget=120, max_tasks=20):

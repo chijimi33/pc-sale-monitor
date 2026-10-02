@@ -8,16 +8,41 @@ import hashlib
 import os
 from pathlib import Path, PurePosixPath
 import re
+from urllib.parse import urlsplit
 
 from sale_monitor.http import Page
-from .acquire import MAX_BODY, Receipt
+from .acquire import MAX_BODY, Receipt, http_framing
 from .safety import atomic_bytes, digest, guard, read, write
 
 LEGACY_FORMAT = "pc-sale-monitor-http-evidence-v1"
-FORMAT = "pc-sale-monitor-http-evidence-v2"
+CHECKPOINT_FORMAT = "pc-sale-monitor-http-evidence-v2"
+FORMAT = "pc-sale-monitor-http-evidence-v3"
 MAX_FILES = 128
 MAX_TOTAL_BYTES = 192 * 1024 * 1024
 MAX_CHECKPOINTS = 128
+
+
+def representations(row):
+    return [row] + ([row['rendered_dom']] if row.get('rendered_dom') else []) + row.get('auxiliary_responses', [])
+
+
+def parser_representation(row):
+    """Choose the recorded parser input, never relabel historical browser bytes."""
+    if row.get('method') == 'browser' or row.get('parser_body_kind') == 'rendered_dom':
+        if row.get('parser_body_kind') != 'rendered_dom' or not row.get('rendered_dom'):
+            raise ValueError('Browser parser representation is unavailable or legacy-ambiguous')
+        return row['rendered_dom']
+    return row
+
+
+def captured_page(root, row, *, method):
+    record = parser_representation(row)
+    if record.get('body_incomplete') or record.get('body_unavailable'):
+        raise ValueError('Parser representation is incomplete')
+    body = _relative_file(Path(root), record['body_file']).read_bytes()
+    if hashlib.sha256(body).hexdigest() != record['body_sha256'] or len(body) != record['body_bytes']:
+        raise ValueError('Capture changed during replay')
+    return Page(record.get('url', row['url']), body, row['observed_at'], method, record.get('content_type', ''))
 
 
 def _relative_file(root, relative):
@@ -105,12 +130,15 @@ class Capture:
             records["browser_subrequests"] = prefix + "browser-subrequests.json"
             atomic_bytes(self.root / records["browser_subrequests"], browser_log.read_bytes())
         names = {"study.json", "source-settings.json"}
-        names.update(r["body_file"] for r in self.receipts if r.get("body_file"))
+        names.update(r["body_file"] for row in self.receipts for r in representations(row) if r.get("body_file"))
         names.update(records.values())
         entries = []
         for name in sorted(names):
             body = _relative_file(self.root, name).read_bytes()
             entries.append({"path": name, "bytes": len(body), "sha256": hashlib.sha256(body).hexdigest()})
+        if (len(entries) > MAX_FILES or any(e['bytes'] > MAX_BODY + 1 for e in entries)
+                or sum(e['bytes'] for e in entries) > MAX_TOTAL_BYTES):
+            raise ValueError('Capture evidence limit exceeded; previous checkpoint is preserved')
         manifest = {"format": FORMAT, "experiment_id": self.metadata["experiment_id"],
                     "mode": self.metadata["mode"], "complete": result is not None,
                     "receipt_count": len(self.receipts), "files": entries,
@@ -138,7 +166,7 @@ def verify_capture(root, *, allow_partial=False):
 
 
 def _verify_manifest(root, manifest, *, allow_partial=False):
-    if (not isinstance(manifest, dict) or manifest.get("format") not in (FORMAT, LEGACY_FORMAT)
+    if (not isinstance(manifest, dict) or manifest.get("format") not in (FORMAT, CHECKPOINT_FORMAT, LEGACY_FORMAT)
             or not isinstance(manifest.get("complete"), bool)):
         raise ValueError("Unsupported evidence manifest")
     if not manifest["complete"] and not allow_partial:
@@ -166,7 +194,7 @@ def _verify_manifest(root, manifest, *, allow_partial=False):
         file = _relative_file(root, relative)
         if not file.is_file() or file.stat().st_size != size or hashlib.sha256(file.read_bytes()).hexdigest() != checksum:
             raise ValueError("Evidence file missing or changed: " + relative)
-    if manifest["format"] == FORMAT:
+    if manifest["format"] in (FORMAT, CHECKPOINT_FORMAT):
         generation = manifest.get("generation")
         if not isinstance(generation, int) or isinstance(generation, bool) or not 1 <= generation <= MAX_CHECKPOINTS:
             raise ValueError("Invalid checkpoint generation")
@@ -195,18 +223,61 @@ def _verify_manifest(root, manifest, *, allow_partial=False):
     if len(receipts) != manifest["receipt_count"]:
         raise ValueError("Evidence receipt count changed")
     for row in receipts:
-        file = row.get("body_file")
-        checksum = row.get("body_sha256")
-        if row.get("status") is not None and checksum is None:
-            raise ValueError("HTTP response is missing its body evidence")
-        if checksum is not None:
-            if not file or file not in seen:
-                raise ValueError("Response receipt is missing its body")
-            body = _relative_file(root, file).read_bytes()
-            if hashlib.sha256(body).hexdigest() != checksum or len(body) != row.get("body_bytes"):
-                raise ValueError("Response receipt and body disagree")
-        elif file is not None:
-            raise ValueError("Unverifiable response body")
+        details = row.get('http_body')
+        if details is not None:
+            try:
+                framing, framing_error = http_framing(row['status'], details['headers'])
+                valid = (details['schema'] == 1 and type(details['complete']) is bool
+                         and type(details['received_bytes']) is int and details['received_bytes'] >= 0
+                         and details['received_bytes'] == row['body_bytes']
+                         and all(details[key] == value for key, value in framing.items())
+                         and (details['error'] is None or isinstance(details['error'], str) and bool(details['error']))
+                         and details['complete'] == (details['error'] is None)
+                         and row.get('body_incomplete') == (not details['complete'])
+                         and (details['complete'] or bool(row.get('error')))
+                         and (framing_error is None or details['error'] == framing_error)
+                         and (not details['complete'] or details['received_bytes'] <= MAX_BODY
+                              and (framing['expected_bytes'] is None or details['received_bytes'] == framing['expected_bytes'])))
+            except (KeyError, TypeError, ValueError, AttributeError):
+                valid = False
+            if not valid:
+                raise ValueError('HTTP body completeness evidence is inconsistent')
+        if row.get('body_incomplete') and not row.get('error'):
+            raise ValueError('Successful receipt has an incomplete body')
+        if manifest['format'] == FORMAT and row.get('method') == 'browser' and row.get('attempts'):
+            if row.get('body_kind') != 'browser_response_body' or row.get('parser_body_kind') != 'rendered_dom':
+                raise ValueError('Invalid browser representation kinds')
+            dom = row.get('rendered_dom')
+            if dom and (dom.get('body_kind') != 'rendered_dom' or dom.get('content_type') != 'text/html; charset=utf-8'
+                        or not dom.get('observed_at')):
+                raise ValueError('Invalid rendered DOM provenance')
+            if not row.get('error') and (not dom or row.get('response_url') != row['url'] or dom['url'] != row['url']
+                                        or dom.get('body_incomplete') or not dom.get('body_sha256')
+                                        or row.get('auxiliary_responses')):
+                raise ValueError('Successful browser receipt has incomplete or blocked provenance')
+            for auxiliary in row.get('auxiliary_responses', []):
+                if (auxiliary.get('body_kind') != 'browser_response_body'
+                        or urlsplit(auxiliary['url']).hostname != urlsplit(row['url']).hostname
+                        or not auxiliary.get('observed_at') or auxiliary.get('status') is None):
+                    raise ValueError('Invalid auxiliary response provenance')
+        for record in representations(row):
+            file, checksum = record.get('body_file'), record.get('body_sha256')
+            missing = record.get('body_unavailable')
+            if missing and (checksum is not None or file is not None or record.get('body_bytes') is not None):
+                raise ValueError('Unavailable response body contains contradictory evidence')
+            if record.get('status') is not None and checksum is None:
+                if not (manifest['format'] == FORMAT and row.get('method') == 'browser' and missing and row.get('error')):
+                    raise ValueError('HTTP response is missing its body evidence')
+            if checksum is not None:
+                if not file or file not in seen:
+                    raise ValueError('Response receipt is missing its body')
+                body = _relative_file(root, file).read_bytes()
+                if hashlib.sha256(body).hexdigest() != checksum or len(body) != record.get('body_bytes'):
+                    raise ValueError('Response receipt and body disagree')
+                if len(body) > MAX_BODY and not record.get('body_incomplete'):
+                    raise ValueError('Oversized body is not marked incomplete')
+            elif file is not None:
+                raise ValueError('Unverifiable response body')
     result = read(root / records["result"]) if manifest["complete"] else None
     if result is not None and (result["receipts"] != receipts or result["experiment_id"] != manifest["experiment_id"]
                                or result.get("mode") != manifest["mode"]):
@@ -289,9 +360,11 @@ def replay_capture(source, output, *, allow_partial=False):
     for receipt in verified["receipts"]:
         row = {"receipt": receipt, "parsed": False, "observation": None}
         if receipt["status"] == 200 and not receipt.get("error") and not receipt.get("body_incomplete"):
-            body = _relative_file(source, receipt["body_file"]).read_bytes()
-            page = Page(receipt["url"], body, receipt["observed_at"], "captured_http_replay",
-                        receipt.get("content_type", ""))
+            if receipt['method'] == 'browser' and verified['manifest']['format'] != FORMAT:
+                row['skip_reason'] = 'legacy_browser_representation_ambiguous'
+                rows.append(row)
+                continue
+            page = captured_page(source, receipt, method='captured_http_replay')
             observation = normalize(receipt["store"], page, verified["settings"]["stores"][receipt["store"]],
                                     "replay:" + verified["manifest"]["experiment_id"] + ":" + receipt["method"], receipt)
             row.update(parsed=True, observation=observation.to_dict())
