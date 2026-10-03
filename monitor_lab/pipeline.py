@@ -84,24 +84,36 @@ def dependencies(candidate, pages, tasks, created, known_catalog=None):
 
 
 def run(inputs, label, architecture, mode, output, *, backend=None, transport="urllib", budget=2100, cycles=1, max_tasks=20,
-        discovery_input=None):
+        discovery_input=None, capture_input=None, capture_method='urllib', candidate_urls=None):
     if architecture not in {"A", "B", "C"} or mode not in {"replay", "live"}:
         raise ValueError("Invalid architecture/mode")
     if architecture == "C" and environment()["system"] != "Windows":
         raise ValueError("C requires a real Windows process")
     if not 1 <= max_tasks <= 20 or budget <= 0 or budget > 2100 or cycles not in (1, 2):
         raise ValueError("Experiment limit exceeded")
+    if capture_input and (mode != 'replay' or discovery_input):
+        raise ValueError('A scoped capture requires replay mode and cannot be mixed with discovery fixtures')
+    if candidate_urls and not capture_input:
+        raise ValueError('Explicit captured candidates require a scoped capture')
     output = guard(Path(output))
     manifest = verify(Path(inputs))
     if label not in manifest["snapshots"]:
         raise ValueError("Unknown pinned input snapshot")
     pages = manifest["pages"]
-    if len(pages) != 6:
+    if not capture_input and len(pages) != 6:
         raise ValueError("The six primary-page fixtures are required")
     cfg = read(Path(__file__).resolve().parents[1] / "config/sources.json")
-    discovery = load_bundle(discovery_input, manifest['input_hash'], cfg['stores']) if discovery_input else None
-    resources = {p['url']: {**p, '_root': Path(inputs), 'kind': 'product'} for p in pages}
-    if discovery:
+    captured = captured_client = None
+    if capture_input:
+        from .capture_inputs import load_capture_inputs
+        from .queue_study import CapturedClient
+        captured = load_capture_inputs(capture_input, capture_method, pages, cfg['stores'], candidate_urls)
+        captured_client = CapturedClient(capture_input, captured['verified'], captured['source_method'])
+        pages, resources, discovery = captured['pages'], captured['resources'], captured['roots']
+    else:
+        discovery = load_bundle(discovery_input, manifest['input_hash'], cfg['stores']) if discovery_input else None
+        resources = {p['url']: {**p, '_root': Path(inputs), 'kind': 'product'} for p in pages}
+    if discovery and not captured:
         for resource in discovery['resources']:
             if resource['url'] in resources:
                 raise ValueError('Discovery input must not replace pinned primary-page fixtures')
@@ -123,6 +135,11 @@ def run(inputs, label, architecture, mode, output, *, backend=None, transport="u
     conditions["implementation_hash"] = implementation_hash()
     if discovery:
         conditions['discovery_input_hash'] = discovery['input_hash']
+    if captured:
+        conditions.update(capture_manifest_sha256=captured['manifest_sha256'],
+                          capture_source_method=captured['source_method'],
+                          capture_plan_hash=captured['plan_hash'], candidate_urls=captured['candidate_urls'],
+                          acquisition_mode='captured_queue_simulation')
     if meta_path.exists():
         meta = read(meta_path)
         if meta["conditions"] != conditions:
@@ -147,25 +164,38 @@ def run(inputs, label, architecture, mode, output, *, backend=None, transport="u
             changes += [('event_state', key, value) for key, value in source_event_states.items()]
             changes += [('events', key, value) for key, value in source_events.items()]
             for page in pages:
-                if page["name"] not in {"koubou-b550", "tsukumo-capture"}:
+                if captured or page["name"] not in {"koubou-b550", "tsukumo-capture"}:
                     continue
                 key = existing_task_id(originals, page["store"], page["url"])
                 original = originals.get(key)
                 task = make_task(page["store"], page["url"], page["observed_at"], group=page["group"], role="candidate", original=original)
                 changes.append(("tasks", key, task))
             if discovery:
-                changes += root_changes(discovery, originals, cfg['stores'], allowed_urls)
+                roots = root_changes(discovery, originals, cfg['stores'], allowed_urls)
+                if captured:
+                    for _, _, task in roots:
+                        if task['lab_kind'] == 'product' and task['lab_role'] != 'candidate':
+                            # Permission to replay a URL is not a request to do
+                            # its work before a candidate or listing needs it.
+                            task.update(lab_selected=False, lab_reason='not_requested_by_candidate_or_discovery')
+                        reasons = [captured['root_holds'][root] for root in task['lab_root_ids']
+                                   if root in captured['root_holds']]
+                        if reasons:
+                            task.update(lab_status='external_wait', lab_selected=False, lab_reason=reasons[0])
+                changes += roots
             store.commit("import:" + manifest["snapshots"][label]["data_sha"], changes)
         state = store.snapshot()
         hosts = deepcopy(state["records"].get("hosts", {}))
-        client = Coordinator(TRANSPORTS[transport](), budget=budget, hosts=hosts)
+        client = captured_client or Coordinator(TRANSPORTS[transport](), budget=budget, hosts=hosts)
+        if captured_client:
+            client.restore(state['records'])
         def verified_not_found(page):
             fixture = resources.get(page.url, {})
             return fixture.get('kind') == 'list' and bool(confirmed_empty_search(fixture['store'], page))
         client.inspect_not_found = verified_not_found if discovery else None
         dispatcher = Dispatcher(cfg['stores'], allowed_urls)
 
-        if mode == "replay":
+        if mode == "replay" and not captured:
             def saved_page(url):
                 fixture = resources[url]
                 body = (fixture['_root'] / fixture["path"]).read_bytes()
@@ -195,6 +225,8 @@ def run(inputs, label, architecture, mode, output, *, backend=None, transport="u
                         activate_search(value, cfg['stores'], allowed_urls)
                     elif value.get('url') in allowed_urls:
                         value['lab_selected'] = True
+                    if value.get('lab_selected') and value.get('lab_reason') == 'not_requested_by_candidate_or_discovery':
+                        value.pop('lab_reason')
                 if not tasks.get(key, {}).get('lab_selected'):
                     value['lab_ready_cycle'] = cycle + (architecture == 'A')
             return added
@@ -202,6 +234,10 @@ def run(inputs, label, architecture, mode, output, *, backend=None, transport="u
         def on_page(task, page, receipt_dict, tasks, cycle, records):
             if task['lab_kind'] in {'search', 'list'}:
                 changes = dispatcher.expand(task, page, receipt_dict, tasks)
+                for namespace, _, value in changes:
+                    if (namespace == 'tasks' and value.get('lab_selected')
+                            and value.get('lab_reason') == 'not_requested_by_candidate_or_discovery'):
+                        value.pop('lab_reason')
                 staged = {**tasks, **{key: value for ns, key, value in changes if ns == 'tasks'}}
                 for key in dict.fromkeys(k for ns, k, _ in changes if ns == 'tasks'):
                     child = staged[key]
@@ -214,6 +250,8 @@ def run(inputs, label, architecture, mode, output, *, backend=None, transport="u
                             changes += [('tasks', key, child)] + added
                             staged.update({k: v for _, k, v in added})
                 return changes
+            if captured and resources[page.url]['kind'] != 'product':
+                raise ValueError('A captured discovery resource cannot become a product observation')
             observation = normalize(task["lab_store"], page, cfg["stores"][task["lab_store"]], run_id, receipt_dict)
             changes = [("observations", observation.offer.key, observation.to_dict())]
             if task["lab_role"] == "candidate":
@@ -223,9 +261,10 @@ def run(inputs, label, architecture, mode, output, *, backend=None, transport="u
         try:
             collection = collect(store, client, run_id, allowed_urls, on_page,
                                  architecture=architecture, cycles=cycles, max_tasks=max_tasks, budget=budget,
-                                 elapsed_before_collection=time.perf_counter() - start)
+                                 elapsed_before_collection=0 if captured else time.perf_counter() - start)
         finally:
-            client.transport.close()
+            if not captured:
+                client.transport.close()
         receipts = collection['receipts']
         completed_times = collection['completed_task_seconds']
         state = store.snapshot()
@@ -325,7 +364,8 @@ def run(inputs, label, architecture, mode, output, *, backend=None, transport="u
         originals = {k: t for k, t in tasks.items() if "lab_key" in t}
         pending = [t for t in tasks.values() if t["lab_status"] != "complete"]
         pending_age_now = timestamp(read(Path(inputs) / label / "public/latest.json")["generated_at"])
-        coverage = coverage_report(resources, state['records'], source_tasks, cfg['stores'], mode, run_id)
+        coverage = coverage_report(resources, state['records'], source_tasks, cfg['stores'],
+                                   'captured_queue_simulation' if captured else mode, run_id)
         summary = {"experiment_id": run_id, **conditions, "environment": environment(),
                    "wall_seconds": time.perf_counter() - start, "http_navigation_attempts": client.requests,
                    "replayed_pages": len(receipts) if mode == "replay" else 0,
@@ -336,7 +376,7 @@ def run(inputs, label, architecture, mode, output, *, backend=None, transport="u
                    "original_tasks_completed_by_replay_only": sum(t["lab_status"] == "complete" for t in originals.values()) if mode == "replay" else 0,
                    "original_pending_over_24h": sum(bool(timestamp(t.get("created_at"))) and (pending_age_now - timestamp(t["created_at"])).total_seconds() > 86400 for t in originals.values()),
                    "same_cycle_planner_enabled": architecture != "A",
-                   "all_selected_comparators_observed": len(offers) == 6,
+                   "all_selected_comparators_observed": len(offers) == len(pages),
                    "completed_task_seconds": completed_times, "emitted_storage_bytes": store.emitted_bytes,
                    "scheduling": collection['scheduling'],
                    "logical_mutation_bytes": store.logical_bytes,
@@ -355,12 +395,33 @@ def run(inputs, label, architecture, mode, output, *, backend=None, transport="u
             discovery_tasks = [t for t in tasks.values() if t.get('lab_kind') in {'search', 'list'} and
                                (t.get('lab_selected') or t.get('lab_root_ids') or t.get('lab_parent_keys'))]
             summary['discovery'] = {'input_hash': discovery['input_hash'], 'root_requests': len(discovery['roots']),
-                                   'resources': len(discovery['resources']), 'tasks': len(discovery_tasks),
+                                   'resources': len(resources) if captured else len(discovery['resources']), 'tasks': len(discovery_tasks),
                                    'completed': sum(t['lab_status'] == 'complete' for t in discovery_tasks),
                                    'confirmed_empty': sum(t.get('lab_resolution', {}).get('result') == 'confirmed_empty' for t in discovery_tasks),
                                    'outside_selected_resources': sum(t.get('lab_reason') == 'discovered_url_outside_selected_resources' for t in tasks.values()),
                                    'discovered_products': sum(t.get('lab_kind') == 'product' and bool(t.get('lab_parent_keys')) for t in tasks.values())}
             summary['scope'] += ' An explicit discovery bundle adds bounded home/list/product resources; all other discovered URLs stay pending with their lineage. This does not measure whole-store completion.'
+        if captured:
+            committed = [d['receipt'] for d in state['records'].get('dispatches', {}).values() if d.get('receipt')]
+            summary['capture_replay'] = {
+                'source_experiment_id': captured['verified']['metadata']['experiment_id'],
+                'source_manifest_sha256': captured['manifest_sha256'],
+                'source_data_sha': captured['verified']['metadata']['scope_plan']['source_data_sha'],
+                'backlog_data_sha': manifest['snapshots'][label]['data_sha'],
+                'source_method': captured['source_method'],
+                'source_actual_attempts': sum(len(row['attempts']) for _, row in client.rows),
+                'replayed_actual_attempts': sum(len(row['attempts']) for row in committed),
+                'evidence_gaps': sum(row.get('error') == 'evidence_exhausted' for row in committed),
+                'simulated_elapsed_seconds': client.clock() - client.start,
+                'http_requests': 0, 'production_prices_added': 0,
+                'limits': ['Scheduling recorded per-URL outcomes is a simulation, not new network behavior.',
+                           'Unrequested or exhausted source outcomes are gaps, never invented successes.',
+                           'Pinned backlog and capture dates may differ; source timestamps and files are retained.']}
+            summary['scope'] = ('Scoped capture replay of explicitly selected product, home and list resources against a pinned backlog. '
+                                'Only explicit candidate roots and sale-specific discovered products become candidates. '
+                                'Captured bytes replace all primary-page replay fixtures; unavailable responses remain unresolved. '
+                                'Unknown adapters and discovered URLs outside the capture stay pending. '
+                                'No current production prices, full-store completion, or real elapsed-time improvement is established.')
         counters = process_counters()
         summary["peak_rss_bytes"] = counters["peak_rss_bytes"]
         summary["process_write_bytes_delta"] = counters.get("process_write_bytes", 0) - counters_before.get("process_write_bytes", 0)

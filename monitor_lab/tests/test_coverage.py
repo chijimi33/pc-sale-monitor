@@ -108,6 +108,16 @@ class CoverageTest(unittest.TestCase):
         self.assertEqual({'http_404': 1}, result['stores']['ark']['receipt_error_counts'])
         self.assertEqual(1, result['totals']['product_resources_observed'])
 
+    def test_captured_source_attempts_are_not_reported_as_new_http_requests(self):
+        resources, records, originals = inputs()
+        receipt = {**observation()['receipt'], 'attempts': [{'sequence': 7}],
+                   'evidence_mode': 'captured_queue_simulation'}
+        records['dispatches'] = {'one': {'url': PRODUCT, 'state': 'committed', 'receipt': receipt}}
+        result = self.report(resources, records, originals, mode='captured_queue_simulation')
+        self.assertEqual(0, result['totals']['confirmed_http_attempts'])
+        self.assertEqual(1, result['totals']['recorded_source_http_attempts'])
+        self.assertEqual(1, result['stores']['ark']['replay_receipts'])
+
     def test_all_field_records_stay_distinct_from_unknown_values_and_verification(self):
         resources, records, originals = inputs()
         fields = self.report(resources, records, originals)['stores']['ark']['field_evidence']

@@ -159,6 +159,41 @@ class SchedulerTest(unittest.TestCase):
             self.assertEqual('complete', store.snapshot()['records']['tasks']['one']['lab_status'])
         self.assertEqual(2, client.requests)
 
+    def test_held_host_does_not_strand_next_cycle_work_or_reset_its_gate_on_resume(self):
+        for status, headers, reason in ((403, {}, 'blocked_hosts'),
+                                        (429, {'Retry-After': '3600'}, 'wait_exceeds_remaining_budget')):
+            clock = Clock(NOW)
+            denied, waiter, deferred = TSUKUMO + '1/', TSUKUMO + '2/', ARK + '3/'
+            tasks = {'denied': task(denied), 'waiter': task(waiter, age='2021-01-01'),
+                     'deferred': {**task(deferred), 'lab_ready_cycle': 1}}
+            client = client_for(clock, {denied: [(status, headers, b'hold')], deferred: [(200, {}, b'next cycle')]})
+            path = self.root / ('next-cycle-' + str(status))
+            with SQLite(path) as store:
+                store.commit('import', [('tasks', key, value) for key, value in tasks.items()])
+                result = collect(store, client, 'lab-next-cycle', {denied, waiter, deferred}, on_page,
+                                 architecture='A', cycles=2, max_tasks=20, budget=120)
+                before = store.snapshot()
+            self.assertEqual([denied, deferred], [row['url'] for row in client.transport.calls])
+            records = before['records']
+            self.assertEqual('complete', records['tasks']['deferred']['lab_status'])
+            self.assertNotEqual('complete', records['tasks']['waiter']['lab_status'])
+            self.assertEqual([], records['tasks']['waiter']['lab_attempts'])
+            self.assertEqual(reason, result['scheduling']['stop_reason'])
+            self.assertEqual(NOW + 120, records['scheduler']['collection']['deadline_epoch'])
+            self.assertEqual(1, records['scheduler']['collection']['cycle'])
+            self.assertEqual(2, records['scheduler']['collection']['reserved_resources'])
+            gate = records['hosts']['shop.tsukumo.co.jp']
+            self.assertTrue(gate.get('blocked') if status == 403 else gate['until'] > NOW + 120)
+            for key in tasks:
+                self.assertEqual(tasks[key]['created_at'], records['tasks'][key]['created_at'])
+                self.assertEqual(7, records['tasks'][key]['attempts'])
+            resumed = client_for(clock, {})
+            with SQLite(path) as store:
+                collect(store, resumed, 'lab-next-cycle', {denied, waiter, deferred}, on_page,
+                        architecture='A', cycles=2, max_tasks=20, budget=120)
+                self.assertEqual(before, store.snapshot())
+            self.assertEqual([], resumed.transport.calls)
+
     def test_parse_failure_is_checkpointed_without_completing_task(self):
         clock = Clock(NOW)
         url = ARK + '1/'

@@ -83,6 +83,25 @@ def collect(store, client, run_id, allowed_urls, on_page, *, architecture, cycle
                 and task.get('lab_status') not in {'complete', 'external_wait', 'evidence_wait'}
                 and task.get('lab_ready_cycle', 0) <= control['cycle']}
 
+    def advance_deferred_cycle():
+        """A held host must not strand runnable work in a later allowed cycle."""
+        deferred = []
+        for task in tasks.values():
+            ready = task.get('lab_ready_cycle', 0)
+            url = resource_url(task)
+            if (not task.get('lab_selected') or task.get('lab_kind') not in {'product', 'list', 'search'}
+                    or not url or task.get('lab_status') in {'complete', 'external_wait', 'evidence_wait'}
+                    or not control['cycle'] < ready < cycles):
+                continue
+            gate = client.hosts.get(urlsplit(url).hostname, {})
+            if not gate.get('blocked') and gate.get('until', 0) < control['deadline_epoch']:
+                deferred.append(ready)
+        if not deferred:
+            return False
+        control['cycle'] = min(deferred)
+        commit(f"schedule:cycle:{run_id}:{control['cycle']}", [('scheduler', 'collection', control)])
+        return True
+
     while control['cycle'] < cycles:
         if client.monotonic() >= client.deadline or client.clock() >= control['deadline_epoch']:
             stop_reason = 'budget_exhausted'
@@ -101,11 +120,15 @@ def collect(store, client, run_id, allowed_urls, on_page, *, architecture, cycle
             deadlines = [client.hosts[host]['until'] for host in selection['waiting_by_host']
                          if not client.hosts[host].get('blocked') and client.hosts[host].get('until', 0) > client.clock()]
             if not deadlines:
+                if advance_deferred_cycle():
+                    continue
                 stop_reason = 'blocked_hosts'
                 break
             until = min(deadlines)
             remaining = client.deadline - client.monotonic()
             if until >= control['deadline_epoch'] or until - client.clock() >= remaining:
+                if advance_deferred_cycle():
+                    continue
                 stop_reason = 'wait_exceeds_remaining_budget'
                 break
             wait = {'reason': 'shared_host_wait', 'started_at_epoch': client.clock(), 'until_epoch': until,

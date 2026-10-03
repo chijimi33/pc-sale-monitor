@@ -23,6 +23,9 @@ def main():
     compare.add_argument("--cycles", type=int, default=1)
     compare.add_argument("--max-tasks", type=int, default=20)
     compare.add_argument("--discovery-input", type=Path)
+    compare.add_argument('--capture-input', type=Path, help='Replay a complete scoped capture without primary-page fixture fallback')
+    compare.add_argument('--capture-method', choices=['urllib', 'pooled', 'browser'], default='urllib')
+    compare.add_argument('--candidate-url', action='append', dest='candidate_urls', help='Explicit candidate product URL within the scoped capture')
     bench = sub.add_parser("benchmark")
     bench.add_argument("--source", type=Path, required=True)
     bench.add_argument("--output", type=Path, required=True)
@@ -103,7 +106,8 @@ def main():
         from .pipeline import run
         result = run(args.input, args.snapshot, args.architecture, args.mode, args.output, backend=args.backend,
                      transport=args.transport, budget=args.budget, cycles=args.cycles, max_tasks=args.max_tasks,
-                     discovery_input=args.discovery_input)
+                     discovery_input=args.discovery_input, capture_input=args.capture_input,
+                     capture_method=args.capture_method, candidate_urls=args.candidate_urls)
         print(json.dumps({k: result[k] for k in ("experiment_id", "observations", "decidable_candidates", "accepted_candidates", "wall_seconds")}, ensure_ascii=False))
     elif args.command == "capture-timing":
         from .operations import capture_timing

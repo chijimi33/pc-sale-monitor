@@ -65,6 +65,44 @@ the original bundle when a check fails; diagnose the validator or capture rather
 than editing historical receipts. Partial capture verification requires the
 explicit `--allow-partial` option and does not make an interrupted run complete.
 
+## Discovery and decisions from a scoped capture
+
+The regular `run` command accepts `--capture-input` in replay mode. It uses the
+selected method's verified capture outcomes for every permitted URL, including
+failures and missing attempts. It never falls back to the older six primary-page
+HTML fixtures. The pinned input still provides the original backlog, history,
+and event registry; their dates may differ from the capture and remain explicit.
+
+```powershell
+python -m monitor_lab run --input "$inputs" --snapshot ark_repaired --architecture B --mode replay --capture-input "$capture" --capture-method urllib --output "$result" --budget 180 --max-tasks 20
+```
+
+Captured home/list resources become discovery tasks with ordinary sale-signal
+filtering. They do not mark every linked catalog product as a sale. Products
+discovered with sale evidence become candidates; other captured product resources
+wait for discovery or a comparison request. Repeat `--candidate-url URL` to select a known
+candidate explicitly. Each candidate must be a product URL in this capture.
+An arbitrary number of captured product resources is supported within the plan
+limit; six primary-page fixtures are required only by the original mode.
+
+All discovered dependencies retain their source and original age. URLs without
+captured responses stay pending; failed or exhausted responses cannot turn into
+successful retries. Non-HTML adapters remain an explicit external wait in this
+path. The same persisted queue, current-comparison checks, history rules, and
+event handling are used for the resulting observations and decisions.
+
+This is a simulation of queue order using recorded outcomes. Its clock is
+separate from the original observation times and real elapsed time. Read
+`capture_replay` for source attempts, replayed attempts, evidence gaps, and the
+two data revisions. Coverage reports `recorded_source_http_attempts` separately
+from new `confirmed_http_attempts`, which stays zero. Reopening the same output
+resumes its saved budget and consumed outcomes instead of fetching again.
+Capture and local store settings must match. Live mode and separate discovery
+fixture bundles cannot be combined with this option.
+If a host is blocked or its wait cannot fit, the scheduler can advance to an
+allowed later cycle that has other runnable work. It retains the original host
+gate, request cap, and deadline; advancing the cycle does not authorize a retry.
+
 ## Validation
 
 ```powershell

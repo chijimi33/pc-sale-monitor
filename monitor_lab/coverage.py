@@ -11,7 +11,7 @@ from .evidence import FIELDS
 
 
 def coverage_report(resources, records, original_tasks, config, mode, run_id):
-    if mode not in {'live', 'replay'} or not set(STORES) <= set(config):
+    if mode not in {'live', 'replay', 'captured_queue_simulation'} or not set(STORES) <= set(config):
         raise ValueError('Coverage requires the fixed ten stores and a known experiment mode')
     resources = list(resources.values())
     tasks = records.get('tasks', {})
@@ -81,8 +81,11 @@ def coverage_report(resources, records, original_tasks, config, mode, run_id):
             'pending_reason_counts': dict(sorted(Counter(t.get('lab_last_error') or t.get('lab_reason') or
                 ('not_selected_for_this_experiment' if not t.get('lab_selected') else 'pending') for t in pending).items())),
             'dispatch_state_counts': dict(sorted(Counter(d['state'] for d in store_dispatches).items())),
-            'confirmed_http_attempts': sum(len(r.get('attempts', [])) for r in receipts),
-            'replay_receipts': sum(r.get('evidence_mode') in {'replay', 'fixture_replay'} for r in receipts),
+            'confirmed_http_attempts': sum(len(r.get('attempts', [])) for r in receipts
+                                           if r.get('evidence_mode') != 'captured_queue_simulation'),
+            'recorded_source_http_attempts': sum(len(r.get('attempts', [])) for r in receipts
+                                                if r.get('evidence_mode') == 'captured_queue_simulation'),
+            'replay_receipts': sum(r.get('evidence_mode') in {'replay', 'fixture_replay', 'captured_queue_simulation'} for r in receipts),
             'receipt_error_counts': dict(sorted(Counter(r['error'] for r in receipts if r.get('error')).items())),
             'current_run_observations': len(current), 'other_run_observations': excluded['other_run'],
             'excluded_observation_counts': dict(sorted(excluded.items())), 'field_evidence': field_evidence}
@@ -95,7 +98,8 @@ def coverage_report(resources, records, original_tasks, config, mode, run_id):
                    'product_resources_observed': sum(len(r['product_resources_observed']) for r in rows.values()),
                    'current_run_observations': sum(r['current_run_observations'] for r in rows.values()),
                    'recorded_dispatches': len(dispatches),
-                   'confirmed_http_attempts': sum(r['confirmed_http_attempts'] for r in rows.values())},
+                   'confirmed_http_attempts': sum(r['confirmed_http_attempts'] for r in rows.values()),
+                   'recorded_source_http_attempts': sum(r['recorded_source_http_attempts'] for r in rows.values())},
         'unattributed_dispatches': sum(d['url'] not in by_url for d in dispatches),
         'stores': rows,
         'limits': ['A parsed product is not proof that its price or every field is verified.',
