@@ -291,6 +291,14 @@ def deferred_listing(tasks, page, cfg) -> tuple[list[dict], dict] | None:
     if len(page.body) > MAX_BODY:
         raise ValueError('Deferred listing body exceeds the inspection limit')
     text = page.text
+    raw_titles = _SourceTitles()
+    raw_titles.feed(text)
+    raw_titles.close()
+    if (any(marker in text for marker in ('search_result_area', 'GetSearchParts', 'product_list_parts.aspx'))
+            and (raw_titles.active or raw_titles.invalid)):
+        # A parser may consume the rest of a malformed document as title text,
+        # making all deferred markers disappear from its recovered tree.
+        raise ValueError('Deferred search source has malformed title boundaries')
     parser = html.HTMLParser(no_network=True)
     try:
         tree = html.fromstring(text, base_url=page.url, parser=parser)
@@ -345,9 +353,6 @@ def deferred_listing(tasks, page, cfg) -> tuple[list[dict], dict] | None:
             raise ValueError('Deferred search task scope/query does not match the shell')
     titles = tree.xpath('//title')
     expected_title = query + 'の検索結果｜新品・中古・買取りのソフマップ[sofmap]'
-    raw_titles = _SourceTitles()
-    raw_titles.feed(text)
-    raw_titles.close()
     if (raw_titles.active or raw_titles.invalid or raw_titles.titles != [expected_title]
             or len(titles) != 1 or ''.join(titles[0].itertext()).strip() != expected_title):
         raise ValueError('Deferred search title does not prove the exact query')

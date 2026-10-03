@@ -331,6 +331,12 @@ class DeferredListingTest(unittest.TestCase):
             with self.subTest(status=status), self.assertRaises(ValueError):
                 self.extract(status=status)
 
+    def test_malformed_title_is_rejected_before_recovery_can_hide_deferred_markers(self):
+        malformed = shell().replace('</title>', '</h1>')
+        with patch('monitor_lab.deferred_listing.html.fromstring', side_effect=AssertionError('Do not repair malformed title')):
+            with self.assertRaisesRegex(ValueError, 'title boundaries'):
+                self.extract(body=malformed)
+
     def test_rejects_changed_loader_method_url_type_parameter_and_request_options(self):
         replacements = [('type:"GET"', 'type:"POST"'), ('dataType: "html"', 'dataType: "json"'),
                         ('url: strUrl,', 'url: otherUrl,'), ('jQuery.ajax({', 'jQuery.ajax({ method:"POST",'),
