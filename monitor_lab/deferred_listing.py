@@ -8,6 +8,7 @@ from __future__ import annotations
 
 from copy import deepcopy
 import hashlib
+from html.parser import HTMLParser
 import re
 from urllib.parse import parse_qsl, urljoin, urlsplit
 
@@ -247,6 +248,36 @@ def _class(name):
     return 'contains(concat(" ",normalize-space(@class)," ")," ' + name + ' ")'
 
 
+class _SourceTitles(HTMLParser):
+    """Inspect explicit title boundaries before libxml's platform-specific repair."""
+    def __init__(self):
+        super().__init__(convert_charrefs=True)
+        self.active, self.invalid, self.parts, self.titles = False, False, [], []
+
+    def handle_starttag(self, tag, attrs):
+        if self.active:
+            self.invalid = True
+        if tag == 'title':
+            self.active, self.parts = True, []
+
+    def handle_endtag(self, tag):
+        if tag == 'title':
+            if not self.active:
+                self.invalid = True
+            self.titles.append(''.join(self.parts).strip())
+            self.active = False
+        elif self.active:
+            self.invalid = True
+
+    def handle_data(self, data):
+        if self.active:
+            self.parts.append(data)
+
+    def handle_comment(self, data):
+        if self.active:
+            self.invalid = True
+
+
 def deferred_listing(tasks, page, cfg) -> tuple[list[dict], dict] | None:
     """Return one fresh fragment task and evidence, or None for ordinary pages.
 
@@ -313,7 +344,12 @@ def deferred_listing(tasks, page, cfg) -> tuple[list[dict], dict] | None:
                 or (task.get('lab_resource_url') or task.get('url')) != page.url):
             raise ValueError('Deferred search task scope/query does not match the shell')
     titles = tree.xpath('//title')
-    if len(titles) != 1 or ''.join(titles[0].itertext()).strip() != query + 'の検索結果｜新品・中古・買取りのソフマップ[sofmap]':
+    expected_title = query + 'の検索結果｜新品・中古・買取りのソフマップ[sofmap]'
+    raw_titles = _SourceTitles()
+    raw_titles.feed(text)
+    raw_titles.close()
+    if (raw_titles.active or raw_titles.invalid or raw_titles.titles != [expected_title]
+            or len(titles) != 1 or ''.join(titles[0].itertext()).strip() != expected_title):
         raise ValueError('Deferred search title does not prove the exact query')
     fields = tree.xpath('//input[@name="keyword"]')
     forms = root.xpath('.//form[.//input[@name="keyword"]]')
