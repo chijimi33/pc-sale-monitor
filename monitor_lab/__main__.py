@@ -40,7 +40,13 @@ def main():
     network.add_argument("--output", type=Path, required=True)
     network.add_argument("--methods", nargs="+", choices=["urllib", "pooled", "browser"], default=["urllib", "pooled"])
     network.add_argument('--plan', type=Path, help='Verified bounded URL plan; omitted uses the original six products')
+    network.add_argument('--followup', type=Path, help='Prepared dependency follow-up; revalidates sources and inherits host waits')
     network.add_argument('--budget', type=float, default=2100, help='One shared budget across all methods, up to 2100 seconds')
+    followup = sub.add_parser('prepare-followup')
+    followup.add_argument('--experiment', type=Path, required=True)
+    followup.add_argument('--capture', type=Path, required=True)
+    followup.add_argument('--output', type=Path, required=True)
+    followup.add_argument('--task-id', action='append', dest='task_ids', required=True)
     queue = sub.add_parser("queue-study")
     queue.add_argument("--input", type=Path, required=True)
     queue.add_argument("--capture", type=Path, required=True)
@@ -78,7 +84,11 @@ def main():
     timing.add_argument("--input", type=Path, required=True)
     timing.add_argument("--output", type=Path, required=True)
     args = parser.parse_args()
-    if args.command == "queue-study":
+    if args.command == 'prepare-followup':
+        from .followup import prepare_followup
+        result = prepare_followup(args.experiment, args.capture, args.output, args.task_ids)
+        print(json.dumps({'bundle_hash': result['bundle_hash'], 'resources': len(result['request_plan']['resources'])}))
+    elif args.command == "queue-study":
         from .queue_study import queue_study
         result = queue_study(args.input, args.snapshot, args.capture, args.output, architecture=args.architecture,
                              method=args.method, budget=args.budget, max_tasks=args.max_tasks)
@@ -127,7 +137,7 @@ def main():
     elif args.command == "transport-study":
         from .study import study
         result = study(args.output, args.methods, emit=lambda row: print("LAB_RECEIPT " + json.dumps(row, ensure_ascii=False), flush=True),
-                       plan=args.plan, budget=args.budget)
+                       plan=args.plan, followup=args.followup, budget=args.budget)
         print("LAB_STUDY " + json.dumps({k: v for k, v in result.items() if k != "receipts"}, ensure_ascii=False))
     else:
         from .benchmark import benchmark, worker

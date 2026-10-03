@@ -243,6 +243,10 @@ def _verify_manifest(root, manifest, *, allow_partial=False):
             raise ValueError('Completed capture is missing planned receipt outcomes')
     elif any('resource_kind' in row for row in receipts):
         raise ValueError('Resource kinds require a verified request plan')
+    if metadata.get('followup') is not None:
+        from .followup_provenance import validate_provenance, verify_inherited_gates
+        validate_provenance(metadata['followup'], settings['stores'], scope)
+        verify_inherited_gates(metadata['followup'], receipts)
     for row in receipts:
         details = row.get('http_body')
         if details is not None:

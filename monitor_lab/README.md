@@ -113,6 +113,28 @@ If a host is blocked or its wait cannot fit, the scheduler can advance to an
 allowed later cycle that has other runnable work. It retains the original host
 gate, request cap, and deadline; advancing the cycle does not authorize a retry.
 
+## Bounded follow-up acquisition
+
+Prepare a separate follow-up from explicit pending dependency task IDs in a
+scoped-capture experiment. Preparation revalidates the original capture and
+reparses the relevant source HTML to confirm each destination. It retains task
+ages, attempts, dependencies, parent evidence and original host gates without
+changing the source queue. Every unselected store remains explicitly listed.
+
+```powershell
+python -m monitor_lab prepare-followup --experiment "$previousRun" --capture "$previousCapture" --task-id "$pendingTask" --output "$followup"
+python -m monitor_lab transport-study --followup "$followup" --methods urllib --budget 90 --output "$newCapture"
+```
+
+`transport-study --followup` rechecks the prepared intent and all referenced
+inputs before constructing a transport. It starts a separate, bounded capture
+with new response times; original host blocks and unexpired waits still prevent
+requests. Its portable provenance links to the original experiment, source
+capture, exported state and task evidence. Simulation-translated waits cannot
+replace original live host gates. `--plan` and `--followup` cannot be combined.
+Capturing a dependency does not complete its original queued task, establish an
+empty search, or make any discovered price eligible by itself.
+
 ## Validation
 
 ```powershell

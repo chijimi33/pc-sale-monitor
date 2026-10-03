@@ -1,6 +1,7 @@
 """Bounded transport experiment, identical request plan on Actions and Windows."""
 from __future__ import annotations
 
+from copy import deepcopy
 from dataclasses import asdict
 from pathlib import Path
 import math
@@ -21,7 +22,7 @@ PLAN = [
 ]
 
 
-def study(output, methods=("urllib", "pooled"), emit=lambda row: None, *, plan=None, budget=2100):
+def study(output, methods=("urllib", "pooled"), emit=lambda row: None, *, plan=None, followup=None, budget=2100):
     output = guard(Path(output))
     if not methods or len(set(methods)) != len(methods) or set(methods) - set(TRANSPORTS):
         raise ValueError("Each enabled method may be requested once")
@@ -29,7 +30,13 @@ def study(output, methods=("urllib", "pooled"), emit=lambda row: None, *, plan=N
         raise ValueError('Invalid shared study budget')
     identifier = experiment_id()
     settings = read(Path(__file__).resolve().parents[1] / "config/sources.json")
-    scope = load_plan(plan, settings['stores']) if plan is not None else None
+    if plan is not None and followup is not None:
+        raise ValueError('Choose an explicit plan or a verified follow-up, not both')
+    intent = None
+    if followup is not None:
+        from .followup import load_followup
+        intent = load_followup(followup, settings['stores'])
+    scope = intent['request_plan'] if intent else load_plan(plan, settings['stores']) if plan is not None else None
     if scope and 'browser' in methods and any(row['store'] != 'koubou' for row in scope['resources']):
         raise ValueError('Browser scope is currently limited to Koubou')
     request_plan = [(row['store'], row['url']) for row in scope['resources']] if scope else PLAN
@@ -40,8 +47,11 @@ def study(output, methods=("urllib", "pooled"), emit=lambda row: None, *, plan=N
                 "implementation_hash_lf": implementation_hash(normalize_line_endings=True)}
     if scope:
         metadata.update(scope_plan=scope, budget_seconds=budget)
+    if intent:
+        from .followup_provenance import retain_followup, validate_provenance
+        metadata['followup'] = validate_provenance(retain_followup(intent), settings['stores'], scope)
     capture = Capture(output, metadata, settings)
-    hosts = {}
+    hosts = deepcopy(intent['inherited_host_gates']) if intent else {}
     results = []
     deadline = time.monotonic() + budget
     started = time.perf_counter()
