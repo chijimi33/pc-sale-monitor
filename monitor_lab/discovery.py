@@ -191,6 +191,9 @@ class Dispatcher:
         source = {'url': page.url, 'observed_at': page.observed_at, 'http_status': page.status,
                   'body_sha256': representation.get('body_sha256'), 'body_kind': representation.get('body_kind', 'http_response'),
                   'evidence_mode': receipt.get('evidence_mode')}
+        source.update({key: receipt[key] for key in ('method', 'source_capture_manifest_sha256',
+                      'source_receipt_index', 'source_evidence_mode', 'analysis_reuse', 'derived_from_dispatch')
+                       if key in receipt})
         if kind(task) == 'search':
             # One home response can serve different queries, so each query has
             # its own child even though the network resource is shared.

@@ -5,6 +5,7 @@ import unittest
 from unittest.mock import patch
 import uuid
 
+from monitor_lab.capture import verify_capture
 from monitor_lab.pipeline import run
 from monitor_lab.safety import allowed_root, digest, read, write
 from monitor_lab.stores import SQLite
@@ -97,6 +98,114 @@ class CapturePipelineTest(unittest.TestCase):
         self.assertEqual(result['capture_replay']['replayed_actual_attempts'], resumed['capture_replay']['replayed_actual_attempts'])
         with SQLite(output / 'store') as store:
             self.assertEqual(state, store.snapshot())
+
+    def test_late_jan_searches_reuse_one_captured_home_with_provenance_and_identical_resume(self):
+        home = 'https://www.sofmap.com/contents/?id=2959&sid=1'
+        candidates = {PRODUCT: '0195553309745', HOME + 'i/20300386/': '4711289500124'}
+        home_body = (b'<html><a href="/contents/?id=fixture-sale">SALE SSD</a>'
+                     b'<form action="/search_result.aspx" method="get">'
+                     b'<input name="keyword"></form></html>')
+        source = self.capture(
+            [{'store': 'sofmap', 'url': home, 'kind': 'home'}] +
+            [{'store': 'ark', 'url': url, 'kind': 'product'} for url in candidates],
+            {home: (200, {}, home_body), **{
+                url: (200, {}, BODY.replace(b'0195553309745', jan.encode()))
+                for url, jan in candidates.items()}})
+        source_rows = verify_capture(source)['receipts']
+        home_sources = [(i, row) for i, row in enumerate(source_rows) if row['url'] == home]
+        self.assertEqual(1, len(home_sources))
+        source_index, original = home_sources[0]
+        before = (hashes(source), hashes(self.inputs))
+        output = self.root / 'late-search-run'
+        options = {'capture_input': source, 'candidate_urls': list(candidates)}
+        result = run(self.inputs, 'transport_failure', 'B', 'replay', output, **options)
+        with SQLite(output / 'store') as store:
+            state = store.snapshot()
+        records, tasks = state['records'], state['records']['tasks']
+        dispatches = sorted(records['dispatches'].items(), key=lambda item: item[1]['slot'])
+
+        # These fixtures exercise root-list parsing before either candidate is
+        # observed, rather than coalescing pre-existing searches with that root.
+        source_dispatch_id, source_dispatch = dispatches[0]
+        self.assertEqual(home, source_dispatch['url'])
+        self.assertEqual('committed', source_dispatch['state'])
+        self.assertIsNone(source_dispatch['processing_error'])
+        self.assertFalse(source_dispatch['receipt']['analysis_reuse'])
+        self.assertEqual(1, len(source_dispatch['task_ids']))
+        root = tasks[source_dispatch['task_ids'][0]]
+        self.assertEqual(('list', 'complete'), (root['lab_kind'], root['lab_status']))
+        self.assertTrue(root['lab_root_ids'])
+        self.assertEqual(original['attempts'], source_dispatch['receipt']['attempts'])
+        for field in ('observed_at', 'body_sha256', 'method'):
+            self.assertEqual(original[field], source_dispatch['receipt'][field])
+        candidate_dispatches = {d['url']: d for _, d in dispatches if d['url'] in candidates}
+        self.assertEqual(set(candidates), set(candidate_dispatches))
+        self.assertTrue(all(source_dispatch['slot'] < d['slot'] for d in candidate_dispatches.values()))
+        self.assertEqual(set(candidates), {o['offer']['url'] for o in records['observations'].values()})
+
+        reuses = [d for _, d in dispatches if d['receipt'].get('analysis_reuse')]
+        self.assertEqual(2, len(reuses))
+        searches = {key: task for key, task in tasks.items()
+                    if task['lab_store'] == 'sofmap' and task.get('lab_kind') == 'search'}
+        self.assertEqual(2, len(searches))
+        self.assertEqual(set(candidates.values()), {t['query'] for t in searches.values()})
+        expected_source = {
+            'url': home, 'observed_at': original['observed_at'],
+            'body_sha256': original['body_sha256'], 'method': original['method'],
+            'source_capture_manifest_sha256': before[0]['capture-manifest.json'],
+            'source_receipt_index': source_index, 'source_evidence_mode': original['evidence_mode'],
+            'evidence_mode': 'captured_queue_simulation', 'analysis_reuse': True,
+            'derived_from_dispatch': source_dispatch_id,
+        }
+        child_urls = set()
+        for key, task in searches.items():
+            with self.subTest(jan=task['query']):
+                candidate_url = next(url for url, jan in candidates.items() if jan == task['query'])
+                self.assertEqual([candidate_url], task['lab_dependencies'])
+                self.assertEqual('complete', task['lab_status'])
+                self.assertEqual([], task['lab_attempts'])
+                self.assertEqual([], task.get('lab_evidence_gaps', []))
+                self.assertEqual(1, len(task['lab_analysis_reuses']))
+                receipt = task['lab_analysis_reuses'][0]
+                dispatch = next(d for d in reuses if key in d['task_ids'])
+                self.assertGreater(dispatch['slot'], candidate_dispatches[candidate_url]['slot'])
+                self.assertEqual('committed', dispatch['state'])
+                self.assertEqual(receipt, dispatch['receipt'])
+                self.assertEqual(([], [], 0), (receipt['attempts'], receipt['waits'], receipt['elapsed_seconds']))
+                self.assertEqual(expected_source, {field: receipt[field] for field in expected_source})
+                self.assertEqual(expected_source, {field: task['lab_resolution'][field] for field in expected_source})
+                self.assertEqual(1, len(task['lab_child_keys']))
+                child = tasks[task['lab_child_keys'][0]]
+                expected_url = 'https://www.sofmap.com/search_result.aspx?keyword=' + task['query']
+                self.assertEqual(expected_url, child['url'])
+                child_urls.add(child['url'])
+                self.assertEqual('list', child['lab_kind'])
+                self.assertEqual('evidence_wait', child['lab_status'])
+                self.assertEqual('discovered_url_outside_selected_resources', child['lab_reason'])
+                self.assertEqual([key], child['lab_parent_keys'])
+                self.assertEqual([candidate_url], child['lab_dependencies'])
+                self.assertEqual([], child['lab_attempts'])
+                self.assertEqual(1, len(child['lab_discovery_evidence']))
+                evidence = child['lab_discovery_evidence'][0]
+                self.assertEqual(expected_source, {field: evidence[field] for field in expected_source})
+        self.assertEqual(2, len(child_urls))
+        self.assertTrue(child_urls.isdisjoint(d['url'] for _, d in dispatches))
+        self.assertEqual(0, result['http_navigation_attempts'])
+        self.assertEqual(0, result['capture_replay']['evidence_gaps'])
+        self.assertEqual(2, result['capture_replay']['discovery_analysis_reuses'])
+        self.assertEqual(3, result['capture_replay']['replayed_actual_attempts'])
+        sofmap = result['coverage']['stores']['sofmap']
+        self.assertEqual(1, sofmap['recorded_source_http_attempts'])
+        self.assertEqual(2, sofmap['discovery_analysis_reuses'])
+        self.assertEqual(0, sofmap['confirmed_http_attempts'])
+
+        resumed = run(self.inputs, 'transport_failure', 'B', 'replay', output, **options)
+        self.assertEqual(0, resumed['replayed_pages'])
+        self.assertEqual(result['coverage'], resumed['coverage'])
+        self.assertEqual(result['capture_replay'], resumed['capture_replay'])
+        with SQLite(output / 'store') as store:
+            self.assertEqual(state, store.snapshot())
+        self.assertEqual(before, (hashes(source), hashes(self.inputs)))
 
     def test_failed_captured_product_never_falls_back_to_successful_saved_primary_page(self):
         source = self.capture([{'store': 'ark', 'url': PRODUCT, 'kind': 'product'}],

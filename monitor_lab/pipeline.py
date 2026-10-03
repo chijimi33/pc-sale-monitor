@@ -108,7 +108,7 @@ def run(inputs, label, architecture, mode, output, *, backend=None, transport="u
         from .capture_inputs import load_capture_inputs
         from .queue_study import CapturedClient
         captured = load_capture_inputs(capture_input, capture_method, pages, cfg['stores'], candidate_urls)
-        captured_client = CapturedClient(capture_input, captured['verified'], captured['source_method'])
+        captured_client = CapturedClient(capture_input, captured['verified'], captured['source_method'], discovery_reuse=True)
         pages, resources, discovery = captured['pages'], captured['resources'], captured['roots']
     else:
         discovery = load_bundle(discovery_input, manifest['input_hash'], cfg['stores']) if discovery_input else None
@@ -411,11 +411,13 @@ def run(inputs, label, architecture, mode, output, *, backend=None, transport="u
                 'source_method': captured['source_method'],
                 'source_actual_attempts': sum(len(row['attempts']) for _, row in client.rows),
                 'replayed_actual_attempts': sum(len(row['attempts']) for row in committed),
+                'discovery_analysis_reuses': sum(bool(row.get('analysis_reuse')) for row in committed),
                 'evidence_gaps': sum(row.get('error') == 'evidence_exhausted' for row in committed),
                 'simulated_elapsed_seconds': client.clock() - client.start,
                 'http_requests': 0, 'production_prices_added': 0,
                 'limits': ['Scheduling recorded per-URL outcomes is a simulation, not new network behavior.',
                            'Unrequested or exhausted source outcomes are gaps, never invented successes.',
+                           'Discovery reuse derives new parsing from committed source bytes, with no new request or timestamp.',
                            'Pinned backlog and capture dates may differ; source timestamps and files are retained.']}
             summary['scope'] = ('Scoped capture replay of explicitly selected product, home and list resources against a pinned backlog. '
                                 'Only explicit candidate roots and sale-specific discovered products become candidates. '

@@ -117,6 +117,13 @@ class CoverageTest(unittest.TestCase):
         self.assertEqual(0, result['totals']['confirmed_http_attempts'])
         self.assertEqual(1, result['totals']['recorded_source_http_attempts'])
         self.assertEqual(1, result['stores']['ark']['replay_receipts'])
+        records['dispatches']['derived'] = {'url': HOME, 'state': 'committed',
+            'receipt': {**receipt, 'url': HOME, 'attempts': [], 'analysis_reuse': True}}
+        derived = self.report(resources, records, originals, mode='captured_queue_simulation')
+        self.assertEqual(0, derived['totals']['confirmed_http_attempts'])
+        self.assertEqual(1, derived['totals']['recorded_source_http_attempts'])
+        self.assertEqual(1, derived['totals']['discovery_analysis_reuses'])
+        self.assertEqual(1, derived['stores']['ark']['discovery_analysis_reuses'])
 
     def test_all_field_records_stay_distinct_from_unknown_values_and_verification(self):
         resources, records, originals = inputs()

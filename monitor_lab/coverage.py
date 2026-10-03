@@ -86,6 +86,7 @@ def coverage_report(resources, records, original_tasks, config, mode, run_id):
             'recorded_source_http_attempts': sum(len(r.get('attempts', [])) for r in receipts
                                                 if r.get('evidence_mode') == 'captured_queue_simulation'),
             'replay_receipts': sum(r.get('evidence_mode') in {'replay', 'fixture_replay', 'captured_queue_simulation'} for r in receipts),
+            'discovery_analysis_reuses': sum(bool(r.get('analysis_reuse')) for r in receipts),
             'receipt_error_counts': dict(sorted(Counter(r['error'] for r in receipts if r.get('error')).items())),
             'current_run_observations': len(current), 'other_run_observations': excluded['other_run'],
             'excluded_observation_counts': dict(sorted(excluded.items())), 'field_evidence': field_evidence}
@@ -99,7 +100,8 @@ def coverage_report(resources, records, original_tasks, config, mode, run_id):
                    'current_run_observations': sum(r['current_run_observations'] for r in rows.values()),
                    'recorded_dispatches': len(dispatches),
                    'confirmed_http_attempts': sum(r['confirmed_http_attempts'] for r in rows.values()),
-                   'recorded_source_http_attempts': sum(r['recorded_source_http_attempts'] for r in rows.values())},
+                   'recorded_source_http_attempts': sum(r['recorded_source_http_attempts'] for r in rows.values()),
+                   'discovery_analysis_reuses': sum(r['discovery_analysis_reuses'] for r in rows.values())},
         'unattributed_dispatches': sum(d['url'] not in by_url for d in dispatches),
         'stores': rows,
         'limits': ['A parsed product is not proof that its price or every field is verified.',

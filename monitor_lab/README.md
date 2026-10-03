@@ -97,6 +97,16 @@ separate from the original observation times and real elapsed time. Read
 two data revisions. Coverage reports `recorded_source_http_attempts` separately
 from new `confirmed_http_attempts`, which stays zero. Reopening the same output
 resumes its saved budget and consumed outcomes instead of fetching again.
+Later discovery tasks may reparse a successful home/list response already
+committed in the same run. Each derived receipt retains the original observation
+time, method, body hash, capture manifest and receipt index, and names its original
+dispatch. `discovery_analysis_reuses` counts these separately; their attempts,
+waits and elapsed acquisition time are zero. Task history uses
+`lab_analysis_reuses`, and child discovery evidence preserves the source link.
+This does not retry failed tasks or reuse product prices. Failed, incomplete,
+interrupted or changed evidence cannot supply a successful reuse. Host gates,
+the original deadline and the work-slot cap still apply. The standalone
+`queue-study` command retains its consume-once behavior.
 Capture and local store settings must match. Live mode and separate discovery
 fixture bundles cannot be combined with this option.
 If a host is blocked or its wait cannot fit, the scheduler can advance to an

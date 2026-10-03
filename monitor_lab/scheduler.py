@@ -154,7 +154,9 @@ def collect(store, client, run_id, allowed_urls, on_page, *, architecture, cycle
         commit('reserve:' + identity, [('dispatches', identity, dispatch), ('scheduler', 'collection', control)])
         hook('after_reservation')
         previous_requests = client.requests
-        page, receipt = client.fetch(url)
+        reuse = getattr(client, 'reuse_discovery', None)
+        derived = reuse(url, {key: deepcopy(tasks[key]) for key in keys}, records, run_id) if reuse else None
+        page, receipt = derived if derived is not None else client.fetch(url)
         hook('after_fetch')
         receipt_dict = asdict(receipt)
         receipt_dict['task_ids'] = keys
@@ -164,7 +166,8 @@ def collect(store, client, run_id, allowed_urls, on_page, *, architecture, cycle
         for key in keys:
             before_task = deepcopy(tasks[key])
             task = deepcopy(tasks[key])
-            history = 'lab_evidence_gaps' if receipt.error == 'evidence_exhausted' else 'lab_attempts'
+            history = ('lab_analysis_reuses' if receipt_dict.get('analysis_reuse') else
+                       'lab_evidence_gaps' if receipt.error == 'evidence_exhausted' else 'lab_attempts')
             task.setdefault(history, []).append(deepcopy(receipt_dict))
             task['lab_last_error'] = receipt.error
             if page is not None:

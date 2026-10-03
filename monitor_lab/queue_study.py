@@ -6,7 +6,7 @@ and bytes stay unchanged; the simulation's clock is recorded separately.
 from __future__ import annotations
 
 from copy import deepcopy
-from dataclasses import dataclass, fields
+from dataclasses import asdict, dataclass, fields
 import hashlib
 from pathlib import Path
 from urllib.parse import urlsplit
@@ -27,10 +27,12 @@ class TraceReceipt(Receipt):
     source_capture_manifest_sha256: str = ''
     source_receipt_index: int | None = None
     source_evidence_mode: str | None = None
+    analysis_reuse: bool = False
+    derived_from_dispatch: str | None = None
 
 
 class CapturedClient:
-    def __init__(self, root, verified, method):
+    def __init__(self, root, verified, method, *, discovery_reuse=False):
         self.root = Path(root)
         self.verified = verified
         self.checksum = hashlib.sha256((self.root / 'capture-manifest.json').read_bytes()).hexdigest()
@@ -42,6 +44,8 @@ class CapturedClient:
         self.hosts, self.last, self.sequence = {}, {}, []
         self.requests = 0  # Replaying evidence never makes an HTTP request.
         self.used = set()
+        self.discovery_resources = {r['url']: r for r in verified.get('metadata', {}).get('scope_plan', {}).get('resources', [])
+                                    if discovery_reuse and r['kind'] in {'home', 'list'}}
         self.gates = {}
         for row in verified['receipts']:
             if row['error'] == 'shared_host_wait':
@@ -67,6 +71,59 @@ class CapturedClient:
         for row in records.get('scheduler_waits', {}).values():
             self.now = max(self.now, row.get('finished_at_epoch', row['started_at_epoch']))
 
+    def trace_receipt(self, index, row):
+        names = {f.name for f in fields(Receipt)}
+        receipt = TraceReceipt(**{key: deepcopy(value) for key, value in row.items() if key in names},
+                               source_capture_manifest_sha256=self.checksum, source_receipt_index=index,
+                               source_evidence_mode=row['evidence_mode'])
+        receipt.evidence_mode = 'captured_queue_simulation'
+        return receipt
+
+    def reuse_discovery(self, url, selected_tasks, records, run_id):
+        """Derive new discovery work from a committed same-run parser input.
+
+        This cannot supply an acquisition retry or a product observation. The
+        scheduler still applies host gates, the persisted deadline and work cap.
+        """
+        resource = self.discovery_resources.get(url)
+        if (not resource or not selected_tasks or any(
+                t.get('lab_kind') not in {'list', 'search'} or t.get('lab_store') != resource['store']
+                for t in selected_tasks.values())):
+            return None
+        # Preserve recorded request order when another actual outcome exists.
+        if any(i not in self.used and row['url'] == url for i, row in self.rows):
+            return None
+        prior = [(key, d) for key, d in records.get('dispatches', {}).items()
+                 if key.startswith(run_id + ':') and d['url'] == url and d['state'] != 'reserved']
+        if any(set(selected_tasks) & set(d['task_ids']) for _, d in prior):
+            return None
+        outcomes = [(key, d) for key, d in prior if not d.get('receipt', {}).get('analysis_reuse')]
+        if not outcomes:
+            return None
+        identity, dispatch = max(outcomes, key=lambda item: item[1]['slot'])
+        receipt = dispatch.get('receipt', {})
+        index = receipt.get('source_receipt_index')
+        source = next((row for i, row in self.rows if i == index and row['url'] == url), None)
+        if (dispatch['state'] != 'committed' or dispatch.get('processing_error') or source is None
+                or index not in self.used
+                or source.get('resource_kind') not in {'home', 'list'}
+                or source['store'] != resource['store'] or source['status'] != 200 or source['error']
+                or source.get('body_incomplete') or source.get('body_unavailable')):
+            return None
+        derived = self.trace_receipt(index, source)
+        # A restored reference must match the verified immutable source, not
+        # merely name an index that happens to contain a successful response.
+        if any(receipt.get(key) != value for key, value in asdict(derived).items()):
+            raise ValueError('Committed discovery receipt differs from captured source')
+        page = captured_page(self.root, source, method='captured_discovery_reuse')
+        if page.url != url:
+            return None
+        derived.analysis_reuse = True
+        derived.derived_from_dispatch = identity
+        derived.attempts, derived.waits, derived.elapsed_seconds = [], [], 0.0
+        derived.browser_requests = []
+        return page, derived
+
     def fetch(self, url):
         selected = next(((i, row) for i, row in self.rows if i not in self.used and row['url'] == url), None)
         if selected is None:
@@ -77,11 +134,7 @@ class CapturedClient:
         index, row = selected
         self.used.add(index)
         self.now += row['elapsed_seconds']
-        names = {f.name for f in fields(Receipt)}
-        receipt = TraceReceipt(**{key: deepcopy(value) for key, value in row.items() if key in names},
-                               source_capture_manifest_sha256=self.checksum, source_receipt_index=index,
-                               source_evidence_mode=row['evidence_mode'])
-        receipt.evidence_mode = 'captured_queue_simulation'
+        receipt = self.trace_receipt(index, row)
         host = urlsplit(url).hostname
         if receipt.error:
             observed = timestamp(receipt.observed_at).timestamp()
