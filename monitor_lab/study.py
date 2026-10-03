@@ -3,10 +3,12 @@ from __future__ import annotations
 
 from dataclasses import asdict
 from pathlib import Path
+import math
 import time
 
 from .acquire import Coordinator, TRANSPORTS
 from .capture import Capture, verify_capture
+from .request_plan import load_plan, scope_report
 from .safety import digest, environment, experiment_id, guard, implementation_hash, read
 
 PLAN = [
@@ -19,20 +21,29 @@ PLAN = [
 ]
 
 
-def study(output, methods=("urllib", "pooled"), emit=lambda row: None):
+def study(output, methods=("urllib", "pooled"), emit=lambda row: None, *, plan=None, budget=2100):
     output = guard(Path(output))
     if not methods or len(set(methods)) != len(methods) or set(methods) - set(TRANSPORTS):
         raise ValueError("Each enabled method may be requested once")
+    if isinstance(budget, bool) or not isinstance(budget, (int, float)) or not math.isfinite(budget) or not 0 < budget <= 2100:
+        raise ValueError('Invalid shared study budget')
     identifier = experiment_id()
     settings = read(Path(__file__).resolve().parents[1] / "config/sources.json")
+    scope = load_plan(plan, settings['stores']) if plan is not None else None
+    if scope and 'browser' in methods and any(row['store'] != 'koubou' for row in scope['resources']):
+        raise ValueError('Browser scope is currently limited to Koubou')
+    request_plan = [(row['store'], row['url']) for row in scope['resources']] if scope else PLAN
+    kinds = {row['url']: row['kind'] for row in scope['resources']} if scope else {}
     metadata = {"experiment_id": identifier, "mode": "live", "environment": environment(),
-                "plan_hash": digest(PLAN), "request_plan": PLAN, "methods": list(methods),
+                "plan_hash": scope['plan_hash'] if scope else digest(PLAN), "request_plan": request_plan, "methods": list(methods),
                 "implementation_hash": implementation_hash(),
                 "implementation_hash_lf": implementation_hash(normalize_line_endings=True)}
+    if scope:
+        metadata.update(scope_plan=scope, budget_seconds=budget)
     capture = Capture(output, metadata, settings)
     hosts = {}
     results = []
-    deadline = time.monotonic() + 2100
+    deadline = time.monotonic() + budget
     started = time.perf_counter()
     coordinator = None
     for method in methods:
@@ -43,11 +54,13 @@ def study(output, methods=("urllib", "pooled"), emit=lambda row: None):
         else:
             coordinator.transport = transport
         try:
-            for store, url in PLAN:
+            for store, url in request_plan:
                 if method == "browser" and store != "koubou":
                     continue
                 page, receipt = coordinator.fetch(url)
                 row = {"store": store, **asdict(receipt)}
+                if scope:
+                    row['resource_kind'] = kinds[url]
                 results.append(row)
                 capture.append(row, hosts)
                 emit(row)
@@ -59,10 +72,10 @@ def study(output, methods=("urllib", "pooled"), emit=lambda row: None):
         if hasattr(transport, "subrequests"):
             from .safety import write
             write(output / "browser-subrequests.json", transport.subrequests)
-    result = {"experiment_id": identifier, "environment": environment(), "plan_hash": digest(PLAN),
+    result = {"experiment_id": identifier, "environment": environment(), "plan_hash": metadata['plan_hash'],
               "implementation_hash": implementation_hash(),
               "implementation_hash_lf": metadata["implementation_hash_lf"],
-              "request_plan": PLAN, "methods": list(methods), "receipts": results,
+              "request_plan": request_plan, "methods": list(methods), "receipts": results,
               "elapsed_seconds": time.perf_counter() - started,
               "http_navigation_attempts": sum(len(r["attempts"]) for r in results),
               "successful_pages": sum(r["status"] == 200 and not r["error"] for r in results),
@@ -70,6 +83,8 @@ def study(output, methods=("urllib", "pooled"), emit=lambda row: None):
               "limits": ["One bounded observation, not a stability sample", "Sequential method order may confound timing",
                          "Shared host wait may prevent a second method; a skipped request is not a failed HTTP request",
                          "Windows pages are not eligible production prices", "No notification or formal audit"]}
+    if scope:
+        result['scope'] = scope_report(scope, results)
     capture.checkpoint(result=result)
     verify_capture(output)
     return result

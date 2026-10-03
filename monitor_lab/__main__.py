@@ -36,6 +36,8 @@ def main():
     network = sub.add_parser("transport-study")
     network.add_argument("--output", type=Path, required=True)
     network.add_argument("--methods", nargs="+", choices=["urllib", "pooled", "browser"], default=["urllib", "pooled"])
+    network.add_argument('--plan', type=Path, help='Verified bounded URL plan; omitted uses the original six products')
+    network.add_argument('--budget', type=float, default=2100, help='One shared budget across all methods, up to 2100 seconds')
     queue = sub.add_parser("queue-study")
     queue.add_argument("--input", type=Path, required=True)
     queue.add_argument("--capture", type=Path, required=True)
@@ -120,7 +122,8 @@ def main():
         print(json.dumps({k: v for k, v in result.items() if k != "files"}))
     elif args.command == "transport-study":
         from .study import study
-        result = study(args.output, args.methods, emit=lambda row: print("LAB_RECEIPT " + json.dumps(row, ensure_ascii=False), flush=True))
+        result = study(args.output, args.methods, emit=lambda row: print("LAB_RECEIPT " + json.dumps(row, ensure_ascii=False), flush=True),
+                       plan=args.plan, budget=args.budget)
         print("LAB_STUDY " + json.dumps({k: v for k, v in result.items() if k != "receipts"}, ensure_ascii=False))
     else:
         from .benchmark import benchmark, worker

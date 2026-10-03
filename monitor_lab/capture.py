@@ -11,7 +11,7 @@ import re
 from urllib.parse import urlsplit
 
 from sale_monitor.http import Page
-from .acquire import MAX_BODY, Receipt, http_framing
+from .acquire import MAX_BODY, Receipt, TRANSPORTS, http_framing
 from .safety import atomic_bytes, digest, guard, read, write
 
 LEGACY_FORMAT = "pc-sale-monitor-http-evidence-v1"
@@ -222,6 +222,27 @@ def _verify_manifest(root, manifest, *, allow_partial=False):
     receipts = read(root / records["receipts"]) if "receipts" in records else []
     if len(receipts) != manifest["receipt_count"]:
         raise ValueError("Evidence receipt count changed")
+    settings = read(root / 'source-settings.json')
+    scope = metadata.get('scope_plan')
+    if scope is not None:
+        from .request_plan import validate_plan
+        scope = validate_plan(scope, settings.get('stores'))
+        planned = [[row['store'], row['url']] for row in scope['resources']]
+        methods = metadata.get('methods')
+        if (metadata.get('plan_hash') != scope['plan_hash'] or metadata.get('request_plan') != planned
+                or not isinstance(methods, list) or not methods
+                or any(not isinstance(method, str) or method not in TRANSPORTS for method in methods)
+                or len(set(methods)) != len(methods)):
+            raise ValueError('Capture request plan metadata is inconsistent')
+        expected = [(TRANSPORTS[method].method, row['store'], row['url'], row['kind'])
+                    for method in methods for row in scope['resources']]
+        actual = [(row.get('method'), row.get('store'), row.get('url'), row.get('resource_kind')) for row in receipts]
+        if actual != expected[:len(actual)] or len(actual) > len(expected):
+            raise ValueError('Capture receipt does not match its planned resource kind or order')
+        if manifest['complete'] and len(actual) != len(expected):
+            raise ValueError('Completed capture is missing planned receipt outcomes')
+    elif any('resource_kind' in row for row in receipts):
+        raise ValueError('Resource kinds require a verified request plan')
     for row in receipts:
         details = row.get('http_body')
         if details is not None:
@@ -282,8 +303,12 @@ def _verify_manifest(root, manifest, *, allow_partial=False):
     if result is not None and (result["receipts"] != receipts or result["experiment_id"] != manifest["experiment_id"]
                                or result.get("mode") != manifest["mode"]):
         raise ValueError("Final result and evidence receipts disagree")
+    if result is not None and scope is not None:
+        from .request_plan import scope_report
+        if result.get('scope') != scope_report(scope, receipts) or result.get('plan_hash') != scope['plan_hash']:
+            raise ValueError('Final request scope does not match retained receipts')
     return {"manifest": manifest, "metadata": metadata, "receipts": receipts, "result": result,
-            "settings": read(root / "source-settings.json"), "verified_bytes": total,
+            "settings": settings, "verified_bytes": total,
             "hosts": read(root / records["hosts"]) if "hosts" in records else {}}
 
 
@@ -360,6 +385,10 @@ def replay_capture(source, output, *, allow_partial=False):
     for receipt in verified["receipts"]:
         row = {"receipt": receipt, "parsed": False, "observation": None}
         if receipt["status"] == 200 and not receipt.get("error") and not receipt.get("body_incomplete"):
+            if receipt.get('resource_kind', 'product') != 'product':
+                row['skip_reason'] = 'non_product_resource'
+                rows.append(row)
+                continue
             if receipt['method'] == 'browser' and verified['manifest']['format'] != FORMAT:
                 row['skip_reason'] = 'legacy_browser_representation_ambiguous'
                 rows.append(row)
@@ -374,6 +403,9 @@ def replay_capture(source, output, *, allow_partial=False):
               "source_manifest_sha256": hashlib.sha256((source / "capture-manifest.json").read_bytes()).hexdigest(),
               "http_requests": 0, "formal_audits_added": 0, "production_prices_added": 0,
               "parsed_pages": sum(row["parsed"] for row in rows), "observations": rows}
+    if verified['metadata'].get('scope_plan') is not None:
+        result['non_product_pages'] = sum(row.get('skip_reason') == 'non_product_resource' for row in rows)
+        result['scope_plan_hash'] = verified['metadata']['scope_plan']['plan_hash']
     write(output / "result.json", result)
     return result
 

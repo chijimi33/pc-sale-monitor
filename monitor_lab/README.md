@@ -1,0 +1,76 @@
+# Isolated acquisition experiments
+
+The lab writes only under the E-drive experiment root on Windows, or the
+`RUNNER_TEMP/pc-sale-monitor-lab` directory in GitHub Actions. Each run needs a new
+output directory. It does not publish production prices, send notifications, or
+add formal audits.
+
+## Bounded URL plans
+
+`transport-study` uses six selected product URLs by default. An explicit `--plan`
+can select 1–20 unique HTTPS URLs from the configured store seed hosts. Give each
+URL its intended role: `home`, `list`, or `product`. Every one of the ten monitored
+stores must appear either in `resources` or in `not_requested` with a reason.
+Rakuten remains excluded. A role is acquisition intent, not proof of page content.
+
+The plan has exactly these fields:
+
+```json
+{
+  "format": "pc-sale-monitor-request-plan-v1",
+  "created_at": "2026-10-04T00:00:00+09:00",
+  "source_data_sha": "<40-character pinned data-branch commit>",
+  "resources": [
+    {"store": "ark", "url": "https://www.ark-pc.co.jp/", "kind": "home"}
+  ],
+  "not_requested": [
+    {"store": "<each remaining store>", "reason": "<why it is outside this run>"}
+  ],
+  "plan_hash": "<digest of all the other fields>"
+}
+```
+
+This is a schema illustration; replace the placeholders and enumerate the
+remaining stores before running it. To seal a completed plan in Python, remove
+`plan_hash`, then assign `plan['plan_hash'] = monitor_lab.safety.digest(plan)`.
+That digest uses sorted keys, compact JSON, UTF-8, and no ASCII escaping. The hash
+detects changes; it does not establish trusted authorship or price evidence.
+
+Example PowerShell commands, with an existing verified plan and new output paths:
+
+```powershell
+python -m monitor_lab transport-study --plan "$plan" --output "$capture" --budget 240 --methods urllib pooled
+python -m monitor_lab verify-capture --input "$capture"
+python -m monitor_lab replay-capture --input "$capture" --output "$replay"
+```
+
+`--budget` is shared across methods, accepts a positive number up to 2,100 seconds,
+and defaults to 2,100. Native DNS, TLS, and OS stalls still have no verified hard
+cancellation guarantee. Hosts share spacing and failure waits across methods; a
+403 or active retry wait can hold later entries without issuing another request.
+The `pooled` CLI option records receipt method `pooled_http11`. The verifier checks
+this explicit mapping, resource roles, receipt order, and final scope counts.
+Browser experiments remain limited to Koubou.
+
+Successful home and list responses are retained but skipped by product replay.
+Only successful, complete product responses reach the normalizer. Parsing is not
+proof of complete product fields or eligibility. Read `scope` in the study result
+for actual HTTP attempts, successful responses, distinct successful product URLs,
+and omitted-store reasons. Held entries are not failed HTTP attempts; repeated
+responses are not additional unique products. All ten stores stay in the coverage
+denominator, and `full_store_coverage_proven` remains false.
+
+Verification and replay read retained evidence without network requests. Preserve
+the original bundle when a check fails; diagnose the validator or capture rather
+than editing historical receipts. Partial capture verification requires the
+explicit `--allow-partial` option and does not make an interrupted run complete.
+
+## Validation
+
+```powershell
+python -m unittest discover -s monitor_lab/tests -v
+```
+
+Ordinary PR updates run offline tests and capture/replay smoke checks. The separate
+live-acquisition workflow still uses the default six-product plan. A custom local
+plan does not alter the workflow or establish scheduled production stability.
