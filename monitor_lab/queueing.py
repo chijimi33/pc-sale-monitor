@@ -96,6 +96,11 @@ def expand_shared_list(tasks, page, cfg):
         raise ValueError('Shared listing tasks need the same parsing scope')
     products, pagination, campaigns = discover(page, cfg, sale_page=sale_page, comparison=comparison)
     if not products and not pagination and not campaigns:
+        if comparison and tasks[0]['lab_store'] == 'sofmap':
+            from .deferred_listing import deferred_listing
+            deferred = deferred_listing(tasks, page, cfg)
+            if deferred is not None:
+                return deferred
         reason = confirmed_empty_search(tasks[0]["lab_store"], page) if comparison else None
         if reason is None:
             raise ValueError("Missing fixture or parser failure is not an empty search result")

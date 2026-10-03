@@ -135,6 +135,40 @@ replace original live host gates. `--plan` and `--followup` cannot be combined.
 Capturing a dependency does not complete its original queued task, establish an
 empty search, or make any discovered price eligible by itself.
 
+Apply that capture to a new complete copy of the original experiment:
+
+```powershell
+python -m monitor_lab apply-followup --intent "$followup" --capture "$newCapture" --output "$continuedRun" --budget 120 --max-tasks 20
+```
+
+This revalidates the source intent and requires the capture's full retained
+provenance to match. Only the selected tasks run, using their original search
+query, parsing scope, age and dependencies. All source tasks and transaction
+history survive. Each application has a separate persisted collection budget;
+reopening it cannot reset either its own budget or the earlier collection.
+Receipt indexes and the replay clock belong to the selected capture and phase.
+An interrupted reservation remains unknown, consumes a slot and retains a wait.
+
+List responses expand dependencies without promoting comparison results into
+sale candidates. New product observations go into `phase_observations`; prior
+observations, decisions and events remain unchanged. This command does not
+reevaluate historical candidates, publish prices, notify or add a stability
+sample. New out-of-scope children remain pending and can supply the next explicit
+`prepare-followup` intent with this continued experiment and capture.
+When an existing product has discovery evidence from multiple phases, preparation
+revalidates each ancestral snapshot, capture and activation transaction. The same
+ancestry authenticates inherited translated host waits without clearing them.
+Keep referenced source directories: missing, changed, cyclic or overly deep
+ancestry is rejected before acquisition.
+
+The observed Sofmap query shell loads its product list from a separate HTML
+fragment. The lab recognizes its selected tab, matching keyword and retained GET
+loader contract, including first-load `isFirst=true`, without executing JavaScript.
+It omits the volatile cache-busting `_` parameter and records that omission.
+It records a further list
+dependency; an empty shell or displayed count is never proof of an empty search,
+a product identity or a price. A changed or ambiguous contract is a parse error.
+
 ## Validation
 
 ```powershell

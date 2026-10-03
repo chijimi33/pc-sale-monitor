@@ -47,6 +47,13 @@ def main():
     followup.add_argument('--capture', type=Path, required=True)
     followup.add_argument('--output', type=Path, required=True)
     followup.add_argument('--task-id', action='append', dest='task_ids', required=True)
+    apply = sub.add_parser('apply-followup')
+    apply.add_argument('--intent', type=Path, required=True)
+    apply.add_argument('--capture', type=Path, required=True)
+    apply.add_argument('--output', type=Path, required=True)
+    apply.add_argument('--method', choices=['urllib', 'pooled', 'browser'], default='urllib')
+    apply.add_argument('--budget', type=float, default=120)
+    apply.add_argument('--max-tasks', type=int, default=20)
     queue = sub.add_parser("queue-study")
     queue.add_argument("--input", type=Path, required=True)
     queue.add_argument("--capture", type=Path, required=True)
@@ -84,7 +91,12 @@ def main():
     timing.add_argument("--input", type=Path, required=True)
     timing.add_argument("--output", type=Path, required=True)
     args = parser.parse_args()
-    if args.command == 'prepare-followup':
+    if args.command == 'apply-followup':
+        from .followup_apply import apply_followup
+        result = apply_followup(args.intent, args.capture, args.output, method=args.method,
+                                budget=args.budget, max_tasks=args.max_tasks)
+        print(json.dumps({k: result[k] for k in ('selected_statuses', 'new_task_ids', 'new_phase_observations', 'http_requests')}))
+    elif args.command == 'prepare-followup':
         from .followup import prepare_followup
         result = prepare_followup(args.experiment, args.capture, args.output, args.task_ids)
         print(json.dumps({'bundle_hash': result['bundle_hash'], 'resources': len(result['request_plan']['resources'])}))

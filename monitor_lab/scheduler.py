@@ -11,7 +11,8 @@ from .queueing import resource_url, select_resource
 
 
 def collect(store, client, run_id, allowed_urls, on_page, *, architecture, cycles, max_tasks,
-            budget, hook=lambda stage: None, elapsed_before_collection=0):
+            budget, hook=lambda stage: None, elapsed_before_collection=0,
+            collection_key='collection', task_ids=None):
     """Reserve bounded work before acquisition; checkpoint outcomes atomically.
 
     A reservation whose outcome was not committed remains explicitly unknown on
@@ -23,9 +24,17 @@ def collect(store, client, run_id, allowed_urls, on_page, *, architecture, cycle
     if not math.isfinite(elapsed_before_collection) or elapsed_before_collection < 0:
         raise ValueError('Invalid preparation duration')
     options = {'architecture': architecture, 'cycles': cycles, 'max_tasks': max_tasks, 'budget_seconds': budget}
+    if not isinstance(collection_key, str) or not collection_key:
+        raise ValueError('Invalid collection key')
+    if task_ids is not None:
+        if not isinstance(task_ids, (list, tuple)) or not task_ids or len(set(task_ids)) != len(task_ids):
+            raise ValueError('Expected explicit unique task IDs')
+        options['task_ids'] = sorted(task_ids)
     records = store.snapshot()['records']
     tasks = records['tasks']
-    control = deepcopy(records.get('scheduler', {}).get('collection'))
+    if task_ids is not None and not set(task_ids) <= set(tasks):
+        raise ValueError('Selected task is missing')
+    control = deepcopy(records.get('scheduler', {}).get(collection_key))
 
     def commit(txid, changes):
         store.commit(txid, changes)
@@ -37,7 +46,7 @@ def collect(store, client, run_id, allowed_urls, on_page, *, architecture, cycle
         control = {'schema': 1, 'options': options, 'started_at_epoch': now, 'deadline_epoch': now + budget,
                    'budget_seconds': budget, 'cycle': 0, 'cursor': 0, 'reserved_resources': 0,
                    'active': None, 'confirmed_http_requests': 0, 'last_by_host': {}, 'request_sequence': [], 'wait_count': 0}
-        commit('schedule:init:' + run_id, [('scheduler', 'collection', control)])
+        commit('schedule:init:' + run_id, [('scheduler', collection_key, control)])
     if (control.get('schema') != 1 or control.get('options') != options
             or not all(math.isfinite(control[key]) for key in ('started_at_epoch', 'deadline_epoch'))
             or abs(control['deadline_epoch'] - control['started_at_epoch'] - budget) > 0.00001):
@@ -69,7 +78,7 @@ def collect(store, client, run_id, allowed_urls, on_page, *, architecture, cycle
             task['lab_status'] = 'waiting'
             changes.append(('tasks', key, task))
         control['active'] = None
-        changes.append(('scheduler', 'collection', control))
+        changes.append(('scheduler', collection_key, control))
         commit('schedule:interrupted:' + identity, changes)
 
     receipts, completed_times, dispatches = [], {}, []
@@ -78,6 +87,7 @@ def collect(store, client, run_id, allowed_urls, on_page, *, architecture, cycle
 
     def selected_tasks():
         return {key: task for key, task in tasks.items() if task.get('lab_selected')
+                and (task_ids is None or key in task_ids)
                 and task.get('lab_kind') in {'product', 'list', 'search'}
                 and resource_url(task)
                 and task.get('lab_status') not in {'complete', 'external_wait', 'evidence_wait'}
@@ -86,7 +96,9 @@ def collect(store, client, run_id, allowed_urls, on_page, *, architecture, cycle
     def advance_deferred_cycle():
         """A held host must not strand runnable work in a later allowed cycle."""
         deferred = []
-        for task in tasks.values():
+        for key, task in tasks.items():
+            if task_ids is not None and key not in task_ids:
+                continue
             ready = task.get('lab_ready_cycle', 0)
             url = resource_url(task)
             if (not task.get('lab_selected') or task.get('lab_kind') not in {'product', 'list', 'search'}
@@ -99,7 +111,7 @@ def collect(store, client, run_id, allowed_urls, on_page, *, architecture, cycle
         if not deferred:
             return False
         control['cycle'] = min(deferred)
-        commit(f"schedule:cycle:{run_id}:{control['cycle']}", [('scheduler', 'collection', control)])
+        commit(f"schedule:cycle:{run_id}:{control['cycle']}", [('scheduler', collection_key, control)])
         return True
 
     while control['cycle'] < cycles:
@@ -112,7 +124,7 @@ def collect(store, client, run_id, allowed_urls, on_page, *, architecture, cycle
         eligible = selected_tasks()
         if not eligible:
             control['cycle'] += 1
-            commit(f"schedule:cycle:{run_id}:{control['cycle']}", [('scheduler', 'collection', control)])
+            commit(f"schedule:cycle:{run_id}:{control['cycle']}", [('scheduler', collection_key, control)])
             continue
         selection = select_resource(eligible, client.hosts, client.clock(), control['cursor'],
                                     policy='cyclic' if architecture == 'A' else 'dependent')
@@ -136,7 +148,7 @@ def collect(store, client, run_id, allowed_urls, on_page, *, architecture, cycle
             control['wait_count'] += 1
             wait_id = f"{run_id}:{control['wait_count']}"
             wait['state'] = 'planned'
-            commit('schedule:wait:' + wait_id, [('scheduler_waits', wait_id, wait), ('scheduler', 'collection', control)])
+            commit('schedule:wait:' + wait_id, [('scheduler_waits', wait_id, wait), ('scheduler', collection_key, control)])
             client.sleep(max(0, until - client.clock()))
             wait.update(state='completed', finished_at_epoch=client.clock())
             commit('schedule:waited:' + wait_id, [('scheduler_waits', wait_id, wait)])
@@ -151,7 +163,7 @@ def collect(store, client, run_id, allowed_urls, on_page, *, architecture, cycle
                     'resource': selection['resource'], 'cursor_before': control['cursor'],
                     'cursor_after': selection['next_cursor'], 'started_at_epoch': client.clock()}
         control.update(reserved_resources=slot, cursor=selection['next_cursor'], active=identity)
-        commit('reserve:' + identity, [('dispatches', identity, dispatch), ('scheduler', 'collection', control)])
+        commit('reserve:' + identity, [('dispatches', identity, dispatch), ('scheduler', collection_key, control)])
         hook('after_reservation')
         previous_requests = client.requests
         reuse = getattr(client, 'reuse_discovery', None)
@@ -208,7 +220,7 @@ def collect(store, client, run_id, allowed_urls, on_page, *, architecture, cycle
         control.update(active=None, confirmed_http_requests=control['confirmed_http_requests'] + client.requests - previous_requests,
                        last_by_host=deepcopy(client.last), request_sequence=list(client.sequence))
         changes += [('hosts', host, gate) for host, gate in client.hosts.items()]
-        changes += [('dispatches', identity, dispatch), ('scheduler', 'collection', control)]
+        changes += [('dispatches', identity, dispatch), ('scheduler', collection_key, control)]
         # Every task sharing this resource, observations, wait state and cursor
         # become visible together. Failed normalizations never complete a task.
         commit('acquire:' + identity, changes)

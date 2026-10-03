@@ -62,13 +62,20 @@ class CapturedClient:
     def sleep(self, seconds):
         self.now += seconds
 
-    def restore(self, records):
-        for row in records.get('dispatches', {}).values():
-            index = row.get('receipt', {}).get('source_receipt_index')
+    def restore(self, records, *, run_id=None):
+        for identity, row in records.get('dispatches', {}).items():
+            if run_id is not None and not identity.startswith(run_id + ':'):
+                continue
+            receipt = row.get('receipt', {})
+            if receipt and receipt.get('source_capture_manifest_sha256') != self.checksum:
+                continue
+            index = receipt.get('source_receipt_index')
             if index is not None:
                 self.used.add(index)
             self.now = max(self.now, row.get('finished_at_epoch', row['started_at_epoch']))
-        for row in records.get('scheduler_waits', {}).values():
+        for identity, row in records.get('scheduler_waits', {}).items():
+            if run_id is not None and not identity.startswith(run_id + ':'):
+                continue
             self.now = max(self.now, row.get('finished_at_epoch', row['started_at_epoch']))
 
     def trace_receipt(self, index, row):
