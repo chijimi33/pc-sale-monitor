@@ -6,14 +6,14 @@ from pathlib import Path
 import re
 
 from .models import STORES, iso, utcnow
-from .reporting import aggregate, merge_incoming, validation
+from .reporting import aggregate, checkpoint, merge_incoming, validation
 from .runner import Collector
 from .storage import Store, read_json
 
 
 def main(argv=None):
     parser = argparse.ArgumentParser(description="10店の特価監視。楽天価格取得は対象外。")
-    parser.add_argument("command", choices=["collect", "aggregate", "validate", "ack"])
+    parser.add_argument("command", choices=["collect", "checkpoint", "aggregate", "validate", "ack"])
     parser.add_argument("--state", type=Path, default=Path("data"))
     parser.add_argument("--public", type=Path, default=Path("public"))
     parser.add_argument("--config", type=Path, default=Path("config/sources.json"))
@@ -33,6 +33,10 @@ def main(argv=None):
             parser.error("configuration must contain exactly the ten supported stores")
         result = Collector(args.state, args.store, config, args.run_id).collect(args.seconds)
         print(json.dumps({"store": args.store, "status": result["status"], "offers": len(result["offers"]), "pending": len(result["queue"]), "errors": result["errors"]}, ensure_ascii=False))
+    elif args.command == "checkpoint":
+        if args.incoming is None:
+            parser.error("checkpoint requires --incoming")
+        print(json.dumps(checkpoint(args.state, args.incoming, args.run_id), ensure_ascii=False))
     elif args.command == "aggregate":
         if args.incoming:
             merge_incoming(args.state, args.incoming)
