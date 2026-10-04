@@ -4,7 +4,7 @@ from datetime import datetime
 from dataclasses import asdict
 import os
 import re
-from urllib.parse import urlencode
+from urllib.parse import urlencode, urljoin, urlsplit
 
 from .http import Client, FetchError
 from .models import Offer, UTC, allowed_url, iso, timestamp, valid_jan
@@ -127,6 +127,16 @@ def amazon_candidates(client: Client, source_url: str) -> tuple[list[dict], dict
 def amazon_product(client: Client, candidate: dict) -> Offer:
     page = client.get(candidate["url"])
     tree = document(page)
+    amazon_hosts = {"amazon.co.jp", "www.amazon.co.jp"}
+    if (urlsplit(page.url).hostname or "").lower() in amazon_hosts:
+        for form in tree.xpath('//form[@action and not(ancestor::template) and not(ancestor::noscript)]'):
+            action = urlsplit(urljoin(page.url, form.get("action")))
+            if (action.scheme in ("http", "https") and
+                    (action.hostname or "").lower() in amazon_hosts and
+                    action.path in ("/errors_page/validateCaptcha", "/errors/validateCaptcha")):
+                # HTTP 200 can be an access challenge, not a product receipt.
+                # Never submit this form or overwrite the last product snapshot.
+                raise FetchError("amazon_access_challenge", page=page)
     offer = parse_product("amazon", page, {}, candidate)
     offer.product_id = candidate["url"].rsplit("/", 1)[-1]
     offer.title = first(tree, '//*[@id="productTitle"]') or candidate.get("title", "")

@@ -3,6 +3,7 @@ from __future__ import annotations
 from copy import deepcopy
 from datetime import timedelta
 from pathlib import Path
+import hashlib
 import os
 import time
 from urllib.parse import urlsplit
@@ -64,6 +65,7 @@ class Collector:
         self.state["status"] = "running"
         if self.new_run:
             self.state["errors"] = []
+            self.state.pop("access_block", None)
         self.state.setdefault("errors", [])
         self.attempted = {key for key, task in self.state["queue"].items()
                           if task.get("last_attempt_run_id") == run_id}
@@ -372,6 +374,10 @@ class Collector:
 
     def collect(self, seconds: int = 2100, review_root: Path = Path("config/flyer_reviews")) -> dict:
         self.seed()
+        if self.state.get("access_block", {}).get("run_id") == self.run_id:
+            self.state.update(status="access_required", cycle_complete=False)
+            self.save()
+            return self.state
         deadline = time.monotonic() + seconds
         if self.store == "yahoo":
             self.state["errors"] = [e for e in self.state["errors"]
@@ -429,6 +435,15 @@ class Collector:
                     for row in self.state["offers"].values():
                         if canonical(row["url"]) == canonical(task["url"]):
                             row["issues"] = sorted(set(row.get("issues", []) + ["latest_fetch_failed"]))
+                if self.store == "amazon" and reason == "amazon_access_challenge":
+                    page = exc.page if isinstance(exc, FetchError) else None
+                    self.state["access_block"] = {
+                        "run_id": self.run_id, "reason": reason, "url": task.get("url"),
+                        "checked_at": page.observed_at if page else iso(),
+                        "body_sha256": hashlib.sha256(page.body).hexdigest() if page else None,
+                    }
+                    self.save()
+                    break
             self.save()
         if self.store == "koubou":
             try:
@@ -441,7 +456,10 @@ class Collector:
         self.state["cycle_complete"] = not self.state["queue"]
         _, self.state["waiting_dependencies"] = runnable(self.state["queue"], self.attempted, self.cfg,
             self.client, self.page_failure_retry_at, time.time())
-        self.state["status"] = "complete" if self.state["cycle_complete"] and not self.state.get("discovery_gaps") else "partial"
+        if self.state.get("access_block", {}).get("run_id") == self.run_id:
+            self.state["status"] = "access_required"
+        else:
+            self.state["status"] = "complete" if self.state["cycle_complete"] and not self.state.get("discovery_gaps") else "partial"
         self.state["completed_at"] = iso()
         self.save()
         return self.state
