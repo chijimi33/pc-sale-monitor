@@ -55,14 +55,18 @@ class Collector:
         scheduler = self.state.setdefault("scheduler", {"cursor": 0})
         if self.new_run:
             scheduler["selected_by_lane"] = {}
+            scheduler["selected_by_attempt_kind"] = {}
             self.state["retry_activity"] = {"retries_started": 0, "recovered_tasks": 0, "wait_seconds": 0}
             self.state["recovered_errors"] = []
         self.state.setdefault("retry_activity", {"retries_started": 0, "recovered_tasks": 0, "wait_seconds": 0})
         self.state["run_id"] = run_id
         self.state["started_at"] = iso()
         self.state["status"] = "running"
-        self.state["errors"] = []
-        self.attempted = set()
+        if self.new_run:
+            self.state["errors"] = []
+        self.state.setdefault("errors", [])
+        self.attempted = {key for key, task in self.state["queue"].items()
+                          if task.get("last_attempt_run_id") == run_id}
         self.pages = {}
         self.page_failures = {}
         self.page_failure_retry_at = {}
@@ -369,11 +373,14 @@ class Collector:
     def collect(self, seconds: int = 2100, review_root: Path = Path("config/flyer_reviews")) -> dict:
         self.seed()
         deadline = time.monotonic() + seconds
-        if self.store == "yahoo" and not os.environ.get("YAHOO_CLIENT_ID"):
-            self.state["status"] = "configuration_needed"
-            self.state["errors"] = [{"reason": "YAHOO_CLIENT_ID_missing"}]
-            self.save()
-            return self.state
+        if self.store == "yahoo":
+            self.state["errors"] = [e for e in self.state["errors"]
+                                    if e.get("reason") != "YAHOO_CLIENT_ID_missing"]
+            if not os.environ.get("YAHOO_CLIENT_ID"):
+                self.state["status"] = "configuration_needed"
+                self.state["errors"].append({"reason": "YAHOO_CLIENT_ID_missing"})
+                self.save()
+                return self.state
         while (tick := time.monotonic()) < deadline:
             wall_now = time.time()
             pending, waits = runnable(self.state["queue"], self.attempted, self.cfg, self.client,
@@ -393,7 +400,7 @@ class Collector:
                 time.sleep(delay)
                 self.state["retry_activity"]["wait_seconds"] += delay
                 continue
-            task_id, task = select_task(pending, self.state["scheduler"], task_order, utcnow())
+            task_id, task = select_task(pending, self.state["scheduler"], task_order, utcnow(), self.attempted)
             self.attempted.add(task_id)
             if task.get("retry_at_epoch_seconds") is not None:
                 self.state["retry_activity"]["retries_started"] += 1
@@ -410,7 +417,8 @@ class Collector:
                 # Only sanitized error types/codes are persisted; URLs with API
                 # credentials and raw exception messages never enter the feed.
                 reason = str(exc) if isinstance(exc, FetchError) and "http" not in str(exc)[5:] and len(str(exc)) < 100 else type(exc).__name__
-                task.update(attempts=task.get("attempts", 0)+1, last_error=reason, last_attempt_at=iso())
+                task.update(attempts=task.get("attempts", 0)+1, last_error=reason, last_attempt_at=iso(),
+                            last_attempt_run_id=self.run_id)
                 task.pop("retry_at_epoch_seconds", None)
                 if transient(reason):
                     task["retry_at_epoch_seconds"] = time.time() + 300

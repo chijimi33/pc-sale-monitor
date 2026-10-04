@@ -58,7 +58,7 @@ def lane(task: dict) -> str:
     return "discovery" if task["type"] in ("list", "dospara_list", "amazon_discovery") else "sale"
 
 
-def select_task(pending: list[tuple[str, dict]], scheduler: dict, order, now):
+def select_task(pending: list[tuple[str, dict]], scheduler: dict, order, now, attempted=None):
     """A saved cursor prevents short runs from always restarting in one lane."""
     cursor = scheduler.get("cursor", 0) % len(LANES)
     for offset in range(len(LANES)):
@@ -67,6 +67,7 @@ def select_task(pending: list[tuple[str, dict]], scheduler: dict, order, now):
         if not candidates:
             continue
 
+        group = LANES[index]
         if LANES[index] == "comparison":
             # Three opportunities for currently needed work, then one for old
             # work. Persist the cursor so interruptions cannot starve either.
@@ -75,6 +76,18 @@ def select_task(pending: list[tuple[str, dict]], scheduler: dict, order, now):
             comparison_cursor = scheduler.get("comparison_cursor", 0) % 4
             candidates = (needed if comparison_cursor < 3 else other) or needed or other
             scheduler["comparison_cursor"] = (comparison_cursor + 1) % 4
+            group += ":requested" if candidates[0][1].get("requested") else ":other"
+
+        # Cooling down makes a failed task runnable again, but does not give it
+        # every opportunity ahead of equally runnable work that has not been
+        # attempted this run. Retain retry opportunities as well as coverage.
+        attempted = attempted or set()
+        untried = [pair for pair in candidates if pair[0] not in attempted]
+        retries = [pair for pair in candidates if pair[0] in attempted]
+        retry_cursors = scheduler.setdefault("retry_cursor_by_group", {})
+        retry_cursor = retry_cursors.get(group, 0) % 4
+        candidates = (untried if retry_cursor < 3 else retries) or untried or retries
+        retry_cursors[group] = (retry_cursor + 1) % 4
 
         def ranked(pair):
             created = timestamp(pair[1].get("created_at"))
@@ -86,6 +99,9 @@ def select_task(pending: list[tuple[str, dict]], scheduler: dict, order, now):
         scheduler["cursor"] = (index + 1) % len(LANES)
         counts = scheduler.setdefault("selected_by_lane", {})
         counts[LANES[index]] = counts.get(LANES[index], 0) + 1
+        attempt_kind = "retry_same_run" if selected[0] in attempted else "first_attempt_this_run"
+        counts = scheduler.setdefault("selected_by_attempt_kind", {})
+        counts[attempt_kind] = counts.get(attempt_kind, 0) + 1
         return selected
     return None
 
