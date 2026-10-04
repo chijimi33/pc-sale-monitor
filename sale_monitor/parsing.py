@@ -160,6 +160,15 @@ def parse_product(store: str, page: Page, cfg: dict, discovery: dict | None = No
         if date:
             offer.expires_at = iso(date + timedelta(days=1) - timedelta(seconds=1)) if len(expiry) == 10 else iso(date)
     evidence_fields = {"json_ld": bool(item), "schema_availability": schema_offer.get("availability"), "specifications": data}
+    # Import after module initialization: identity reuses the URL/text helpers.
+    from .identity import extract_primary_jan
+    primary_jan = extract_primary_jan(store, page, cfg)
+    if primary_jan is not None:
+        # Unknown/conflicting scoped evidence must never fall back to the
+        # document-wide JAN/SKU lookup. Keep every claim for review.
+        offer.jan = primary_jan["selected_value"] if primary_jan["status"] == "observed" else None
+        offer.issues.extend(primary_jan["conflicts"])
+        evidence_fields["jan_identity"] = primary_jan
     # Scope selectors to the current product, never scrape a page-wide lowest price.
     if store == "ark":
         price_blocks = tree.xpath('//*[@id=$id]/ancestor::li[contains(concat(" ",normalize-space(@class)," ")," itemprice ")][1]', id="item-" + offer.product_id)

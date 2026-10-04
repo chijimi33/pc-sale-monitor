@@ -15,7 +15,7 @@ from .parsing import canonical, confirmed_empty_search, discover, parse_product,
 from .storage import Store
 from .scheduling import plan_comparison_refresh, select_task
 from .retrying import runnable, transient
-from . import koubou_search
+from . import koubou_search, sofmap_search
 
 
 def task_order(task: dict) -> tuple:
@@ -263,8 +263,12 @@ class Collector:
             url = search_form(home, task["query"])
             if not url:
                 raise FetchError("search_form_not_found")
-            self.enqueue({"type": "list", "url": url, "sale_page": False, "kind": "comparison", "depth": 0, "priority": task.get("priority", 3), "created_at": task.get("created_at") or iso()})
+            self.enqueue({"type": "list", "url": url, "sale_page": False, "kind": "comparison", "depth": 0, "priority": task.get("priority", 3), "created_at": task.get("created_at") or iso(),
+                          **({"search_query": task["query"]} if self.store == "sofmap" else {})})
         elif kind == "list":
+            if self.store == "sofmap" and task.get("kind") == "comparison":
+                self.process_sofmap_search(task)
+                return
             # Explicit, reviewed entry changes apply only to sale discovery.
             # Keep the old queued task and age until replacement discovery
             # succeeds; an HTTP/parse failure must still leave it pending.
@@ -330,6 +334,37 @@ class Collector:
             self.record(offer)
         else:
             raise ValueError("unknown_task_type")
+
+    def process_sofmap_search(self, task: dict):
+        query = task.get("search_query") or task.get("query") or sofmap_search.request_query(task["url"])
+        page = self.page(task["url"], allow_browser=False)
+        if canonical(page.url) != canonical(task["url"]):
+            # A redirect may discard filters or a page cursor. Matching only
+            # the returned keyword cannot resolve the original queued scope.
+            raise FetchError("comparison_search_response_unverified")
+        source = None
+        if urlsplit(page.url).path == sofmap_search.SEARCH_PATH:
+            try:
+                deferred = sofmap_search.deferred_url(page, query, self.cfg)
+            except (ValueError, TypeError) as exc:
+                raise FetchError("comparison_search_response_unverified") from exc
+            if deferred is not None:
+                fragment_url, source = deferred
+                page = self.page(fragment_url, allow_browser=False)
+                if canonical(page.url) != canonical(fragment_url):
+                    raise FetchError("comparison_search_response_unverified")
+        products, dependencies, evidence = sofmap_search.parse_listing(page, query)
+        origin = {"created_at": task.get("created_at") or iso(), "priority": task.get("priority", 3)}
+        for product in products:
+            self.enqueue({"type": "product", **product, **origin})
+        for dependency in dependencies:
+            self.enqueue({"type": "list", "kind": "comparison", "sale_page": False,
+                          "depth": task.get("depth", 0) + 1, **dependency, **origin})
+        self.state.setdefault("comparison_searches", {})[canonical(task["url"])] = {
+            **evidence, "observed_run_id": self.run_id, "created_at": origin["created_at"],
+            "original_task": deepcopy(task), "deferred_source": source}
+        self.state["list_pages"] += 1 + bool(source)
+        self.state["listed_candidates"] += len(products)
 
     def collect(self, seconds: int = 2100, review_root: Path = Path("config/flyer_reviews")) -> dict:
         self.seed()
