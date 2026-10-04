@@ -83,6 +83,57 @@ def merge_incoming(root: Path, incoming: Path):
             atomic_json(root / relative, read_json(source, None))
 
 
+def checkpoint(root: Path, incoming: Path, run_id: str) -> dict:
+    """Persist collected snapshots before evaluation without publishing results.
+
+    Journals stay in the snapshots until aggregate archives them. A later
+    collector carries them forward if aggregation or publication is interrupted.
+    """
+    result = {"run_id": run_id, "accepted_stores": [], "missing_stores": [],
+              "rejected_stores": [], "journal_rows": {}, "flyer_errors": []}
+    for name in STORES:
+        source = incoming / "stores" / (name + ".json")
+        if not source.exists():
+            result["missing_stores"].append(name)
+            continue
+        try:
+            value = read_json(source, None)
+        except (OSError, ValueError) as exc:
+            reason = "artifact_unreadable_" + type(exc).__name__
+        else:
+            if not isinstance(value, dict):
+                reason = "artifact_not_object"
+            elif value.get("store") != name:
+                reason = "artifact_store_mismatch"
+            elif value.get("run_id") != run_id:
+                reason = "artifact_run_mismatch"
+            elif (not isinstance(value.get("queue"), dict) or
+                  not isinstance(value.get("offers"), dict) or
+                  not isinstance(value.get("journal"), list) or
+                  not isinstance(value.get("done", []), list)):
+                reason = "artifact_invalid_containers"
+            else:
+                # Preserve every queued task and journal row verbatim in JSON.
+                # A write failure aborts before the workflow can commit it.
+                atomic_json(root / "stores" / source.name, value)
+                result["accepted_stores"].append(name)
+                result["journal_rows"][name] = len(value["journal"])
+                continue
+        result["rejected_stores"].append({"store": name, "reason": reason})
+    if "koubou" in result["accepted_stores"] and (incoming / "flyers").exists():
+        for source in sorted((incoming / "flyers").rglob("*.json")):
+            relative = source.relative_to(incoming)
+            try:
+                value = read_json(source, None)
+            except (OSError, ValueError) as exc:
+                result["flyer_errors"].append({"path": relative.as_posix(),
+                    "reason": "artifact_unreadable_" + type(exc).__name__})
+                continue
+            atomic_json(root / relative, value)
+    atomic_json(root / "checkpoints" / (run_id + ".json"), result)
+    return result
+
+
 def comparison_inputs_by_identity(current: list[Offer], history: list[dict]) -> tuple[dict, dict]:
     """Narrow evaluation by identity without merging product conditions or rows."""
     # Identity equality is required by same_product; its other checks stay in evaluate.
