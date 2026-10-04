@@ -189,6 +189,21 @@ def parse_product(store: str, page: Page, cfg: dict, discovery: dict | None = No
         offer.price_yen = integer(first(tree, '//input[@id="priceIncTax"]/@value'))
         if field(data, r"^送料$") == "無料":
             offer.shipping_yen = 0
+        primary = tree.xpath('//main//*[contains(concat(" ",normalize-space(@class)," ")," productDetail--main__right ") and not(ancestor::template) and not(ancestor::noscript) and not(ancestor::footer) and not(ancestor::nav) and not(ancestor::aside)]')
+        if len(primary) == 1:
+            # Product-specific price/cart and title panels only. Sitewide
+            # registration links do not establish a conditional product price.
+            zones = primary[0].xpath('.//*[contains(concat(" ",normalize-space(@class)," ")," productDetail--main__right--price ") or contains(concat(" ",normalize-space(@class)," ")," title-box ")]')
+            notices = []
+            for zone in zones:
+                text = " ".join(" ".join(zone.xpath('.//text()[not(ancestor::script) and not(ancestor::style) and not(ancestor::template) and not(ancestor::noscript) and not(ancestor::footer) and not(ancestor::nav) and not(ancestor::aside)]')).split())
+                if re.search(r"会員限定価格|(?<!非)会員価格", text):
+                    notices.append(text[:2000])
+            if notices:
+                evidence_fields["conditional_prices"] = [{"kind": "member", "price_yen": None,
+                    "status": "unverified", "scope": "primary_product_price_panels",
+                    "normal_price_yen": offer.price_yen, "notices": notices}]
+                offer.issues.append("member_price_not_verified")
         raw = re.search(r"eccube\.classCategories\s*=\s*(\{.*?\});", page.text, re.S)
         if raw:
             try:
