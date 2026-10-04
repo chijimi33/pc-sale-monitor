@@ -337,7 +337,7 @@ class Collector:
             else:
                 page = self.page(task["url"])
                 offer = parse_product(self.store, page, self.cfg, task)
-                if not offer.verified and self.cfg.get("browser_fallback") and page.method != "browser":
+                if not offer.verified and "member_price_not_verified" not in offer.issues and self.cfg.get("browser_fallback") and page.method != "browser":
                     page = self.client.rendered(task["url"])
                     offer = parse_product(self.store, page, self.cfg, task)
                 if self.store == "tsukumo" and tsukumo_shipping.standard_product(page, offer):

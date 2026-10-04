@@ -196,8 +196,11 @@ def aggregate(root: Path, public: Path, run_id: str, now=None) -> dict:
             if basis["status"] == "accepted":
                 missing = missing_comparators(offer, known, current_by_key, now, points=basis["basis"] == "points")
                 if missing:
+                    reasons = ["known_comparator_not_verified_this_run"]
+                    if any(item.get("unverified_member_price") for item in missing):
+                        reasons.append("comparator_member_price_not_verified")
                     basis.update(status="insufficient", provisional_rule=basis["rule"], rule=None,
-                                 reasons=["known_comparator_not_verified_this_run"], missing_comparators=missing)
+                                 reasons=reasons, missing_comparators=missing)
                     held_offer_keys.add(offer.key)
         decision = payment if payment["status"] == "accepted" or points["status"] != "accepted" else points
         decisions.append({"offer": offer.to_dict(), "payment": payment, "points": points})
