@@ -16,7 +16,7 @@ from .parsing import canonical, confirmed_empty_search, discover, parse_product,
 from .storage import Store
 from .scheduling import plan_comparison_refresh, select_task
 from .retrying import runnable, transient
-from . import koubou_search, sofmap_search, tsukumo_shipping
+from . import koubou_search, sofmap_search, tsukumo_shipping, comparison_routing
 
 
 def task_order(task: dict) -> tuple:
@@ -103,6 +103,7 @@ class Collector:
                     existing["discovery_origin"] = deepcopy(task["discovery_origin"])
         elif task_id not in self.state["done"]:
             self.state["queue"][task_id] = {"created_at": iso(), "attempts": 0, **task}
+        return task_id
 
     def record(self, offer: Offer):
         offer.observed_run_id = self.run_id
@@ -170,12 +171,91 @@ class Collector:
                 if task["kind"] == "comparison" and (identity in priorities or identity in candidates):
                     task.update(requested=True, priority=priorities.get(identity, 3))
                 self.enqueue(task)
+        known_by_identity = comparison_routing.offers_by_identity(self.state["offers"]) if self.cfg["adapter"] == "html" else {}
         for query in requests or []:
             if self.cfg["adapter"] == "yahoo":
                 self.enqueue({"type": "yahoo", "query": query["query"], "start": 1, "kind": "comparison", "priority": query.get("priority", 3), "requested": True})
             elif self.cfg["adapter"] == "html":
-                self.enqueue({"type": "search", "query": query["query"], "kind": "comparison", "priority": query.get("priority", 3), "requested": True})
+                self.route_comparison(query, known_by_identity.get(query.get("identity"), {}))
         self.save()
+
+    def routing_state(self):
+        current = self.state.get("comparison_routing")
+        if not isinstance(current, dict) or current.get("run_id") != self.run_id:
+            current = self.state["comparison_routing"] = {"run_id": self.run_id,
+                "policy": "known_compatible_urls_then_search_on_failed_verification",
+                "requests": {}, "receipts": {}}
+        return current
+
+    def comparison_search(self, request, created_at=None, *, existing_only=False):
+        task = {"type": "search", "query": request["query"], "kind": "comparison",
+                "priority": request.get("priority", 3), "requested": True}
+        key = digest([task["type"], None, task["query"], None, task["kind"], None])[:24]
+        # Routing never completes, replaces, or changes the original age of an
+        # already queued broad search. A completed head may have pending pages.
+        if key in self.state["queue"]:
+            return self.enqueue(task)
+        if key in self.state["done"]:
+            return key
+        if existing_only:
+            return None
+        if created_at:
+            task["created_at"] = created_at
+        return self.enqueue(task)
+
+    def route_comparison(self, request, known_offers=None):
+        targets, reason = comparison_routing.known_targets(request,
+            self.state["offers"] if known_offers is None else known_offers, self.store, utcnow())
+        route_id = comparison_routing.request_key(request)
+        routing = self.routing_state()
+        routing["requests"][route_id] = {"identity": request.get("identity"), "query": request.get("query"),
+            "reason": reason, "target_offer_keys": [o.key for o in targets],
+            "scope": "new_request_routing_only_existing_searches_retained"}
+        if not targets:
+            self.comparison_search(request)
+            return
+        # Existing searches still belong to the active comparison plan. Keep
+        # their normal priority promotion without creating a new search head.
+        self.comparison_search(request, existing_only=True)
+        for other in targets:
+            task_id = self.enqueue({"type": "product", "url": other.url,
+                "kind": other.discovery_kind, "source": other.discovery_url, "title": other.title,
+                "requested": True, "priority": request.get("priority", 3)})
+            expected = comparison_routing.scope(other)
+            task = self.state["queue"].get(task_id)
+            if task is not None:
+                routes = task.setdefault("comparison_routes", {})
+                # Keep the original request time across interruption and future
+                # runs even if the request no longer appears in the new plan.
+                # One URL can have multiple seller/condition expectations.
+                # A response must account for each instead of keeping only one.
+                slot = digest([route_id, expected])[:24]
+                route = routes.setdefault(slot, {"request_id": route_id,
+                    "request": deepcopy(request), "expected": expected, "created_at": iso()})
+                route["request"]["priority"] = min(route["request"].get("priority", 3), request.get("priority", 3))
+            elif comparison_routing.current_target(other, expected, self.run_id, utcnow(), request):
+                self.routing_receipt(route_id, expected, other, "verified_current_product")
+            else:
+                # A done task with an unusable result cannot satisfy the route.
+                self.comparison_search(request)
+                self.routing_receipt(route_id, expected, None, "search_requested_after_unverified_done_task")
+
+    def routing_receipt(self, route_id, expected, offer, result, reason=None):
+        key = digest([route_id, expected])[:24]
+        self.routing_state()["receipts"][key] = {"request_id": route_id, "expected": deepcopy(expected),
+            "run_id": self.run_id, "result": result, "checked_at": iso(), "reason": reason,
+            "offer_key": offer.key if offer else None, "observed_at": offer.observed_at if offer else None,
+            "evidence": deepcopy(offer.evidence) if offer else []}
+
+    def complete_comparison_routes(self, task, offer=None, reason=None):
+        for slot, route in task.get("comparison_routes", {}).items():
+            route_id = route.get("request_id", slot)
+            expected = route["expected"]
+            if offer is not None and comparison_routing.current_target(offer, expected, self.run_id, utcnow(), route["request"]):
+                self.routing_receipt(route_id, expected, offer, "verified_current_product")
+            else:
+                self.comparison_search(route["request"], route["created_at"])
+                self.routing_receipt(route_id, expected, offer, "search_requested", reason or "current_product_unverified")
 
     def page(self, url: str, *, allow_browser: bool = True):
         if url in self.page_failures:
@@ -352,6 +432,7 @@ class Collector:
                     if self.shipping_policy_page is not None:
                         tsukumo_shipping.apply_policy(offer, page, self.shipping_policy_page)
             self.record(offer)
+            self.complete_comparison_routes(task, offer)
         else:
             raise ValueError("unknown_task_type")
 
@@ -446,6 +527,7 @@ class Collector:
                 self.state["errors"] = [e for e in self.state["errors"] if e.get("task_id") != task_id]
                 self.state["errors"].append({"task_id": task_id, "reason": reason, "url": task.get("url")})
                 if task["type"] == "product":
+                    self.complete_comparison_routes(task, reason=reason)
                     for row in self.state["offers"].values():
                         if canonical(row["url"]) == canonical(task["url"]):
                             row["issues"] = sorted(set(row.get("issues", []) + ["latest_fetch_failed"]))

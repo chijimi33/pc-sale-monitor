@@ -8,6 +8,7 @@ from collections import Counter
 from datetime import timedelta
 
 from .models import Offer, timestamp
+from .comparison_routing import scope
 
 
 LANES = ("discovery", "sale", "comparison", "sale")
@@ -131,8 +132,14 @@ def plan_comparisons(current: list[Offer], changes: dict, stores, now):
             query = offer.jan or " ".join(filter(None, (offer.brand, offer.model)))
             priority = {"new": 0, "price_down": 1, "restocked": 2}.get(changes.get(offer.key), 3)
             previous = requests.get(offer.identity)
-            if previous is None or priority < previous["priority"]:
-                requests[offer.identity] = {"query": query, "identity": offer.identity, "priority": priority}
+            if previous is None:
+                previous = requests[offer.identity] = {"query": query, "identity": offer.identity,
+                                                       "priority": priority, "candidates": []}
+            elif priority < previous["priority"]:
+                previous.update(query=query, priority=priority)
+            candidate = scope(offer)
+            if candidate not in previous["candidates"]:
+                previous["candidates"].append(candidate)
         planned[name] = sorted(requests.values(), key=lambda q: (q["priority"], q["identity"]))
     summary = {"policy": "eligible_sale_candidates_only", "eligible_sale_offers": len(eligible),
                "held_sale_offers": len(held), "held_reasons": dict(Counter(r for h in held for r in h["reasons"])),

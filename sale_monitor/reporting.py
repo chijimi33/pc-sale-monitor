@@ -55,6 +55,7 @@ def health(state: dict, now) -> dict:
             "transport_retry_after": state.get("transport_retry_after", {}),
             "scheduler": state.get("scheduler", {}),
             "comparison_refresh": state.get("comparison_refresh", {}),
+            "comparison_routing": state.get("comparison_routing", {}),
             "waiting_dependencies": state.get("waiting_dependencies", []),
             "access_block": state.get("access_block"),
             "retry_activity": state.get("retry_activity", {}),
