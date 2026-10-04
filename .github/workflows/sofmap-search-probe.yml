@@ -1,0 +1,30 @@
+name: Sofmap search integration probe
+on:
+  pull_request:
+    types: [labeled]
+permissions:
+  contents: read
+jobs:
+  probe:
+    if: github.event.label.name == 'run-sofmap-probe' && github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    timeout-minutes: 6
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: pip install -e .
+      - name: Read three exact searches and two known products without changing production state
+        env:
+          SOURCE_COMMIT: ${{ github.event.pull_request.head.sha }}
+        run: python -B -X utf8 -m tools.sofmap_search_probe --output sofmap-probe
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: sofmap-search-probe-${{ github.event.pull_request.head.sha }}
+          path: sofmap-probe/
+          retention-days: 14
+          if-no-files-found: warn
