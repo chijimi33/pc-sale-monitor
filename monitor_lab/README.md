@@ -169,6 +169,46 @@ It records a further list
 dependency; an empty shell or displayed count is never proof of an empty search,
 a product identity or a price. A changed or ambiguous contract is a parse error.
 
+## Fresh candidate/comparator phase
+
+To evaluate candidates after discovery, explicitly select their existing task
+IDs and prepare a new product capture. Preparation derives every related known
+product task, includes catalog matches, and retains unfinished store searches.
+URLs must have authenticated captured product or discovery evidence. Duplicate
+queue entries for one product remain separate tasks but share one request.
+Their listing evidence is combined before the shared observation is evaluated,
+so processing order cannot erase an expiry or conflicting claim.
+
+```powershell
+python -m monitor_lab prepare-comparison --experiment "$continuedRun" --capture "$previousCapture" --candidate-id "$candidateTask" --output "$comparisonIntent"
+python -m monitor_lab transport-study --comparison "$comparisonIntent" --methods urllib --budget 90 --output "$comparisonCapture"
+python -m monitor_lab apply-comparison --intent "$comparisonIntent" --capture "$comparisonCapture" --output "$comparisonRun" --budget 120 --max-tasks 20
+```
+
+The intent and capture have a separate provenance type; `--comparison`, `--plan`
+and `--followup` are mutually exclusive. The 20-task bound is explicit; larger
+derived dependency sets are rejected instead of silently truncated. Original
+host blocks and waits still apply. The source is a scoped collection or verified
+follow-up; comparison outputs are currently terminal evaluation artifacts, not
+inputs for another follow-up or comparison phase.
+
+Application preserves the complete queue, old observations, decisions, event
+state and collection budgets. Only freshly parsed responses from this capture
+enter its `phase_observations` and `phase_decisions`. Missing candidates never
+fall back to historical prices. Missing/changed comparator identities and
+unfinished comparison discovery hold both payment and points decisions.
+Historical source files are hash-checked and used only for rule B. Resume keeps
+the same request cap and deadline. These are laboratory decisions with no
+notifications, publication or formal audit credit.
+
+For Sofmap, the lab selects JAN/EAN/UPC only from the verified primary product
+specification/info tables or product-bound JSON-LD. Product numbers establish
+scope but do not supply JAN. It retains leading zeros, conflicting claims and
+the original parser value as evidence. Unknown/conflicting primary evidence
+does not fall back to a footer or recommendation identifier. Other product
+conditions, shipping, warranty and stock checks remain in force. This override
+does not alter the production parser.
+
 ## Validation
 
 ```powershell

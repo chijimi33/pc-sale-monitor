@@ -41,6 +41,7 @@ def main():
     network.add_argument("--methods", nargs="+", choices=["urllib", "pooled", "browser"], default=["urllib", "pooled"])
     network.add_argument('--plan', type=Path, help='Verified bounded URL plan; omitted uses the original six products')
     network.add_argument('--followup', type=Path, help='Prepared dependency follow-up; revalidates sources and inherits host waits')
+    network.add_argument('--comparison', type=Path, help='Prepared candidate/comparator refresh with inherited discovery holds')
     network.add_argument('--budget', type=float, default=2100, help='One shared budget across all methods, up to 2100 seconds')
     followup = sub.add_parser('prepare-followup')
     followup.add_argument('--experiment', type=Path, required=True)
@@ -54,6 +55,18 @@ def main():
     apply.add_argument('--method', choices=['urllib', 'pooled', 'browser'], default='urllib')
     apply.add_argument('--budget', type=float, default=120)
     apply.add_argument('--max-tasks', type=int, default=20)
+    refresh = sub.add_parser('prepare-comparison')
+    refresh.add_argument('--experiment', type=Path, required=True)
+    refresh.add_argument('--capture', type=Path, required=True)
+    refresh.add_argument('--output', type=Path, required=True)
+    refresh.add_argument('--candidate-id', action='append', dest='candidate_ids', required=True)
+    compare_apply = sub.add_parser('apply-comparison')
+    compare_apply.add_argument('--intent', type=Path, required=True)
+    compare_apply.add_argument('--capture', type=Path, required=True)
+    compare_apply.add_argument('--output', type=Path, required=True)
+    compare_apply.add_argument('--method', choices=['urllib', 'pooled', 'browser'], default='urllib')
+    compare_apply.add_argument('--budget', type=float, default=120)
+    compare_apply.add_argument('--max-tasks', type=int, default=20)
     queue = sub.add_parser("queue-study")
     queue.add_argument("--input", type=Path, required=True)
     queue.add_argument("--capture", type=Path, required=True)
@@ -91,7 +104,16 @@ def main():
     timing.add_argument("--input", type=Path, required=True)
     timing.add_argument("--output", type=Path, required=True)
     args = parser.parse_args()
-    if args.command == 'apply-followup':
+    if args.command == 'prepare-comparison':
+        from .comparison import prepare_comparison
+        result = prepare_comparison(args.experiment, args.capture, args.output, args.candidate_ids)
+        print(json.dumps({'bundle_hash': result['bundle_hash'], 'resources': len(result['request_plan']['resources'])}))
+    elif args.command == 'apply-comparison':
+        from .comparison_apply import apply_comparison
+        result = apply_comparison(args.intent, args.capture, args.output, method=args.method,
+                                  budget=args.budget, max_tasks=args.max_tasks)
+        print(json.dumps({k: result[k] for k in ('selected_statuses', 'new_phase_observations', 'http_requests')}))
+    elif args.command == 'apply-followup':
         from .followup_apply import apply_followup
         result = apply_followup(args.intent, args.capture, args.output, method=args.method,
                                 budget=args.budget, max_tasks=args.max_tasks)
@@ -149,7 +171,7 @@ def main():
     elif args.command == "transport-study":
         from .study import study
         result = study(args.output, args.methods, emit=lambda row: print("LAB_RECEIPT " + json.dumps(row, ensure_ascii=False), flush=True),
-                       plan=args.plan, followup=args.followup, budget=args.budget)
+                       plan=args.plan, followup=args.followup, comparison=args.comparison, budget=args.budget)
         print("LAB_STUDY " + json.dumps({k: v for k, v in result.items() if k != "receipts"}, ensure_ascii=False))
     else:
         from .benchmark import benchmark, worker

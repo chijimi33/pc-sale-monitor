@@ -22,7 +22,7 @@ PLAN = [
 ]
 
 
-def study(output, methods=("urllib", "pooled"), emit=lambda row: None, *, plan=None, followup=None, budget=2100):
+def study(output, methods=("urllib", "pooled"), emit=lambda row: None, *, plan=None, followup=None, comparison=None, budget=2100):
     output = guard(Path(output))
     if not methods or len(set(methods)) != len(methods) or set(methods) - set(TRANSPORTS):
         raise ValueError("Each enabled method may be requested once")
@@ -30,12 +30,15 @@ def study(output, methods=("urllib", "pooled"), emit=lambda row: None, *, plan=N
         raise ValueError('Invalid shared study budget')
     identifier = experiment_id()
     settings = read(Path(__file__).resolve().parents[1] / "config/sources.json")
-    if plan is not None and followup is not None:
-        raise ValueError('Choose an explicit plan or a verified follow-up, not both')
+    if sum(x is not None for x in (plan, followup, comparison)) > 1:
+        raise ValueError('Choose one acquisition intent, not both an explicit plan and another follow-up/comparison intent')
     intent = None
     if followup is not None:
         from .followup import load_followup
         intent = load_followup(followup, settings['stores'])
+    if comparison is not None:
+        from .comparison import load_comparison
+        intent = load_comparison(comparison, settings['stores'])
     scope = intent['request_plan'] if intent else load_plan(plan, settings['stores']) if plan is not None else None
     if scope and 'browser' in methods and any(row['store'] != 'koubou' for row in scope['resources']):
         raise ValueError('Browser scope is currently limited to Koubou')
@@ -47,9 +50,12 @@ def study(output, methods=("urllib", "pooled"), emit=lambda row: None, *, plan=N
                 "implementation_hash_lf": implementation_hash(normalize_line_endings=True)}
     if scope:
         metadata.update(scope_plan=scope, budget_seconds=budget)
-    if intent:
+    if intent and comparison is None:
         from .followup_provenance import retain_followup, validate_provenance
         metadata['followup'] = validate_provenance(retain_followup(intent), settings['stores'], scope)
+    elif intent:
+        from .comparison_provenance import retain_comparison, validate_comparison
+        metadata['comparison'] = validate_comparison(retain_comparison(intent), settings['stores'], scope)
     capture = Capture(output, metadata, settings)
     hosts = deepcopy(intent['inherited_host_gates']) if intent else {}
     results = []

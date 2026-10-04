@@ -247,6 +247,12 @@ def _verify_manifest(root, manifest, *, allow_partial=False):
         from .followup_provenance import validate_provenance, verify_inherited_gates
         validate_provenance(metadata['followup'], settings['stores'], scope)
         verify_inherited_gates(metadata['followup'], receipts)
+    if metadata.get('comparison') is not None:
+        from .comparison_provenance import validate_comparison, verify_inherited_gates
+        if metadata.get('followup') is not None:
+            raise ValueError('Capture cannot combine follow-up and comparison intents')
+        validate_comparison(metadata['comparison'], settings['stores'], scope)
+        verify_inherited_gates(metadata['comparison'], receipts)
     for row in receipts:
         details = row.get('http_body')
         if details is not None:

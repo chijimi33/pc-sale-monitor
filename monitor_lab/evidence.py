@@ -51,6 +51,17 @@ def normalize(store, page, cfg, run_id, receipt):
     if offer.condition and not schema.get("itemCondition"):
         records["condition"]["status"] = "catalog_inference"
     conflicts, conditional = list(offer.issues), []
+    from .identity import extract_primary_jan
+    primary_jan = extract_primary_jan(store, page, cfg)
+    if primary_jan is not None:
+        # Preserve the baseline value while selecting only product-bound
+        # evidence. An unknown/conflicting primary claim never falls back to
+        # the original document-wide JAN/SKU lookup.
+        records['jan']['status'] = primary_jan['status']
+        records['jan']['sources'].extend(primary_jan['evidence'])
+        records['jan']['primary_identity_reasons'] = primary_jan['reasons']
+        offer.jan = primary_jan['selected_value'] if primary_jan['status'] == 'observed' else None
+        conflicts.extend(primary_jan['conflicts'])
     point_conflicts = []
     if store == 'koubou':
         raw = re.search(r'eccube\.classCategories\s*=\s*(\{.*?\});', page.text, re.S)

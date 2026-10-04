@@ -11,25 +11,29 @@ from .safety import digest
 FORMAT = 'pc-sale-monitor-followup-provenance-v1'
 
 
-def retain_followup(bundle):
+def retain_followup(bundle, *, format=FORMAT):
     retained = deepcopy(bundle)
     checksum = retained.pop('bundle_hash')
     retained['source'].pop('experiment_path')
     retained['source'].pop('capture_path')
-    unsigned = {'format': FORMAT, 'source_bundle_hash': checksum, 'intent': retained}
+    unsigned = {'format': format, 'source_bundle_hash': checksum, 'intent': retained}
     return {**unsigned, 'provenance_hash': digest(unsigned)}
 
 
 def validate_provenance(value, config, scope):
+    return _validate(value, config, scope, FORMAT, 'pc-sale-monitor-followup-v1')
+
+
+def _validate(value, config, scope, format, intent_format, extra_fields=frozenset()):
     if not isinstance(value, dict) or set(value) != {'format', 'source_bundle_hash', 'intent', 'provenance_hash'}:
         raise ValueError('Invalid retained follow-up provenance')
     unsigned = {k: v for k, v in value.items() if k != 'provenance_hash'}
     hex_digest = lambda item: isinstance(item, str) and re.fullmatch('[0-9a-f]{64}', item)
-    if value['format'] != FORMAT or digest(unsigned) != value['provenance_hash'] or not hex_digest(value['source_bundle_hash']):
+    if value['format'] != format or digest(unsigned) != value['provenance_hash'] or not hex_digest(value['source_bundle_hash']):
         raise ValueError('Follow-up provenance checksum mismatch')
     intent = value['intent']
-    if (not isinstance(intent, dict) or set(intent) != {'format', 'created_at', 'source', 'request_plan', 'tasks', 'inherited_host_gates'}
-            or intent['format'] != 'pc-sale-monitor-followup-v1'
+    if (not isinstance(intent, dict) or set(intent) != {'format', 'created_at', 'source', 'request_plan', 'tasks', 'inherited_host_gates'} | set(extra_fields)
+            or intent['format'] != intent_format
             or not isinstance(intent['tasks'], list) or not 1 <= len(intent['tasks']) <= 20
             or not all(isinstance(t, dict) for t in intent['tasks'])):
         raise ValueError('Invalid retained follow-up intent')
