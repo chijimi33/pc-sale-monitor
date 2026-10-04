@@ -56,6 +56,7 @@ def health(state: dict, now) -> dict:
             "scheduler": state.get("scheduler", {}),
             "comparison_refresh": state.get("comparison_refresh", {}),
             "waiting_dependencies": state.get("waiting_dependencies", []),
+            "access_block": state.get("access_block"),
             "retry_activity": state.get("retry_activity", {}),
             "comparison_search_pages": sum(r.get("observed_run_id") == state.get("run_id")
                                             for r in state.get("comparison_searches", {}).values()),
