@@ -1,0 +1,82 @@
+name: Serialized queue integration probe
+on:
+  pull_request:
+    types: [labeled]
+permissions:
+  contents: read
+jobs:
+  queued:
+    if: github.event.label.name == 'run-queue-probe' && github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    strategy:
+      fail-fast: false
+      matrix:
+        slot: [1, 2, 3]
+    concurrency:
+      group: sale-monitor-queue-probe-${{ github.run_id }}-${{ github.run_attempt }}
+      queue: max
+      cancel-in-progress: false
+    steps:
+      - name: Record a bounded execution interval
+        env:
+          SLOT: ${{ matrix.slot }}
+          SOURCE_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          python - <<'PY'
+          import json, os, time
+          from pathlib import Path
+          started = time.time_ns()
+          time.sleep(15)
+          result = {'slot': int(os.environ['SLOT']), 'source_sha': os.environ['SOURCE_SHA'],
+                    'run_id': os.environ['GITHUB_RUN_ID'], 'run_attempt': int(os.environ['GITHUB_RUN_ATTEMPT']),
+                    'started_ns': started, 'completed_ns': time.time_ns()}
+          Path('queue-result.json').write_text(json.dumps(result) + '\n', encoding='utf-8')
+          print('QUEUE_INTERVAL=' + json.dumps(result))
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: queue-attempt-${{ github.run_attempt }}-slot-${{ matrix.slot }}
+          path: queue-result.json
+          retention-days: 14
+          if-no-files-found: error
+  verify:
+    needs: queued
+    if: always() && github.event.label.name == 'run-queue-probe' && github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: queue-attempt-${{ github.run_attempt }}-slot-*
+          path: intervals
+      - name: Require all three intervals without overlap
+        env:
+          SOURCE_SHA: ${{ github.event.pull_request.head.sha }}
+          QUEUED_RESULT: ${{ needs.queued.result }}
+        run: |
+          python - <<'PY'
+          import json, os
+          from pathlib import Path
+          assert os.environ['QUEUED_RESULT'] == 'success'
+          pattern = f"queue-attempt-{os.environ['GITHUB_RUN_ATTEMPT']}-slot-*/queue-result.json"
+          rows = [json.loads(p.read_text()) for p in Path('intervals').glob(pattern)]
+          assert len(rows) == 3 and {r['slot'] for r in rows} == {1, 2, 3}
+          assert all(r['source_sha'] == os.environ['SOURCE_SHA'] for r in rows)
+          assert all(r['run_id'] == os.environ['GITHUB_RUN_ID'] and r['run_attempt'] == int(os.environ['GITHUB_RUN_ATTEMPT']) for r in rows)
+          rows.sort(key=lambda r: r['started_ns'])
+          assert all(r['completed_ns'] - r['started_ns'] >= 15_000_000_000 for r in rows)
+          assert all(a['completed_ns'] <= b['started_ns'] for a, b in zip(rows, rows[1:]))
+          result = {'source_sha': os.environ['SOURCE_SHA'], 'completed': 3,
+                    'run_id': os.environ['GITHUB_RUN_ID'], 'run_attempt': int(os.environ['GITHUB_RUN_ATTEMPT']),
+                    'overlapping_intervals': 0, 'retailer_requests': 0, 'intervals': rows}
+          Path('queue-verification.json').write_text(json.dumps(result, indent=2) + '\n', encoding='utf-8')
+          print('QUEUE_VERIFICATION=' + json.dumps(result))
+          PY
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: queue-verification-attempt-${{ github.run_attempt }}
+          path: queue-verification.json
+          retention-days: 14
+          if-no-files-found: warn
