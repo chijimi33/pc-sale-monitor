@@ -43,6 +43,8 @@ python -m sale_monitor.cli aggregate --run-id trial-001
 
 Yahoo!はGitHubリポジトリの **Settings → Secrets and variables → Actions** に `YAHOO_CLIENT_ID` を設定すると有効になります。APIキーをコード、公開JSON、ChatGPTの会話へ記載する必要はありません。現時点では未取得として扱います。
 
+ツクモの通常商品で送料が欠ける場合は、同じ巡回で[公式送料案内](https://shop.tsukumo.co.jp/shopping-help/service/souryo.html)を取得します。商品ページのJAN・主価格・税込表示を照合し、特別送料やBTOの記載がない商品のみ、全国一律料金表の購入額未満の送料を適用します。1商品・数量1の通常配送を基準にし、代引き等の選択制手数料は含めません。案内は収集プロセスごとに1回取得し、取得失敗・形式変更・商品との確認時刻差が1時間超の場合は未確認を維持します。適用時は案内URL・確認日時・本文ハッシュ・適用条件を観測に保存します。
+
 ## 永続化と通知用ファイル
 
 `.github/workflows/monitor.yml` はUTC `17 */4 * * *` に実行します。日本時間では原則1:17、5:17、9:17、13:17、17:17、21:17です。スケジュール実行の遅延を前提とし、確認日時とジョブ未実行を必ず検査します。

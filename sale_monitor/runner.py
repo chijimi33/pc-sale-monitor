@@ -16,7 +16,7 @@ from .parsing import canonical, confirmed_empty_search, discover, parse_product,
 from .storage import Store
 from .scheduling import plan_comparison_refresh, select_task
 from .retrying import runnable, transient
-from . import koubou_search, sofmap_search
+from . import koubou_search, sofmap_search, tsukumo_shipping
 
 
 def task_order(task: dict) -> tuple:
@@ -72,6 +72,8 @@ class Collector:
         self.pages = {}
         self.page_failures = {}
         self.page_failure_retry_at = {}
+        self.shipping_policy_checked = False
+        self.shipping_policy_page = None
 
     def save(self):
         self.state["checkpoint_at"] = iso()
@@ -336,7 +338,19 @@ class Collector:
                 page = self.page(task["url"])
                 offer = parse_product(self.store, page, self.cfg, task)
                 if not offer.verified and self.cfg.get("browser_fallback") and page.method != "browser":
-                    offer = parse_product(self.store, self.client.rendered(task["url"]), self.cfg, task)
+                    page = self.client.rendered(task["url"])
+                    offer = parse_product(self.store, page, self.cfg, task)
+                if self.store == "tsukumo" and tsukumo_shipping.standard_product(page, offer):
+                    if not self.shipping_policy_checked:
+                        self.shipping_policy_checked = True
+                        try:
+                            self.shipping_policy_page = self.page(tsukumo_shipping.POLICY_URL, allow_browser=False)
+                        except FetchError:
+                            # A missing optional tariff must not discard the
+                            # product observation or reuse a previous tariff.
+                            pass
+                    if self.shipping_policy_page is not None:
+                        tsukumo_shipping.apply_policy(offer, page, self.shipping_policy_page)
             self.record(offer)
         else:
             raise ValueError("unknown_task_type")
