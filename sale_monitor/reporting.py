@@ -82,6 +82,27 @@ def merge_incoming(root: Path, incoming: Path):
             atomic_json(root / relative, read_json(source, None))
 
 
+def comparison_inputs_by_identity(current: list[Offer], history: list[dict]) -> tuple[dict, dict]:
+    """Narrow evaluation by identity without merging product conditions or rows."""
+    # Identity equality is required by same_product; its other checks stay in evaluate.
+    current_by_identity = {}
+    for offer in current:
+        current_by_identity.setdefault(offer.identity, []).append(offer)
+    history_by_identity = {}
+    for row in history:
+        if not isinstance(row, dict) or not isinstance(row.get("offer", {}), dict):
+            # evaluate may never reach this malformed payload. Defer its handling
+            # to the evaluator rather than introducing an eager parsing failure.
+            return current_by_identity, {identity: history for identity in current_by_identity}
+        try:
+            identity = Offer.from_dict(row["offer"]).identity
+        except (KeyError, TypeError, ValueError):
+            # These are the same malformed-row errors evaluate already skips.
+            continue
+        history_by_identity.setdefault(identity, []).append(row)
+    return current_by_identity, history_by_identity
+
+
 def aggregate(root: Path, public: Path, run_id: str, now=None) -> dict:
     now = now or utcnow()
     disk = Store(root)
@@ -107,14 +128,18 @@ def aggregate(root: Path, public: Path, run_id: str, now=None) -> dict:
                 current.append(offer)
     historical = [row for row in disk.history() if row.get("run_id") != run_id]
     known = known_comparators(states, historical, now)
+    current_by_identity, history_by_identity = comparison_inputs_by_identity(current, historical)
     current_by_key = {(o.store, o.key): o for o in current}
     held_offer_keys = set()
     registry = disk.load("events/registry.json", {"states": {}, "events": {}})
     decisions = []
     reviews = []
     for offer in current:
-        payment = evaluate(offer, current, historical, now)
-        points = evaluate(offer, current, historical, now, points=True)
+        identity = offer.identity
+        peers = current_by_identity.get(identity, [])
+        past = history_by_identity.get(identity, [])
+        payment = evaluate(offer, peers, past, now)
+        points = evaluate(offer, peers, past, now, points=True)
         for basis in (payment, points):
             if basis["status"] == "accepted":
                 missing = missing_comparators(offer, known, current_by_key, now, points=basis["basis"] == "points")
