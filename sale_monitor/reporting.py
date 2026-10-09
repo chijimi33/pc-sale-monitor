@@ -10,6 +10,7 @@ from .models import STORES, Offer, digest, fresh, iso, timestamp, utcnow
 from .storage import Store, atomic_json, read_json
 from .scheduling import plan_comparisons
 from .comparison_integrity import known_comparators, missing_comparators
+from .routing_reporting import summary as routing_summary
 from .validation_integrity import audit_counts, scheduled_samples, verified_provenance
 
 
@@ -55,7 +56,7 @@ def health(state: dict, now) -> dict:
             "transport_retry_after": state.get("transport_retry_after", {}),
             "scheduler": state.get("scheduler", {}),
             "comparison_refresh": state.get("comparison_refresh", {}),
-            "comparison_routing": state.get("comparison_routing", {}),
+            "comparison_routing": routing_summary(state),
             "waiting_dependencies": state.get("waiting_dependencies", []),
             "access_block": state.get("access_block"),
             "retry_activity": state.get("retry_activity", {}),
@@ -162,12 +163,16 @@ def aggregate(root: Path, public: Path, run_id: str, now=None) -> dict:
     states = {name: disk.load(f"stores/{name}.json", {}) for name in STORES}
     statuses = {}
     collection_errors = {}
+    comparison_routing = {}
     current = []
     changes = {}
     for name, state in states.items():
         if state.get("run_id") != run_id:
             state = {**state, "status": "job_missing", "cycle_complete": False}
         statuses[name] = health(state, now)
+        comparison_routing[name] = {"run_id": state.get("run_id"), "checkpoint_at": state.get("checkpoint_at"),
+                                    "status": state.get("status", "not_run"),
+                                    "comparison_routing": state.get("comparison_routing")}
         collection_errors[name] = {"run_id": state.get("run_id"), "checkpoint_at": state.get("checkpoint_at"), "status": state.get("status", "not_run"),
                                    "errors": errors_by_url(state.get("errors", [])), "discovery_gaps": state.get("discovery_gaps", [])}
         if state.get("run_id") != run_id:
@@ -266,11 +271,12 @@ def aggregate(root: Path, public: Path, run_id: str, now=None) -> dict:
              "excluded_stores": ["rakuten"], "complete_stores": complete, "collection_completion_rate": complete/10,
              "stores": statuses, "notification_count": len(notification), "review_count": len(reviews),
              "comparison_planning": comparison_plan["summary"],
-             "files": {"notifications": "notifications.json", "reviews": "review_queue.json", "flyer_review": "flyer_review.json", "evidence": "evidence.json", "validation": "validation.json", "collection_errors": "collection_errors.json", "comparison_plan": "comparison_plan.json"},
+             "files": {"notifications": "notifications.json", "reviews": "review_queue.json", "flyer_review": "flyer_review.json", "evidence": "evidence.json", "validation": "validation.json", "collection_errors": "collection_errors.json", "comparison_plan": "comparison_plan.json", "comparison_routing": "comparison_routing.json"},
              "delivery_guarantee": "at_least_once_best_effort; publication_and_delivery_are_distinct", "full_rescan_needed": False}
     atomic_json(public / "notifications.json", {"generated_at": iso(now), "events": notification})
     atomic_json(public / "comparison_plan.json", comparison_plan)
     atomic_json(public / "collection_errors.json", {"generated_at": iso(now), "run_id": run_id, "stores": collection_errors})
+    atomic_json(public / "comparison_routing.json", {"generated_at": iso(now), "run_id": run_id, "stores": comparison_routing})
     atomic_json(public / "review_queue.json", {"generated_at": iso(now), "candidates": reviews, "flyer": disk.load("flyers/latest.json", None)})
     flyer = disk.load("flyers/latest.json", None)
     assets = []
