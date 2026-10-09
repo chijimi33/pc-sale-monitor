@@ -79,6 +79,7 @@ HTML店舗の新しい比較依頼は、対象商品の状態・構成・保証�
 | `state/validation/run_provenance.json` | GitHub APIで確認した実行イベント・作成日時・試行番号。過去分も出典付きで補完し、未確認を定期実行へ推測しない |
 | `public/latest.json` | 軽量な最新索引、10店の取得状況 |
 | `public/collection_errors.json` | URL別の取得失敗件数・巡回漏れの詳細。索引には原因別の件数とURL例を掲載 |
+| `public/comparison_routing.json` | 比較依頼の経路・商品確認記録の全詳細。索引と当該回のmetricsには件数と結果別の要約だけを掲載 |
 | `public/notifications.json` | 現在も根拠が有効な通知候補と固定ID |
 | `public/review_queue.json` | 判定できない候補と不足理由、チラシ確認先 |
 | `public/flyer_review.json` | 共通チラシの画像URL、版、OCR文字列・商品候補、掲載数量の適用範囲 |
@@ -86,6 +87,8 @@ HTML店舗の新しい比較依頼は、対象商品の状態・構成・保証�
 | `public/validation.json` | 並行検証の期間・取得率・切替可否 |
 
 公開中の読取URLは `https://raw.githubusercontent.com/chijimi33/pc-sale-monitor/monitor-data/public/latest.json` です。ChatGPTへ全店再巡回を要求せず、検証後に `docs/chatgpt-task-prompt.md` の切替用プロンプトで通知します。
+
+索引の店舗別 `comparison_routing` は依頼数・確認記録数と結果別の件数です。HTTPリクエスト数、全検索範囲の完了、削除した未処理件数を表しません。`status` は収集回との一致を示し、`current` も全依頼の確認成功を意味しません。未記録の件数は `null`、過去回の記録は `stale` として残します。詳細は `files.comparison_routing` を参照し、索引と集計回の `run_id`・`generated_at`、店舗と記録の `run_id` を照合してください。店舗状態内の全記録と過去のmetricsは保持します。
 
 イベントの公開は配信確認ではありません。初期構成は厳密な一度だけの配信を保証しません。明示的な配信確認を受けた場合だけ `ack --event-id ...` で記録できます。古いイベントを再提示するときも `current_evidence` の現在条件を使用します。
 

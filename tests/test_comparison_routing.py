@@ -530,7 +530,10 @@ class ComparisonRouting(unittest.TestCase):
             self.assertEqual(checkpoint["offers"][target.key], row)
         self.assertEqual(self.searches(c), {})
         self.assertEqual(client.calls, [target.url])
-        self.assertEqual(health(c.state, NOW)["comparison_routing"], c.state["comparison_routing"])
+        summary = health(c.state, NOW)["comparison_routing"]
+        self.assertEqual(summary["status"], "current")
+        self.assertEqual(summary["receipt_results"], {"verified_current_product": 1})
+        self.assertEqual(summary["receipt_count"], 1)
         # A repeated request in the same run has a real current receipt and
         # a done task: do not issue another HTTP request or manufacture history.
         c.route_comparison(self.request()); c.save()
