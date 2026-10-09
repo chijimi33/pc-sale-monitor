@@ -4,32 +4,32 @@
     "decision": "measure_free_gaps_before_paid_comparison",
     "free_current_conditions_coverage": {
       "condition": 0.0,
-      "evidence": 0.007903055848261328,
-      "identity": 0.16491043203371972,
-      "price": 0.007903055848261328,
-      "seller": 0.07850368809272919,
-      "shipping": 0.0005268703898840885,
-      "stock": 0.06217070600632244
+      "evidence": 0.00809968847352025,
+      "identity": 0.19501557632398753,
+      "price": 0.00809968847352025,
+      "seller": 0.09158878504672897,
+      "shipping": 0.0,
+      "stock": 0.07227414330218068
     }
   },
   "coverage": {
     "amazon": {
       "condition": 0.0,
-      "evidence": 0.007903055848261328,
-      "identity": 0.16491043203371972,
-      "price": 0.007903055848261328,
-      "seller": 0.07850368809272919,
-      "shipping": 0.0005268703898840885,
-      "stock": 0.06217070600632244
+      "evidence": 0.00809968847352025,
+      "identity": 0.19501557632398753,
+      "price": 0.00809968847352025,
+      "seller": 0.09158878504672897,
+      "shipping": 0.0,
+      "stock": 0.07227414330218068
     },
     "ark": {
       "condition": 1.0,
-      "evidence": 0.8350480304666629,
-      "identity": 0.975103734439834,
-      "price": 0.9583357016995396,
+      "evidence": 0.8362605914370687,
+      "identity": 0.9753100274956512,
+      "price": 0.9586442960552157,
       "seller": 1.0,
-      "shipping": 0.737338714261354,
-      "stock": 0.9620871937702495
+      "shipping": 0.7376129285674204,
+      "stock": 0.9623477919308681
     },
     "bic": {
       "condition": null,
@@ -59,13 +59,13 @@
       "stock": null
     },
     "koubou": {
-      "condition": 0.999552071668533,
-      "evidence": 0.6978723404255319,
-      "identity": 0.7722284434490482,
-      "price": 0.7722284434490482,
+      "condition": 0.9995310668229778,
+      "evidence": 0.7001172332942556,
+      "identity": 0.7739742086752638,
+      "price": 0.7739742086752638,
       "seller": 1.0,
-      "shipping": 0.6479283314669653,
-      "stock": 0.9811870100783875
+      "shipping": 0.6487690504103165,
+      "stock": 0.9838218053927316
     },
     "sofmap": {
       "condition": 0.9310344827586207,
@@ -78,12 +78,12 @@
     },
     "tsukumo": {
       "condition": 1.0,
-      "evidence": 0.9124910664654967,
-      "identity": 0.9932502183752878,
-      "price": 0.9932502183752878,
+      "evidence": 0.9135185763346862,
+      "identity": 0.9935997502341555,
+      "price": 0.9935997502341555,
       "seller": 1.0,
-      "shipping": 0.9652187723338362,
-      "stock": 0.9955530850472485
+      "shipping": 0.9749453637215111,
+      "stock": 0.9957071495472994
     },
     "yahoo": {
       "condition": null,
@@ -107,7 +107,7 @@
   "cutover_ready": false,
   "earliest_cutover_at": "2026-09-20T19:28:10.260709+00:00",
   "manual_review": {
-    "audited_event_count": 6,
+    "audited_event_count": 7,
     "audits": [
       {
         "delivery_status": "unconfirmed",
@@ -667,13 +667,107 @@
         "source_data_sha": "7bcaf7335ed76f5078b39a851e6cdc17a59f4174",
         "source_run_id": "36884182081-1",
         "status": "needs_review"
+      },
+      {
+        "delivery_status": "unconfirmed",
+        "event_id": "056bed797208c8f9a1e7602f9ef7a5d1",
+        "evidence": [
+          {
+            "body_sha256": "a3ceb7465b11b905024d7292c537830aa302c8ac480a19a14a2eb943be384f59",
+            "condition": "new",
+            "condition_basis": "Primary Product JSON-LD NewCondition.",
+            "jan": "4537694275712",
+            "model": "FD-C-DEF7C-01",
+            "observed_at": "2026-10-09T10:08:28.000370+00:00",
+            "price_yen": 15336,
+            "shipping_yen": 0,
+            "stock": "in_stock",
+            "store": "tsukumo",
+            "url": "https://shop.tsukumo.co.jp/goods/4537694275712/",
+            "verification": "Codex checked product-scoped current base price, matching JAN/model, InStock, NewCondition and free-shipping display. Related products, optional services, conditional points and unknown delivery status excluded."
+          },
+          {
+            "body_sha256": "84d4394b079570f6d097c1046f3cf1670b425890698536e8dbf8d024ab5fb4a2",
+            "condition": "new",
+            "condition_basis": "Primary Product JSON-LD NewCondition.",
+            "jan": "4537694275712",
+            "model": "FD-C-DEF7C-01",
+            "observed_at": "2026-10-09T10:08:29.179199+00:00",
+            "price_yen": 18660,
+            "shipping_yen": 0,
+            "stock": "in_stock",
+            "store": "ark",
+            "url": "https://www.ark-pc.co.jp/i/15201516/",
+            "verification": "Codex checked product-scoped current base price, matching JAN/model, InStock, NewCondition and free-shipping display. Related products, optional services, conditional points and unknown delivery status excluded."
+          }
+        ],
+        "findings": [],
+        "history_evidence": {
+          "all_source_blobs_verified": true,
+          "candidate_rows_sha256": "31a36c417915946a5e318f3ad533b480eae8a8c9b4bc0f25d9774bf360ed1b25",
+          "data_sha": "416f5b3a268672b15c5403c19584126aafe03422",
+          "excluded_run_id": "37908621250-1",
+          "target_jan": "4537694275712",
+          "tree_url": "https://api.github.com/repos/chijimi33/pc-sale-monitor/git/trees/416f5b3a268672b15c5403c19584126aafe03422?recursive=1"
+        },
+        "offer_key": "7414933154ddf57431446828",
+        "price_check": {
+          "candidate_payment_yen": 15336,
+          "current_comparison_payment_yen": 18660,
+          "current_comparison_run_id": "37908621250-1",
+          "decision_reproduction": "Native payment and points decisions reproduced exactly; current-run rows excluded from historical samples.",
+          "difference_yen": 1175,
+          "historical_minimum_yen": 16511,
+          "history_candidate_rows": 184,
+          "history_files_examined": 155,
+          "history_period_from": "2026-09-14T13:15:37.157308+00:00",
+          "history_period_to": "2026-10-09T06:16:39.643229+00:00",
+          "history_scope": "observed_period_only",
+          "independent_other_sellers": 1,
+          "minimum_required_difference_yen": 500,
+          "missing_known_comparators": [],
+          "points_basis": "unknown; not counted",
+          "rule": "B",
+          "status": "supported",
+          "subrule": "B_observed_year_low",
+          "valid_historical_samples": 153
+        },
+        "product": "Fractal Design Define 7 Compact Black Solid FD-C-DEF7C-01",
+        "reviewed_at": "2026-10-09T10:13:39.827009+00:00",
+        "reviewer": "ChatGPT/Codex",
+        "scope": "Current payment-basis eligibility in the pinned collection, supported by a full saved-history replay and two later primary product pages. The later pages are not inserted into the original collection. The older qualified event, original event-generation transition, points and delivery are not newly verified. The B minimum is limited to observed valid history, not the entire market.",
+        "seller_evidence": [
+          {
+            "checked_at": "2026-10-09T10:12:12.992253+00:00",
+            "final_url": "https://shop.tsukumo.co.jp/shopping-help/service/tokusho.html",
+            "matching_context": "トショップヘルプ 特定商取引法に基づく表記 特定商取引法に基づく表記 販売業者 株式会社ヤマダデンキ ツクモネットショップ 運営責任者 西野純一 住所 〒101-0021 東京都千代田区外神田1-9-9 電話番号 050-5835-2502 FAX番号 03-3253-5477 メールアドレス renraku@tsukumo.co.jp URL https://shop.tsukumo.co.jp/ 販売価格 各商品ページをご参照ください。 商品以外の必要代金 ・配送料金 全国一律550円（税込） 商品税",
+            "seller": "株式会社ヤマダデンキ",
+            "sha256": "f1130043bdbc1b2975f7a61fa423dad05890e8d30438cf463fa394f8577dddae",
+            "source_url": "https://shop.tsukumo.co.jp/shopping-help/service/tokusho.html",
+            "status": 200,
+            "store": "tsukumo"
+          },
+          {
+            "checked_at": "2026-10-09T10:12:13.225439+00:00",
+            "final_url": "https://www.ark-pc.co.jp/info/law.html",
+            "matching_context": "での流れ 情報 会社情報 求人情報 店舗案内 特定商取引法に基く表示 販売業者 株式会社アーク 法人番号 8010801007193 適格請求書発行事業者登録番号 T8010801007193 運営統括責任者 福田 智 所在地 東京都千代田区外神田3-16-18 通運会館3F 電話番号 03-5298-7051 FAX番号 03-5298-7105 メールアドレス [email protected] 商品代金以外の必要料金 ・消費税、・送料（送料無料対象を除く）、・代引手数料（代金引換の場合）、・コンビニ",
+            "seller": "株式会社アーク",
+            "sha256": "282c928a5b2ab0c71848385e36c92b70ca43c6ff82e3614b295e3741f6404dc4",
+            "source_url": "https://www.ark-pc.co.jp/info/law.html",
+            "status": 200,
+            "store": "ark"
+          }
+        ],
+        "source_data_sha": "416f5b3a268672b15c5403c19584126aafe03422",
+        "source_run_id": "37908621250-1",
+        "status": "passed"
       }
     ],
     "counting_policy": "Distinct events with unresolved findings are not counted as completed reviews. This record does not confirm delivery.",
     "false_positive_count": 0,
     "needs_review_count": 2,
-    "reviewed_at": "2026-10-01T20:18:19.407320+00:00",
-    "reviewed_count": 4,
+    "reviewed_at": "2026-10-09T10:13:39.827009+00:00",
+    "reviewed_count": 5,
     "reviewer": "ChatGPT/Codex",
     "schema_version": 1
   },
@@ -684,16 +778,17 @@
     "invalid_records": [],
     "needs_review_count": 2,
     "passed_event_ids": [
+      "056bed797208c8f9a1e7602f9ef7a5d1",
       "3372a8fc6ddc40e0257ce24e1d54e0d3",
       "76993c9313bbc85a63a5df9071497a3a",
       "d2d76764ad56bfe39f2488f53e76bd4e",
       "f9237c3d654ce1ecbab7896366f8d125"
     ],
     "policy": "distinct_final_records_with_source_evidence",
-    "reviewed_count": 4
+    "reviewed_count": 5
   },
   "measured_four_hour_windows": 22,
-  "measured_runs": 137,
+  "measured_runs": 138,
   "reasons": [
     "insufficient_scheduled_runs",
     "ten_store_coverage_incomplete",
@@ -718,7 +813,6 @@
     },
     "policy": "github_api_schedule_original_created_at_four_hour_windows",
     "sampled_run_ids": [
-      "37021819656-1",
       "37062323943-1",
       "37099241595-1",
       "37125913339-1",
@@ -739,7 +833,8 @@
       "37735196296-1",
       "37801817692-1",
       "37845761115-1",
-      "37891715222-1"
+      "37891715222-1",
+      "37950529258-1"
     ],
     "unique_scheduled_runs": 22,
     "unknown_run_ids": []
