@@ -79,6 +79,8 @@ class Collector:
         self.state["checkpoint_at"] = iso()
         self.state["pending_count"] = len(self.state["queue"])
         self.state["request_count"] = self.client.count
+        if getattr(self.client, "evidence", None) is not None:
+            self.state["http_evidence"] = {"run_id": self.run_id, **self.client.evidence.snapshot()}
         if isinstance(getattr(self.client, "retry_after", None), dict):
             self.state["retry_after"] = {host: until for host, until in self.client.retry_after.items() if until > time.time()}
         if isinstance(getattr(self.client, "transport_retry_after", None), dict):

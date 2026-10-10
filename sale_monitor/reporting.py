@@ -11,6 +11,7 @@ from .storage import Store, atomic_json, read_json
 from .scheduling import plan_comparisons
 from .comparison_integrity import known_comparators, missing_comparators
 from .routing_reporting import summary as routing_summary
+from .http_evidence import summary as http_summary
 from .validation_integrity import audit_counts, scheduled_samples, verified_provenance
 
 
@@ -64,6 +65,7 @@ def health(state: dict, now) -> dict:
                                             for r in state.get("comparison_searches", {}).values()),
             "request_count": state.get("request_count") if state.get("status") != "job_missing" else None,
             "request_count_scope": "http_attempts_plus_browser_navigations; browser_subresources_excluded",
+            "http_evidence": http_summary(state),
             "comparison_no_results": sum(r.get("result") == "no_results" and r.get("observed_run_id") == state.get("run_id") for r in state.get("comparison_searches", {}).values()),
             "pending_over_24h": sum(now - t > timedelta(hours=24) for t in created), "errors": summarize_errors(state.get("errors", [])),
             "discovery_gaps": state.get("discovery_gaps", []), "source_metadata": state.get("source_metadata"), "flyer": state.get("flyer")}
@@ -174,7 +176,8 @@ def aggregate(root: Path, public: Path, run_id: str, now=None) -> dict:
                                     "status": state.get("status", "not_run"),
                                     "comparison_routing": state.get("comparison_routing")}
         collection_errors[name] = {"run_id": state.get("run_id"), "checkpoint_at": state.get("checkpoint_at"), "status": state.get("status", "not_run"),
-                                   "errors": errors_by_url(state.get("errors", [])), "discovery_gaps": state.get("discovery_gaps", [])}
+                                   "errors": errors_by_url(state.get("errors", [])), "discovery_gaps": state.get("discovery_gaps", []),
+                                   "http_evidence": state.get("http_evidence")}
         if state.get("run_id") != run_id:
             continue
         changes.update(state.get("changes", {}))
