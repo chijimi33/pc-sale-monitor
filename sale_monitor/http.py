@@ -12,6 +12,7 @@ from urllib.parse import urlsplit
 from urllib.request import HTTPRedirectHandler, Request, build_opener
 
 from .models import allowed_url, iso
+from .http_evidence import ResponseEvidence, retry_after_evidence
 
 
 class FetchError(RuntimeError):
@@ -61,6 +62,7 @@ class Client:
         self.transport_failed_urls = {}
         self.count = 0
         self.errors = []
+        self.evidence = ResponseEvidence()
         self.opener = build_opener(SafeRedirect())
 
     def wait_for_host(self, host: str):
@@ -91,6 +93,16 @@ class Client:
         self.retry_after[host] = max(self.retry_after.get(host, 0), time.time() + wait)
         return wait
 
+    def defer_response(self, host: str, status: int, retry: str | None, attempt: int = 0) -> float:
+        wait = self.defer_host(host, retry, attempt)
+        # A 429 without a usable future deadline still asks us to slow down.
+        # Share the collector's five-minute retry interval with every URL on
+        # this host, including browser fallback and checkpoint restarts.
+        if status == 429 and (retry_after_evidence(retry)["kind"] in ("absent", "invalid") or wait <= 0):
+            wait = 300
+            self.retry_after[host] = max(self.retry_after.get(host, 0), time.time() + wait)
+        return wait
+
     def get(self, url: str, *, data: bytes | None = None, method: str = "GET", headers: dict | None = None) -> Page:
         if not allowed_url(url):
             raise FetchError("excluded_source")
@@ -106,25 +118,31 @@ class Client:
                 request = Request(url, data=data, method=method, headers={"User-Agent": "PCSaleMonitor/0.1 (+https://github.com/chijimi33/pc-sale-monitor)", "Accept-Language": "ja,en;q=0.5", "Cache-Control": "no-cache", **(headers or {})})
                 with self.opener.open(request, timeout=self.timeout) as result:
                     page = Page(result.url, result.read(), iso(), content_type=result.headers.get("Content-Type", ""))
+                    response_status = getattr(result, "status", None)
+                self.evidence.record(url, "http", status=response_status)
                 self.transport_failed_urls.pop(host, None)
                 return page
             except HTTPError as exc:
                 self.transport_failed_urls.pop(host, None)
                 if exc.code == 404:
+                    self.evidence.record(url, "http", status=exc.code)
                     page = Page(exc.url, exc.read(), iso(), content_type=(exc.headers or {}).get("Content-Type", ""), status=404)
                     raise FetchError("http_404", page=page) from exc
                 if exc.code not in (429, 500, 502, 503, 504):
+                    self.evidence.record(url, "http", status=exc.code)
                     raise FetchError(f"http_{exc.code}") from exc
                 retry = (exc.headers or {}).get("Retry-After", "")
                 # Retry-After applies to the host, including other product URLs
                 # and browser fallback. The collector persists this deadline.
-                wait = self.defer_host(host, retry, attempt)
+                wait = self.defer_response(host, exc.code, retry, attempt)
+                self.evidence.record(url, "http", status=exc.code, retry=retry, until=self.retry_after[host])
                 if wait > 60 or attempt == 2:
                     code = "rate_limited_retry_later" if retry or exc.code == 429 else f"http_{exc.code}"
                     raise FetchError(code) from exc
             except FetchError:
                 raise
             except (OSError, TimeoutError) as exc:
+                self.evidence.record(url, "http", error=exc)
                 if attempt == 2:
                     # One broken URL is not a host outage. Only defer after
                     # exhausted retries on three distinct URLs without a
@@ -158,11 +176,18 @@ class Client:
                 page = browser.new_page(locale="ja-JP")
                 page.route("**/*", lambda route: route.continue_() if allowed_url(route.request.url) else route.abort())
                 self.count += 1
-                response = page.goto(url, wait_until="domcontentloaded", timeout=self.timeout * 1000)
+                try:
+                    response = page.goto(url, wait_until="domcontentloaded", timeout=self.timeout * 1000)
+                except Exception as exc:
+                    self.evidence.record(url, "browser", error=exc)
+                    raise
                 if response and response.status in (429, 500, 502, 503, 504):
                     retry = response.header_value("Retry-After")
-                    self.defer_host(urlsplit(response.url).hostname, retry)
+                    self.defer_response(urlsplit(response.url).hostname, response.status, retry)
+                    self.evidence.record(url, "browser", status=response.status, retry=retry,
+                                         until=self.retry_after[urlsplit(response.url).hostname])
                     raise FetchError("rate_limited_retry_later" if retry or response.status == 429 else f"http_{response.status}")
+                self.evidence.record(url, "browser", status=response.status if response else None)
                 if response and response.status >= 400:
                     raise FetchError(f"http_{response.status}")
                 try:
