@@ -4,6 +4,7 @@ from __future__ import annotations
 from datetime import timedelta
 import json
 import re
+import unicodedata
 from urllib.parse import parse_qsl, urlencode, urljoin, urlsplit, urlunsplit
 
 from lxml import html
@@ -24,6 +25,25 @@ def canonical(url: str) -> str:
             return "https://www.amazon.co.jp/dp/" + asin[1]
     query = urlencode(sorted((k, v) for k, v in parse_qsl(p.query) if not TRACKING.search(k)))
     return urlunsplit((p.scheme, p.netloc.lower(), p.path or "/", query, ""))
+
+
+def product_url_matches(store: str, claimed: str, observed: str) -> bool:
+    if canonical(claimed) == canonical(observed):
+        return True
+    if store != "tsukumo":
+        return False
+    # Tsukumo serves both spellings with HTTP 200, but its Product offer and
+    # canonical link include the slash. Only this exact goods endpoint shares
+    # identity; preserve observed URLs and persisted queue keys unchanged.
+    identifiers = []
+    for url in (claimed, observed):
+        parts = urlsplit(url)
+        match = re.fullmatch(r"/goods/([0-9]{8,13})/?", parts.path)
+        if (parts.scheme != "https" or parts.netloc != "shop.tsukumo.co.jp"
+                or parts.query or not match or not valid_jan(match[1])):
+            return False
+        identifiers.append(match[1])
+    return identifiers[0] == identifiers[1]
 
 
 def document(page: Page):
@@ -112,6 +132,23 @@ def json_products(tree) -> list[dict]:
     return products
 
 
+def bundle_title_needs_review(title: str) -> bool:
+    markers = r"セット|[24]枚組|まとめ買い"
+    normalized = unicodedata.normalize("NFKC", title)
+    if "ヘッドセット" not in normalized:
+        return bool(re.search(markers, title))
+    # The category word is not a claim of multiple products. Keep a separate
+    # set/quantity/add-on claim unresolved, including a headset supplied with a PC.
+    if re.search(markers, normalized.replace("ヘッドセット", "")):
+        return True
+    # These printed connector alternatives occur in the observed single-item
+    # titles. Other '+'/'&' joins can still denote an additional product.
+    connector = r"(?:USB(?:-[AC])?|φ?3\.5mm(?:ミニプラグ)?)"
+    label = re.sub(connector + r"\s*\+\s*" + connector, "", normalized, flags=re.I)
+    return bool(re.search(r"同梱|付属|付き|付(?=\s|[)\]]|$)|特典|おまけ|プレゼント|"
+                          r"(?<!\d)(?:[2-9]|\d{2,})\s*(?:台|個|点|本|枚)|[+&]", label))
+
+
 def parse_product(store: str, page: Page, cfg: dict, discovery: dict | None = None) -> Offer:
     location = urlsplit(page.url)
     # Sofmap redirects unavailable product requests to an HTTP-200 error page.
@@ -127,7 +164,7 @@ def parse_product(store: str, page: Page, cfg: dict, discovery: dict | None = No
                   observed_at=page.observed_at, discovery_url=(discovery or {}).get("source"),
                   discovery_kind=(discovery or {}).get("kind", "sale"))
     products = json_products(tree)
-    primary = [p for p in products if canonical(p.get("url") or (p.get("offers", {}).get("url") if isinstance(p.get("offers"), dict) else "") or page.url) == canonical(page.url)]
+    primary = [p for p in products if product_url_matches(store, p.get("url") or (p.get("offers", {}).get("url") if isinstance(p.get("offers"), dict) else "") or page.url, page.url)]
     item = primary[0] if len(primary) == 1 else {}
     offer.title = item.get("name") or first(tree, '//h1') or first(tree, '//meta[@property="og:title"]/@content') or ""
     offer.jan = valid_jan(field(data, r"JAN|EAN|UPC|商品番号")) or next((valid_jan(item.get(k)) for k in ("gtin13", "gtin12", "gtin8", "gtin", "sku") if valid_jan(item.get(k))), None)
@@ -299,9 +336,9 @@ def parse_product(store: str, page: Page, cfg: dict, discovery: dict | None = No
     if offer.points_yen is None and points and re.fullmatch(r"[\d,]+\s*ポイント", points):
         offer.points_yen = integer(points.replace("ポイント", "").strip())
     declared = first(tree, '//link[@rel="canonical"]/@href')
-    if declared and canonical(urljoin(page.url, declared)) != canonical(page.url):
+    if declared and not product_url_matches(store, urljoin(page.url, declared), page.url):
         offer.issues.append("canonical_product_mismatch")
-    if re.search(r"セット|[24]枚組|まとめ買い", offer.title) and not offer.variant:
+    if bundle_title_needs_review(offer.title) and not offer.variant:
         offer.issues.append("bundle_contents_review_needed")
     if "/bto/customizer/" in page.url:
         offer.issues.append("bto_configuration_review_needed")
