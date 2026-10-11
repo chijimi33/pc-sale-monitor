@@ -4,6 +4,7 @@ from __future__ import annotations
 from datetime import timedelta
 import json
 import re
+import unicodedata
 from urllib.parse import parse_qsl, urlencode, urljoin, urlsplit, urlunsplit
 
 from lxml import html
@@ -110,6 +111,23 @@ def json_products(tree) -> list[dict]:
         except (ValueError, TypeError):
             continue
     return products
+
+
+def bundle_title_needs_review(title: str) -> bool:
+    markers = r"セット|[24]枚組|まとめ買い"
+    normalized = unicodedata.normalize("NFKC", title)
+    if "ヘッドセット" not in normalized:
+        return bool(re.search(markers, title))
+    # The category word is not a claim of multiple products. Keep a separate
+    # set/quantity/add-on claim unresolved, including a headset supplied with a PC.
+    if re.search(markers, normalized.replace("ヘッドセット", "")):
+        return True
+    # These printed connector alternatives occur in the observed single-item
+    # titles. Other '+'/'&' joins can still denote an additional product.
+    connector = r"(?:USB(?:-[AC])?|φ?3\.5mm(?:ミニプラグ)?)"
+    label = re.sub(connector + r"\s*\+\s*" + connector, "", normalized, flags=re.I)
+    return bool(re.search(r"同梱|付属|付き|付(?=\s|[)\]]|$)|特典|おまけ|プレゼント|"
+                          r"(?<!\d)(?:[2-9]|\d{2,})\s*(?:台|個|点|本|枚)|[+&]", label))
 
 
 def parse_product(store: str, page: Page, cfg: dict, discovery: dict | None = None) -> Offer:
@@ -301,7 +319,7 @@ def parse_product(store: str, page: Page, cfg: dict, discovery: dict | None = No
     declared = first(tree, '//link[@rel="canonical"]/@href')
     if declared and canonical(urljoin(page.url, declared)) != canonical(page.url):
         offer.issues.append("canonical_product_mismatch")
-    if re.search(r"セット|[24]枚組|まとめ買い", offer.title) and not offer.variant:
+    if bundle_title_needs_review(offer.title) and not offer.variant:
         offer.issues.append("bundle_contents_review_needed")
     if "/bto/customizer/" in page.url:
         offer.issues.append("bto_configuration_review_needed")
