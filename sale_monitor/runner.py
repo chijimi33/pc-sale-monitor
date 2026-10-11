@@ -16,7 +16,7 @@ from .parsing import canonical, confirmed_empty_search, discover, parse_product,
 from .storage import Store
 from .scheduling import plan_comparison_refresh, select_task
 from .retrying import runnable, transient
-from . import koubou_search, sofmap_search, tsukumo_shipping, comparison_routing
+from . import koubou_search, sofmap_search, tsukumo_shipping, comparison_routing, comparison_priority
 
 
 def task_order(task: dict) -> tuple:
@@ -90,6 +90,9 @@ class Collector:
     def enqueue(self, task: dict):
         if task.get("url") and not allowed_url(task["url"]):
             return
+        related = comparison_priority.queries(task, self.store) if task.get("comparison_queries") else []
+        if related:
+            task = {**task, "comparison_queries": related}
         task_id = digest([task["type"], task.get("url"), task.get("query"), task.get("start"), task.get("kind"), task.get("item", {}).get("product_id")])[:24]
         if task_id in self.state["queue"]:
             existing = self.state["queue"][task_id]
@@ -99,6 +102,8 @@ class Collector:
                 existing["created_at"] = task["created_at"]
             if task.get("requested"):
                 existing["requested"] = True
+            if related:
+                existing["comparison_queries"] = sorted(set(comparison_priority.queries(existing, self.store)) | set(related))
             if task.get("discovery_origin"):
                 prior = existing.get("discovery_origin")
                 if not prior or task["discovery_origin"]["created_at"] < prior["created_at"]:
@@ -143,8 +148,7 @@ class Collector:
             # Keep unfinished work (and its original age), while allowing fresh
             # list discovery even when one old URL repeatedly fails.
             self.state.update(done=[], changes={}, cycle_started_at=iso(), cycle_complete=False, list_pages=0, listed_candidates=0, discovery_gaps=[])
-            for task in self.state["queue"].values():
-                task.pop("requested", None)
+            comparison_priority.refresh(self.state["queue"], requests, self.store)
             adapter = self.cfg["adapter"]
             if adapter == "html":
                 for url in self.cfg.get("seed_urls", []):
@@ -296,6 +300,7 @@ class Collector:
         products, next_offset, details = koubou_search.parse_search(
             self.page(url, allow_browser=False), query, offset)
         origin = {"created_at": task.get("created_at") or iso(), "priority": task.get("priority", 3)}
+        origin.update(comparison_priority.origin({**task, "type": "koubou_search", "query": query}, self.store))
         for product in products:
             self.enqueue({"type": "product", **product, **origin})
         if next_offset is not None:
@@ -354,6 +359,7 @@ class Collector:
             if not url:
                 raise FetchError("search_form_not_found")
             self.enqueue({"type": "list", "url": url, "sale_page": False, "kind": "comparison", "depth": 0, "priority": task.get("priority", 3), "created_at": task.get("created_at") or iso(),
+                          **comparison_priority.origin(task, self.store),
                           **({"search_query": task["query"]} if self.store == "sofmap" else {})})
         elif kind == "list":
             if self.store == "sofmap" and task.get("kind") == "comparison":
@@ -393,7 +399,7 @@ class Collector:
             discovery_origin = task.get("discovery_origin")
             if replacement:
                 discovery_origin = {"url": task["url"], "created_at": task["created_at"]}
-            origin = {"created_at": task["created_at"]} if task.get("kind") == "comparison" and task.get("created_at") else {}
+            origin = comparison_priority.origin(task, self.store)
             if discovery_origin:
                 discovery_origin = {**discovery_origin, "created_at": min(discovery_origin["created_at"], task["created_at"])}
                 origin = {"created_at": discovery_origin["created_at"], "discovery_origin": discovery_origin}
@@ -458,6 +464,7 @@ class Collector:
                     raise FetchError("comparison_search_response_unverified")
         products, dependencies, evidence = sofmap_search.parse_listing(page, query)
         origin = {"created_at": task.get("created_at") or iso(), "priority": task.get("priority", 3)}
+        origin.update(comparison_priority.origin({**task, "search_query": query}, self.store))
         for product in products:
             self.enqueue({"type": "product", **product, **origin})
         for dependency in dependencies:
