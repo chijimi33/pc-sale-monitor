@@ -22,7 +22,10 @@ def main(argv=None):
     parser.add_argument("--seconds", type=int, default=2100, help="Runner時間制限。中断位置は永続化し次回再開。Web呼出数の上限ではない。")
     parser.add_argument("--run-id", default=utcnow().strftime("%Y%m%dT%H%M%SZ"))
     parser.add_argument("--event-id", action="append", default=[])
+    parser.add_argument("--transport-diagnostic", action="store_true", help="One independent Tsukumo transport comparison after collection; never a price observation")
     args = parser.parse_args(argv)
+    if args.transport_diagnostic and (args.command != "collect" or args.store != "tsukumo"):
+        parser.error("transport diagnostic requires collect --store tsukumo")
     if not re.fullmatch(r"[A-Za-z0-9_-]{1,100}", args.run_id):
         parser.error("invalid run id")
     if args.command == "collect":
@@ -31,7 +34,11 @@ def main(argv=None):
         config = read_json(args.config, None)
         if set(config["stores"]) != set(STORES):
             parser.error("configuration must contain exactly the ten supported stores")
-        result = Collector(args.state, args.store, config, args.run_id).collect(args.seconds)
+        collector = Collector(args.state, args.store, config, args.run_id)
+        result = collector.collect(args.seconds)
+        if args.transport_diagnostic:
+            from .transport_diagnostic import save_after_collection
+            save_after_collection(collector)
         print(json.dumps({"store": args.store, "status": result["status"], "offers": len(result["offers"]), "pending": len(result["queue"]), "errors": result["errors"]}, ensure_ascii=False))
     elif args.command == "checkpoint":
         if args.incoming is None:

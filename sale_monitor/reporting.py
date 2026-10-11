@@ -64,7 +64,9 @@ def health(state: dict, now) -> dict:
             "comparison_search_pages": sum(r.get("observed_run_id") == state.get("run_id")
                                             for r in state.get("comparison_searches", {}).values()),
             "request_count": state.get("request_count") if state.get("status") != "job_missing" else None,
-            "request_count_scope": "http_attempts_plus_browser_navigations; browser_subresources_excluded",
+            "request_count_scope": "collection_http_attempts_plus_browser_navigations; diagnostic_requests_and_browser_subresources_excluded",
+            "diagnostic_request_count": (state.get("transport_diagnostic") or {}).get("diagnostic_request_count")
+                if (state.get("transport_diagnostic") or {}).get("run_id") == state.get("run_id") and state.get("status") != "job_missing" else None,
             "http_evidence": http_summary(state),
             "comparison_no_results": sum(r.get("result") == "no_results" and r.get("observed_run_id") == state.get("run_id") for r in state.get("comparison_searches", {}).values()),
             "pending_over_24h": sum(now - t > timedelta(hours=24) for t in created), "errors": summarize_errors(state.get("errors", [])),
@@ -177,7 +179,8 @@ def aggregate(root: Path, public: Path, run_id: str, now=None) -> dict:
                                     "comparison_routing": state.get("comparison_routing")}
         collection_errors[name] = {"run_id": state.get("run_id"), "checkpoint_at": state.get("checkpoint_at"), "status": state.get("status", "not_run"),
                                    "errors": errors_by_url(state.get("errors", [])), "discovery_gaps": state.get("discovery_gaps", []),
-                                   "http_evidence": state.get("http_evidence")}
+                                   "http_evidence": state.get("http_evidence"),
+                                   "transport_diagnostic": state.get("transport_diagnostic")}
         if state.get("run_id") != run_id:
             continue
         changes.update(state.get("changes", {}))

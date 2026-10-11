@@ -510,7 +510,9 @@ class SofmapRetainedScopeCollection(unittest.TestCase):
         c.process(self.task(used=True))
         c.process(self.task(used=True))
         c.save()
-        self.assertEqual({key: existing}, self.stored(c)['queue'])
+        # Rediscovery adds scheduling provenance; every pre-existing scope,
+        # failure, age and attempt field remains exactly as it was.
+        self.assertEqual({key: {**existing, 'comparison_queries': [JAN]}}, self.stored(c)['queue'])
         self.assertEqual([search_url(used=True), parts_url(used=True)], c.client.calls)
 
     def test_failed_fragment_is_atomic_retained_and_increments_attempt_normally(self):
