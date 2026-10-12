@@ -60,12 +60,20 @@ class Client:
         self.retry_after = {}
         self.transport_retry_after = {}
         self.transport_failed_urls = {}
+        self.access_retry_after = {}
+        self.access_failed_urls = {}
         self.count = 0
         self.errors = []
         self.evidence = ResponseEvidence()
         self.opener = build_opener(SafeRedirect())
 
     def wait_for_host(self, host: str):
+        access = self.access_retry_after.get(host)
+        if access:
+            if access["until"] > time.time():
+                raise FetchError("access_retry_later:" + access["reason"])
+            self.access_retry_after.pop(host, None)
+            self.access_failed_urls.pop(host, None)
         failure = self.transport_retry_after.get(host)
         if failure:
             if failure["until"] > time.time():
@@ -78,6 +86,28 @@ class Client:
         if remaining > 0:
             time.sleep(remaining)
         self.retry_after.pop(host, None)
+
+    def access_response(self, url: str, status: int | None, retry: str | None = None):
+        host = urlsplit(url).hostname
+        if status != 403:
+            self.access_failed_urls.pop(host, None)
+            return None
+        failed = self.access_failed_urls.setdefault(host, set())
+        # Bounded distinct denial evidence, never cookies or response bodies.
+        if len(failed) < 3:
+            failed.add(url)
+        details = retry_after_evidence(retry)
+        server_until = 0
+        if details["kind"] == "seconds":
+            server_until = time.time() + max(0, details["seconds"])
+        elif details["kind"] == "http_date":
+            server_until = datetime.fromisoformat(details["at"]).timestamp()
+        if len(failed) >= 3 or server_until > time.time():
+            until = max(time.time() + 300, server_until,
+                        self.access_retry_after.get(host, {}).get("until", 0))
+            self.access_retry_after[host] = {"until": until, "reason": "http_403"}
+            return until
+        return None
 
     def defer_host(self, host: str, retry: str | None, attempt: int = 0) -> float:
         try:
@@ -120,10 +150,17 @@ class Client:
                     page = Page(result.url, result.read(), iso(), content_type=result.headers.get("Content-Type", ""))
                     response_status = getattr(result, "status", None)
                 self.evidence.record(url, "http", status=response_status)
+                self.access_response(url, response_status)
                 self.transport_failed_urls.pop(host, None)
                 return page
             except HTTPError as exc:
                 self.transport_failed_urls.pop(host, None)
+                if exc.code == 403:
+                    retry = (exc.headers or {}).get("Retry-After", "")
+                    until = self.access_response(url, exc.code, retry)
+                    self.evidence.record(url, "http", status=403, retry=retry, until=until)
+                    raise FetchError("http_403") from exc
+                self.access_response(url, exc.code)
                 if exc.code == 404:
                     self.evidence.record(url, "http", status=exc.code)
                     page = Page(exc.url, exc.read(), iso(), content_type=(exc.headers or {}).get("Content-Type", ""), status=404)
@@ -181,6 +218,12 @@ class Client:
                 except Exception as exc:
                     self.evidence.record(url, "browser", error=exc)
                     raise
+                if response and response.status == 403:
+                    retry = response.header_value("Retry-After")
+                    until = self.access_response(url, 403, retry)
+                    self.evidence.record(url, "browser", status=403, retry=retry, until=until)
+                    raise FetchError("http_403")
+                self.access_response(url, response.status if response else None)
                 if response and response.status in (429, 500, 502, 503, 504):
                     retry = response.header_value("Retry-After")
                     self.defer_response(urlsplit(response.url).hostname, response.status, retry)

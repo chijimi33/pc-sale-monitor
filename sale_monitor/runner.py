@@ -45,6 +45,10 @@ class Collector:
         self.client = client or Client(browser=self.cfg.get("browser_fallback", False))
         self.name = f"stores/{store}.json"
         self.state = self.disk.load(self.name, {"schema_version": 1, "store": store, "queue": {}, "done": [], "offers": {}, "journal": [], "cycle_complete": True})
+        if isinstance(getattr(self.client, "access_retry_after", None), dict):
+            for host, failure in self.state.get("access_retry_after", {}).items():
+                if failure["until"] > self.client.access_retry_after.get(host, {}).get("until", 0):
+                    self.client.access_retry_after[host] = failure.copy()
         if isinstance(getattr(self.client, "retry_after", None), dict):
             for host, until in self.state.get("retry_after", {}).items():
                 self.client.retry_after[host] = max(self.client.retry_after.get(host, 0), until)
@@ -85,6 +89,8 @@ class Collector:
             self.state["retry_after"] = {host: until for host, until in self.client.retry_after.items() if until > time.time()}
         if isinstance(getattr(self.client, "transport_retry_after", None), dict):
             self.state["transport_retry_after"] = {host: failure.copy() for host, failure in self.client.transport_retry_after.items() if failure["until"] > time.time()}
+        if isinstance(getattr(self.client, "access_retry_after", None), dict):
+            self.state["access_retry_after"] = {host: failure.copy() for host, failure in self.client.access_retry_after.items() if failure["until"] > time.time()}
         self.disk.save(self.name, self.state)
 
     def enqueue(self, task: dict):
