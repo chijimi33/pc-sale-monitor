@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import datetime
 from email.utils import parsedate_to_datetime
+from http.client import IncompleteRead
 import json
 import math
 import re
@@ -178,7 +179,7 @@ class Client:
                     raise FetchError(code) from exc
             except FetchError:
                 raise
-            except (OSError, TimeoutError) as exc:
+            except (OSError, TimeoutError, IncompleteRead) as exc:
                 self.evidence.record(url, "http", error=exc)
                 if attempt == 2:
                     # One broken URL is not a host outage. Only defer after
