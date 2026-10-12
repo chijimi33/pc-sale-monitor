@@ -51,7 +51,7 @@ class ResponseEvidence:
             name = type(error).__name__
             if name not in {"TimeoutError", "RemoteDisconnected", "ConnectionResetError",
                             "ConnectionAbortedError", "ConnectionRefusedError", "BrokenPipeError",
-                            "URLError", "OSError", "Error"}:
+                            "URLError", "OSError", "IncompleteRead", "Error"}:
                 name = "other"
             bucket = self.exceptions[method]
             bucket[name] = bucket.get(name, 0) + 1
