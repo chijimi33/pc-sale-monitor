@@ -163,8 +163,19 @@ class Client:
                     raise FetchError("http_403") from exc
                 self.access_response(url, exc.code)
                 if exc.code == 404:
+                    try:
+                        body = exc.read()
+                    except IncompleteRead as body_error:
+                        # A handler's exceptions do not enter sibling handlers.
+                        # Count this attempt only as an incomplete body; never
+                        # offer partial bytes to store-specific 404 classifiers.
+                        self.evidence.record(url, "http", error=body_error)
+                        if attempt == 2:
+                            raise FetchError("IncompleteRead") from body_error
+                        time.sleep(2 ** (attempt + 1))
+                        continue
                     self.evidence.record(url, "http", status=exc.code)
-                    page = Page(exc.url, exc.read(), iso(), content_type=(exc.headers or {}).get("Content-Type", ""), status=404)
+                    page = Page(exc.url, body, iso(), content_type=(exc.headers or {}).get("Content-Type", ""), status=404)
                     raise FetchError("http_404", page=page) from exc
                 if exc.code not in (429, 500, 502, 503, 504):
                     self.evidence.record(url, "http", status=exc.code)
