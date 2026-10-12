@@ -2,6 +2,7 @@ from contextlib import ExitStack
 from copy import deepcopy
 from io import BytesIO
 from pathlib import Path
+import os
 import tempfile
 import unittest
 from unittest.mock import MagicMock, patch
@@ -131,6 +132,43 @@ class AccessBackoffTests(unittest.TestCase):
             ready, waits = runnable(result['queue'], set(), cfg['stores']['sofmap'], resumed.client, {}, 1300)
             self.assertEqual(len(ready), 8)
             self.assertEqual(waits, [])
+
+    def test_hostless_adapter_tasks_wait_without_attempts_until_server_deadline(self):
+        cases = [
+            ('yahoo', 'shopping.yahooapis.jp', {'type': 'yahoo', 'query': 'offline', 'start': 1}),
+            ('dospara', 'www.dospara.co.jp', {'type': 'dospara_product', 'item': {'product_id': 'offline'}}),
+        ]
+        for store, host, task in cases:
+            with self.subTest(store=store), tempfile.TemporaryDirectory() as tmp, ExitStack() as stack:
+                clock = Clock(); clock.patch(stack)
+                stack.enter_context(patch.dict(os.environ, {'YAHOO_CLIENT_ID': 'offline-test-only'}))
+                client = Client(delay=0)
+                client.access_retry_after[host] = {'until': 1900, 'reason': 'http_403'}
+                cfg = {'stores': {store: {'adapter': store, 'seed_urls': []}}}
+                collector = Collector(Path(tmp), store, cfg, 'r1', client)
+                collector.seed = lambda: None
+                for n in range(8):
+                    entry = deepcopy(task)
+                    if store == 'yahoo':
+                        entry['query'] += str(n)
+                    else:
+                        entry['item']['product_id'] += str(n)
+                    collector.enqueue({**entry, 'created_at': OLD, 'attempts': 7})
+                before = deepcopy(collector.state['queue'])
+                self.assertEqual(len(before), 8)
+                with patch.object(collector, 'process', side_effect=FetchError('access_retry_later:http_403')) as process:
+                    result = collector.collect(seconds=600)
+                process.assert_not_called()
+                self.assertEqual(result['queue'], before)
+                self.assertEqual(client.count, 0)
+                self.assertEqual(result['waiting_dependencies'], [{'host': host, 'until_epoch_seconds': 1900,
+                    'reason': 'access_retry_later:http_403', 'affected_tasks': len(before)}])
+                ready, waits = runnable(result['queue'], set(), cfg['stores'][store], client, {}, 1899)
+                self.assertEqual(ready, [])
+                self.assertEqual(sum(x['affected_tasks'] for x in waits), len(before))
+                ready, waits = runnable(result['queue'], set(), cfg['stores'][store], client, {}, 1900)
+                self.assertEqual(len(ready), len(before))
+                self.assertEqual(waits, [])
 
 
 if __name__ == '__main__':

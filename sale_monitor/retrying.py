@@ -20,6 +20,11 @@ def dependency_url(task: dict, cfg: dict) -> str | None:
         return next(iter(cfg.get("seed_urls", [])), None)
     if task["type"] == "amazon_discovery":
         return cfg.get("source_url")
+    # These adapters start with a fixed API request rather than a queued URL.
+    if task["type"] == "yahoo":
+        return "https://shopping.yahooapis.jp/ShoppingWebService/V3/itemSearch"
+    if task["type"] == "dospara_product":
+        return "https://www.dospara.co.jp/s/dospara/api/getProducts"
     return None
 
 
