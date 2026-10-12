@@ -10,7 +10,7 @@ def transient(reason: str) -> bool:
         "RemoteDisconnected", "TimeoutError", "ConnectionResetError", "ConnectionAbortedError",
         "ConnectionRefusedError", "BrokenPipeError", "rate_limited_retry_later",
         "http_429", "http_500", "http_502", "http_503", "http_504",
-    } or reason.startswith("transport_retry_later:")
+    } or reason.startswith(("transport_retry_later:", "access_retry_later:"))
 
 
 def dependency_url(task: dict, cfg: dict) -> str | None:
@@ -20,6 +20,11 @@ def dependency_url(task: dict, cfg: dict) -> str | None:
         return next(iter(cfg.get("seed_urls", [])), None)
     if task["type"] == "amazon_discovery":
         return cfg.get("source_url")
+    # These adapters start with a fixed API request rather than a queued URL.
+    if task["type"] == "yahoo":
+        return "https://shopping.yahooapis.jp/ShoppingWebService/V3/itemSearch"
+    if task["type"] == "dospara_product":
+        return "https://www.dospara.co.jp/s/dospara/api/getProducts"
     return None
 
 
@@ -32,11 +37,13 @@ def runnable(queue: dict, attempted: set, cfg: dict, client, page_deadlines: dic
         url = dependency_url(task, cfg)
         host = urlsplit(url).hostname if url else None
         transport = getattr(client, "transport_retry_after", {}).get(host, {})
+        access = getattr(client, "access_retry_after", {}).get(host, {})
         deadlines = [
             (retry_at or 0, task.get("last_error", "task_retry")),
             (page_deadlines.get(url, 0), "shared_page_retry"),
             (getattr(client, "retry_after", {}).get(host, 0), "rate_limited_retry_later"),
             (transport.get("until", 0), "transport_retry_later:" + transport.get("reason", "unknown")),
+            (access.get("until", 0), "access_retry_later:" + access.get("reason", "unknown")),
         ]
         until, reason = max(deadlines, key=lambda item: item[0])
         if until > now:
