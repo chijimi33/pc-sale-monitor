@@ -1,11 +1,13 @@
 from contextlib import ExitStack
 from copy import deepcopy
 from http.client import IncompleteRead
+from io import BytesIO
 import json
 from pathlib import Path
 import tempfile
 import unittest
 from unittest.mock import MagicMock, patch
+from urllib.error import HTTPError
 
 from sale_monitor.http import Client, FetchError
 from sale_monitor.models import Offer, iso
@@ -33,6 +35,50 @@ def response(body=BODY, partial=False):
 
 
 class IncompleteResponseTests(unittest.TestCase):
+    def test_incomplete_404_body_retries_before_returning_complete_response(self):
+        for final_status in [200, 404]:
+            with self.subTest(final_status=final_status):
+                failures = []
+                for _ in range(2):
+                    stream = MagicMock()
+                    stream.read.side_effect = IncompleteRead(b'private-partial-404', 100)
+                    failures.append(HTTPError(URL, 404, '', {}, stream))
+                final = response() if final_status == 200 else HTTPError(URL, 404, '', {}, BytesIO(BODY))
+                client = Client(delay=0)
+                with patch.object(client.opener, 'open', side_effect=[*failures, final]), \
+                        patch('sale_monitor.http.time.sleep'):
+                    if final_status == 404:
+                        with self.assertRaisesRegex(FetchError, '^http_404$') as raised:
+                            client.get(URL)
+                        page = raised.exception.page
+                    else:
+                        page = client.get(URL)
+                self.assertEqual((page.body, page.status), (BODY, final_status))
+                evidence = client.evidence.snapshot()
+                self.assertEqual(client.count, 3)
+                self.assertEqual(evidence['exception_counts']['http'], {'IncompleteRead': 2})
+                self.assertEqual(evidence['response_status_counts']['http'], {str(final_status): 1})
+                self.assertNotIn('private', json.dumps(evidence))
+
+    def test_incomplete_404_exhaustion_counts_each_request_once(self):
+        failures = []
+        for _ in range(3):
+            stream = MagicMock()
+            stream.read.side_effect = IncompleteRead(b'private-partial-404', 100)
+            failures.append(HTTPError(URL, 404, '', {}, stream))
+        client = Client(delay=0)
+        with patch.object(client.opener, 'open', side_effect=failures) as network, \
+                patch('sale_monitor.http.time.sleep'):
+            with self.assertRaisesRegex(FetchError, '^IncompleteRead$') as raised:
+                client.get(URL)
+        self.assertIsNone(raised.exception.page)
+        self.assertEqual(network.call_count, 3)
+        evidence = client.evidence.snapshot()
+        self.assertEqual(client.count, 3)
+        self.assertEqual(evidence['exception_counts']['http'], {'IncompleteRead': 3})
+        self.assertEqual(evidence['response_status_counts']['http'], {})
+        self.assertNotIn('private', json.dumps(evidence))
+
     def test_partial_body_is_discarded_and_each_attempt_is_accounted_for(self):
         client = Client(delay=0)
         with patch.object(client.opener, 'open', side_effect=[response(partial=True), response()]), \
