@@ -8,9 +8,11 @@ import os
 import time
 from urllib.parse import urlsplit
 
+from lxml.etree import ParserError
+
 from . import adapters
 from .flyers import collect_flyer
-from .http import Client, FetchError
+from .http import Client, FetchError, Page
 from .models import STORES, Offer, allowed_url, digest, fresh, iso, timestamp, utcnow
 from .parsing import canonical, confirmed_empty_search, discover, parse_product, search_form
 from .storage import Store
@@ -540,7 +542,16 @@ class Collector:
                     task["retry_at_epoch_seconds"] = time.time() + 300
                 # Error counts describe unresolved tasks, not repeated attempts.
                 self.state["errors"] = [e for e in self.state["errors"] if e.get("task_id") != task_id]
-                self.state["errors"].append({"task_id": task_id, "reason": reason, "url": task.get("url")})
+                error = {"task_id": task_id, "reason": reason, "url": task.get("url")}
+                page = getattr(exc, "page", None)
+                if isinstance(exc, ParserError) and isinstance(page, Page):
+                    error["response_evidence"] = {
+                        "status": page.status, "method": page.method,
+                        "body_bytes": len(page.body),
+                        "body_sha256": hashlib.sha256(page.body).hexdigest(),
+                        "observed_at": page.observed_at,
+                    }
+                self.state["errors"].append(error)
                 if task["type"] == "product":
                     self.complete_comparison_routes(task, reason=reason)
                     for row in self.state["offers"].values():
