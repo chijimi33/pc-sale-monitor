@@ -7,7 +7,7 @@ import re
 import unicodedata
 from urllib.parse import parse_qsl, urlencode, urljoin, urlsplit, urlunsplit
 
-from lxml import html
+from lxml import etree, html
 
 from .http import FetchError, Page
 from .models import JST, Offer, allowed_url, digest, iso, timestamp, valid_jan
@@ -47,7 +47,13 @@ def product_url_matches(store: str, claimed: str, observed: str) -> bool:
 
 
 def document(page: Page):
-    return html.fromstring(page.text, base_url=page.url)
+    try:
+        return html.fromstring(page.text, base_url=page.url)
+    except etree.ParserError as exc:
+        # Keep the exception type for callers that already handle ParserError.
+        # The collector persists only bounded metadata from this response.
+        exc.page = page
+        raise
 
 
 def clean(element) -> str:
