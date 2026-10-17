@@ -48,6 +48,16 @@ def search_data(number=1, more=False, truncated=False, sale=True):
                     'title': {'main': {'taxonomies': [{'items': [{'text': QUERY, 'url': search_url(QUERY)}]}]}}}}}}}
 
 
+def zero_search_data():
+    data = search_data()
+    bff = data['props']['initialState']['bff']
+    bff.update(searchError={'queryMessage': QUERY, 'errorCode': 'zeroMatch',
+                           'reSearchInfo': None, 'reSearchSuggest': None},
+               searchResults=None, alternativePagination=None)
+    bff['searchResultHeader']['hitCount'] = 0
+    return data
+
+
 def product_data():
     active = {'price': 5000, 'isApplicablePrice': True, 'isPremiumPrice': False, 'isYourTimeSalePrice': False, 'isYouBadge': False,
               'isRegularPrice': True, 'isBargainPrice': False}
@@ -77,6 +87,36 @@ def product(data=None, schema=None):
 
 
 class PublicSearchTests(unittest.TestCase):
+    def test_explicit_zero_match_has_bound_query_and_evidence(self):
+        p = page(zero_search_data(), search_url(QUERY))
+        products, nxt, evidence = parse_search(p, QUERY, comparison=True)
+        self.assertEqual(products, [])
+        self.assertIsNone(nxt)
+        self.assertEqual((evidence['result'], evidence['total'], evidence['returned']), ('no_results', 0, 0))
+        self.assertEqual(evidence['observed_at'], p.observed_at)
+        self.assertFalse(evidence['provider_window_truncated'])
+
+    def test_zero_match_conflicts_remain_unverified(self):
+        for variant in ('query', 'error', 'header', 'count', 'bool', 'results', 'pagination', 'suggest', 'rewrite', 'missing'):
+            d = zero_search_data(); b = d['props']['initialState']['bff']
+            if variant == 'query': b['searchError']['queryMessage'] = 'other'
+            if variant == 'error': b['searchError']['errorCode'] = 'temporarilyUnavailable'
+            if variant == 'header': b['searchResultHeader']['title']['main']['taxonomies'][0]['items'][0]['text'] = 'other'
+            if variant == 'count': b['searchResultHeader']['hitCount'] = 1
+            if variant == 'bool': b['searchResultHeader']['hitCount'] = False
+            if variant == 'results': b['searchResults'] = {'items': {}}
+            if variant == 'pagination': b['alternativePagination'] = {'next': search_url(QUERY,2)}
+            if variant == 'suggest': b['searchError']['reSearchSuggest'] = {'query':'other'}
+            if variant == 'rewrite': b['searchError']['reSearchInfo'] = {'query':'other'}
+            if variant == 'missing': b.pop('searchResults')
+            with self.subTest(variant=variant), self.assertRaises(FetchError):
+                parse_search(page(d, search_url(QUERY)), QUERY, comparison=True)
+
+    def test_zero_match_on_later_page_does_not_complete_a_search(self):
+        d = zero_search_data(); d['query']['params'].append('2')
+        with self.assertRaises(FetchError):
+            parse_search(page(d, search_url(QUERY,2)), QUERY, 2, comparison=True)
+
     def test_discovery_does_not_create_offers_and_follows_provider_next(self):
         products, nxt, evidence = parse_search(page(search_data(more=True), search_url(QUERY)), QUERY)
         self.assertEqual(nxt, search_url(QUERY, 2))

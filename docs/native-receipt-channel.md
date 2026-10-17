@@ -52,6 +52,11 @@ do not derive or update approval automatically from the mailbox. Run the fixed
 checkout with `python -m sale_monitor.native_channel work --key <private>
 --policy <policy> --output <new-evidence-directory> --uploader <artifact.mjs>`.
 Use that checkout's locked Node dependencies and a new output directory per attempt.
+Windows Git checkout/archive conversion can change LF to CRLF. Provision a
+dedicated checkout with local `core.autocrlf=false` before checkout, or materialize
+the exact committed blobs, and compare all Python file bytes. A runtime mismatch
+must stop before fetching retailer pages; never substitute the remote hash into
+the local approval file without making the actual bytes match.
 
 Failed or late uploads leave local checkpoints available, but expired leases are
 not retimestamped or silently accepted. A retry requires an explicit new lease.
@@ -72,6 +77,10 @@ Protocol tests cover native state preservation, signed-body replay, duplicate an
 stale receipts, encryption tampering, local approval, expiry, credential host
 constraints, ZIP traversal/duplicates/symlinks/size, and Windows DPAPI persistence.
 Live integration evidence is recorded separately from these synthetic tests.
+The first real round trip also captured a Yahoo `zeroMatch` response. The parser
+accepts it only on page one with an exact query/header/URL match, integer zero
+count, null results and pagination, and no rewrite or suggestions. Other empty
+shells and contradictory responses stay pending.
 
 Upstream implementation references:
 - https://github.com/actions/toolkit/tree/main/packages/artifact

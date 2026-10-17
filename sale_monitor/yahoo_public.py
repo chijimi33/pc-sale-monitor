@@ -64,7 +64,26 @@ def parse_search(page: Page, query: str, number: int = 1, *, comparison: bool = 
         if data["page"] != "/search/[[...params]]" or data["query"]["params"] != expected:
             raise ValueError("search_query")
         bff = data["props"]["initialState"]["bff"]
+        header, alt = bff["searchResultHeader"], bff["alternativePagination"]
+        terms = header["title"]["main"]["taxonomies"]
+        if (len(terms) != 1 or len(terms[0]["items"]) != 1
+                or terms[0]["items"][0]["text"] != query
+                or not search_scope(terms[0]["items"][0]["url"], query, 1)):
+            raise ValueError("search_header")
         if bff.get("searchError") is not None:
+            error = bff["searchError"]
+            # Observed on a real first-page JAN search. A missing result shell,
+            # another error, suggestions or a contradictory count is not proof
+            # that the requested product has no listings.
+            if (number == 1 and error["errorCode"] == "zeroMatch" and error["queryMessage"] == query
+                    and error["reSearchInfo"] is None and error["reSearchSuggest"] is None
+                    and bff["searchResults"] is None and alt is None
+                    and type(header["hitCount"]) is int and header["hitCount"] == 0):
+                return [], None, {
+                    "method": "yahoo_public_search_html", "url": page.url, "query": query, "page": number,
+                    "result": "no_results", "total": 0, "start": 0, "end": 0, "returned": 0, "selected": 0,
+                    "provider_window_truncated": False, "observed_at": page.observed_at,
+                    "http_status": page.status, "body_sha256": hashlib.sha256(page.body).hexdigest()}
             raise ValueError("search_error")
         sections = bff["searchResults"]["items"][str(number)]
         pagers = [s["content"] for s in sections if s["type"] == "PAGER"]
@@ -72,18 +91,11 @@ def parse_search(page: Page, query: str, number: int = 1, *, comparison: bool = 
         if len(pagers) != 1 or len(results) != 1:
             raise ValueError("search_sections")
         pager, rows = pagers[0], results[0]
-        header, alt = bff["searchResultHeader"], bff["alternativePagination"]
-        terms = header["title"]["main"]["taxonomies"]
-        if (len(terms) != 1 or len(terms[0]["items"]) != 1
-                or terms[0]["items"][0]["text"] != query
-                or not search_scope(terms[0]["items"][0]["url"], query, 1)):
-            raise ValueError("search_header")
         for key in ("current", "start", "end", "total", "totalPage"):
             if type(pager[key]) is not int or type(alt[key]) is not int or pager[key] != alt[key]:
                 raise ValueError("pagination_conflict")
         total, start, end, last = (pager[k] for k in ("total", "start", "end", "totalPage"))
-        # No empty-result schema has been observed yet. An unfamiliar empty
-        # shell remains pending instead of being reported as a verified no-hit.
+        # Empty result arrays still require the explicit zeroMatch shape above.
         if (pager["current"] != number or not isinstance(rows, list) or not rows
                 or type(header["hitCount"]) is not int or header["hitCount"] != total
                 or not 1 <= start <= end <= total or len(rows) != end - start + 1

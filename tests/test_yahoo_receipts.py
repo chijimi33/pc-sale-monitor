@@ -41,6 +41,15 @@ class YahooReceipts(unittest.TestCase):
         self.assertEqual(state['journal'],[{'prior':True}])
         self.assertEqual(state['done'],['old-done','head'])
         self.assertFalse(receipt['scheduled_credit']);self.assertFalse(receipt['formal_audit_added'])
+    def test_explicit_no_results_completes_only_the_bound_search(self):
+        receipt=self.make(Y.zero_search_data());state=self.load()['state']
+        self.assertEqual((receipt['successes'],receipt['failures']),(1,0))
+        self.assertEqual(state['queue'],{'untouched':self.state['queue']['untouched']})
+        self.assertEqual(state['offers'],self.state['offers'])
+        self.assertEqual(state['journal'],self.state['journal'])
+        evidence=state['yahoo_public_searches'][Y.search_url(Y.QUERY)]
+        self.assertEqual((evidence['result'],evidence['query'],evidence['observed_run_id']),('no_results',Y.QUERY,B.RUN))
+        self.assertFalse(receipt['scheduled_credit'])
     def test_public_pagination_receipt_preserves_age_and_scope(self):
         receipt=self.make(Y.search_data(more=True));state=self.load()['state']
         child=next(t for t in state['queue'].values() if t['type']=='yahoo_public_search')
