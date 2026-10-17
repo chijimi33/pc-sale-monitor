@@ -155,6 +155,43 @@ def bundle_title_needs_review(title: str) -> bool:
                           r"(?<!\d)(?:[2-9]|\d{2,})\s*(?:台|個|点|本|枚)|[+&]", label))
 
 
+def ark_purchase_end(tree, page: Page) -> dict | None:
+    """An explicit disabled EOL control on the canonical primary product."""
+    if page.status != 200 or not re.fullmatch(r"https://www\.ark-pc\.co\.jp/i/\d{8}/", page.url):
+        return None
+    declared = tree.xpath('//link[@rel="canonical"]/@href')
+    if len(declared) != 1 or canonical(urljoin(page.url, declared[0])) != canonical(page.url):
+        return None
+    panels = tree.xpath('//*[@id="middle_col"]/div[contains(concat(" ",normalize-space(@class)," ")," item_detailbox ")]/div[contains(concat(" ",normalize-space(@class)," ")," detail2col_r ")]')
+    if len(panels) != 1:
+        return None
+    panel = panels[0]
+    if panel.xpath('.//form[contains(concat(" ",normalize-space(@class)," ")," add2cart ")]'):
+        return None
+    buttons = panel.xpath('.//div[contains(concat(" ",normalize-space(@class)," ")," add2cart ") and contains(concat(" ",normalize-space(@class)," ")," soldout ")]/button[@disabled]')
+    if len(buttons) != 1:
+        return None
+    button = buttons[0]
+    inside_panel = True
+    for node in [button, *button.iterancestors()]:
+        if (node.tag in ('aside', 'footer', 'nav', 'template', 'noscript') or 'hidden' in node.attrib
+                or re.search(r'display\s*:\s*none|visibility\s*:\s*hidden', node.get('style', ''), re.I)):
+            return None
+        if node is panel:
+            inside_panel = False
+        if inside_panel and set(node.get('class', '').split()) & {'item-recommend-tbl', 'image_item_listbox', 'item_detailbox'}:
+            return None
+    statuses = button.xpath('./span[contains(concat(" ",normalize-space(@class)," ")," cart-stat ")]')
+    labels = button.xpath('./span[contains(concat(" ",normalize-space(@class)," ")," cart-txt ")]')
+    if len(statuses) != 1 or len(labels) != 1:
+        return None
+    status, label = clean(statuses[0]), clean(labels[0])
+    if status != 'EOL' or label not in ('取り扱い終了', '取扱終了'):
+        return None
+    return {'source': 'primary_disabled_eol_button', 'canonical_url': page.url,
+            'button_status': status, 'button_text': label, 'button_disabled': True}
+
+
 def parse_product(store: str, page: Page, cfg: dict, discovery: dict | None = None) -> Offer:
     location = urlsplit(page.url)
     # Sofmap redirects unavailable product requests to an HTTP-200 error page.
@@ -214,6 +251,13 @@ def parse_product(store: str, page: Page, cfg: dict, discovery: dict | None = No
         evidence_fields["jan_identity"] = primary_jan
     # Scope selectors to the current product, never scrape a page-wide lowest price.
     if store == "ark":
+        ended = ark_purchase_end(tree, page)
+        if ended:
+            evidence_fields["purchase_availability"] = ended
+            if offer.stock in ("unknown", "out_of_stock"):
+                offer.stock = "out_of_stock"
+            else:
+                offer.issues.append("purchase_availability_conflict_review_needed")
         price_blocks = tree.xpath('//*[@id=$id]/ancestor::li[contains(concat(" ",normalize-space(@class)," ")," itemprice ")][1]', id="item-" + offer.product_id)
         if len(price_blocks) == 1:
             displayed = first(price_blocks[0], './div[contains(concat(" ",normalize-space(@class)," ")," date-diff2 ")]')
