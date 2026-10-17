@@ -36,10 +36,10 @@ def task_order(task: dict) -> tuple:
 
 
 class Collector:
-    def __init__(self, root: Path, store: str, config: dict, run_id: str, client: Client | None = None):
+    def __init__(self, root: Path, store: str, config: dict, run_id: str, client: Client | None = None, *, disk: Store | None = None):
         if store not in STORES:
             raise ValueError("excluded_store")
-        self.disk = Store(root)
+        self.disk = disk if disk is not None else Store(root)
         self.store = store
         self.cfg = config["stores"][store]
         self.config = config
@@ -514,6 +514,60 @@ class Collector:
         self.state["list_pages"] += 1 + bool(source)
         self.state["listed_candidates"] += len(products)
 
+    def attempt(self, task_id: str) -> bool:
+        """Process one existing task; return True when access requires a stop."""
+        task = self.state["queue"][task_id]
+        self.attempted.add(task_id)
+        if task.get("retry_at_epoch_seconds") is not None:
+            self.state["retry_activity"]["retries_started"] += 1
+        try:
+            self.process(task)
+            if task.get("last_error"):
+                self.state["retry_activity"]["recovered_tasks"] += 1
+                self.state.setdefault("recovered_errors", []).append({"task_id": task_id,
+                    "reason": task["last_error"], "attempts": task.get("attempts", 0), "recovered_at": iso()})
+                self.state["errors"] = [e for e in self.state["errors"] if e.get("task_id") != task_id]
+            self.state["done"].append(task_id)
+            del self.state["queue"][task_id]
+        except Exception as exc:
+            task = self.state["queue"][task_id]
+            # Only sanitized error types/codes are persisted; URLs with API
+            # credentials and raw exception messages never enter the feed.
+            reason = str(exc) if isinstance(exc, FetchError) and "http" not in str(exc)[5:] and len(str(exc)) < 100 else type(exc).__name__
+            task.update(attempts=task.get("attempts", 0)+1, last_error=reason, last_attempt_at=iso(),
+                        last_attempt_run_id=self.run_id)
+            task.pop("retry_at_epoch_seconds", None)
+            if transient(reason):
+                task["retry_at_epoch_seconds"] = time.time() + 300
+            # Error counts describe unresolved tasks, not repeated attempts.
+            self.state["errors"] = [e for e in self.state["errors"] if e.get("task_id") != task_id]
+            error = {"task_id": task_id, "reason": reason, "url": task.get("url")}
+            page = getattr(exc, "page", None)
+            if isinstance(exc, ParserError) and isinstance(page, Page):
+                error["response_evidence"] = {
+                    "status": page.status, "method": page.method,
+                    "body_bytes": len(page.body),
+                    "body_sha256": hashlib.sha256(page.body).hexdigest(),
+                    "observed_at": page.observed_at,
+                }
+            self.state["errors"].append(error)
+            if task["type"] == "product":
+                self.complete_comparison_routes(task, reason=reason)
+                for row in self.state["offers"].values():
+                    if canonical(row["url"]) == canonical(task["url"]):
+                        row["issues"] = sorted(set(row.get("issues", []) + ["latest_fetch_failed"]))
+            if self.store == "amazon" and reason == "amazon_access_challenge":
+                page = exc.page if isinstance(exc, FetchError) else None
+                self.state["access_block"] = {
+                    "run_id": self.run_id, "reason": reason, "url": task.get("url"),
+                    "checked_at": page.observed_at if page else iso(),
+                    "body_sha256": hashlib.sha256(page.body).hexdigest() if page else None,
+                }
+                self.save()
+                return True
+        self.save()
+        return False
+
     def collect(self, seconds: int = 2100, review_root: Path = Path("config/flyer_reviews")) -> dict:
         self.seed()
         if self.state.get("access_block", {}).get("run_id") == self.run_id:
@@ -549,54 +603,8 @@ class Collector:
                 self.state["retry_activity"]["wait_seconds"] += delay
                 continue
             task_id, task = select_task(pending, self.state["scheduler"], task_order, utcnow(), self.attempted)
-            self.attempted.add(task_id)
-            if task.get("retry_at_epoch_seconds") is not None:
-                self.state["retry_activity"]["retries_started"] += 1
-            try:
-                self.process(task)
-                if task.get("last_error"):
-                    self.state["retry_activity"]["recovered_tasks"] += 1
-                    self.state.setdefault("recovered_errors", []).append({"task_id": task_id,
-                        "reason": task["last_error"], "attempts": task.get("attempts", 0), "recovered_at": iso()})
-                    self.state["errors"] = [e for e in self.state["errors"] if e.get("task_id") != task_id]
-                self.state["done"].append(task_id)
-                del self.state["queue"][task_id]
-            except Exception as exc:
-                # Only sanitized error types/codes are persisted; URLs with API
-                # credentials and raw exception messages never enter the feed.
-                reason = str(exc) if isinstance(exc, FetchError) and "http" not in str(exc)[5:] and len(str(exc)) < 100 else type(exc).__name__
-                task.update(attempts=task.get("attempts", 0)+1, last_error=reason, last_attempt_at=iso(),
-                            last_attempt_run_id=self.run_id)
-                task.pop("retry_at_epoch_seconds", None)
-                if transient(reason):
-                    task["retry_at_epoch_seconds"] = time.time() + 300
-                # Error counts describe unresolved tasks, not repeated attempts.
-                self.state["errors"] = [e for e in self.state["errors"] if e.get("task_id") != task_id]
-                error = {"task_id": task_id, "reason": reason, "url": task.get("url")}
-                page = getattr(exc, "page", None)
-                if isinstance(exc, ParserError) and isinstance(page, Page):
-                    error["response_evidence"] = {
-                        "status": page.status, "method": page.method,
-                        "body_bytes": len(page.body),
-                        "body_sha256": hashlib.sha256(page.body).hexdigest(),
-                        "observed_at": page.observed_at,
-                    }
-                self.state["errors"].append(error)
-                if task["type"] == "product":
-                    self.complete_comparison_routes(task, reason=reason)
-                    for row in self.state["offers"].values():
-                        if canonical(row["url"]) == canonical(task["url"]):
-                            row["issues"] = sorted(set(row.get("issues", []) + ["latest_fetch_failed"]))
-                if self.store == "amazon" and reason == "amazon_access_challenge":
-                    page = exc.page if isinstance(exc, FetchError) else None
-                    self.state["access_block"] = {
-                        "run_id": self.run_id, "reason": reason, "url": task.get("url"),
-                        "checked_at": page.observed_at if page else iso(),
-                        "body_sha256": hashlib.sha256(page.body).hexdigest() if page else None,
-                    }
-                    self.save()
-                    break
-            self.save()
+            if self.attempt(task_id):
+                break
         if self.store == "koubou":
             try:
                 offers, metadata = collect_flyer(self.client, self.disk, self.config["flyer"], review_root)
