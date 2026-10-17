@@ -98,6 +98,19 @@ class Channel(unittest.TestCase):
         with self.assertRaisesRegex(R.Rejected,'credential_host'):
             N.request('https://example.com/',token='synthetic')
 
+    def test_mailbox_reads_latest_ref_then_immutable_packet(self):
+        packet=self.packet()
+        with patch.object(N,'request',side_effect=[R.encode({'object':{'type':'commit','sha':'c'*40}}),R.encode(packet)]) as fetch:
+            self.assertEqual(N.mailbox_packet(),packet)
+        self.assertEqual(fetch.call_args_list[0].args,(f'https://api.github.com/repos/{N.REPOSITORY}/git/ref/heads/{N.MAILBOX_BRANCH}',))
+        self.assertEqual(fetch.call_args_list[1].args,(f'https://raw.githubusercontent.com/{N.REPOSITORY}/{"c"*40}/{N.MAILBOX_PATH}',))
+
+    def test_malformed_ref_never_builds_an_arbitrary_download_url(self):
+        for value in ['../other','a'*39,'A'*40,'https://example.com/']:
+            with patch.object(N,'request',return_value=R.encode({'object':{'type':'commit','sha':value}})) as fetch:
+                with self.assertRaisesRegex(R.Rejected,'mailbox_ref'):N.mailbox_packet()
+            self.assertEqual(fetch.call_count,1)
+
     def test_extra_secret_fields_and_whitespace_token_rejected(self):
         self.credentials['repository_token']='synthetic'
         with self.assertRaisesRegex(R.Rejected,'credential_schema'):self.open()

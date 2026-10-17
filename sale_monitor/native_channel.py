@@ -50,7 +50,8 @@ class NoRedirect(HTTPRedirectHandler):
 
 
 def request(url, *, data=None, token=None, method=None, limit=MAX_PACKET):
-    headers = {'User-Agent': 'pc-sale-monitor-native-validation', 'Accept': 'application/vnd.github+json'}
+    headers = {'User-Agent': 'pc-sale-monitor-native-validation', 'Accept': 'application/vnd.github+json',
+               'Cache-Control': 'no-cache'}
     if token:
         R.require(urlsplit(url).hostname == 'api.github.com', 'credential_host')
         headers['Authorization'] = 'Bearer ' + token
@@ -61,6 +62,16 @@ def request(url, *, data=None, token=None, method=None, limit=MAX_PACKET):
         raw = response.read(limit + 1)
     R.require(len(raw) <= limit, 'download_too_large')
     return raw
+
+
+def mailbox_packet():
+    # Raw branch URLs can serve a previous lease for several minutes. Resolve
+    # the authoritative ref first, then read the immutable object. This public
+    # API needs no stored GitHub credential; callers must respect its quota.
+    ref = json.loads(request(f'https://api.github.com/repos/{REPOSITORY}/git/ref/heads/{MAILBOX_BRANCH}'))
+    commit = ref['object']['sha']
+    R.require(ref['object']['type']=='commit' and re.fullmatch('[0-9a-f]{40}',commit), 'mailbox_ref')
+    return json.loads(request(f'https://raw.githubusercontent.com/{REPOSITORY}/{commit}/{MAILBOX_PATH}'))
 
 
 def dpapi(raw, *, decrypt=False):
@@ -249,7 +260,7 @@ def work(args):
     signing, exchange = load_keys(args.key)
     R.require(signing.public_key().public_bytes_raw().hex()==policy['public_key_hex'] and
               exchange.public_key().public_bytes_raw().hex()==policy['exchange_key_hex'], 'registered_key_mismatch')
-    packet = json.loads(request(f'https://raw.githubusercontent.com/{REPOSITORY}/{MAILBOX_BRANCH}/{MAILBOX_PATH}'))
+    packet = mailbox_packet()
     metadata, credentials = open_packet(packet, exchange, policy)
     lease = metadata['lease']
     config = json.loads(Path('config/sources.json').read_bytes())

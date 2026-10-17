@@ -16,11 +16,15 @@ remain mandatory. A successful discovery receipt is not a verified price.
 3. A separate `native-worker-mailbox` branch holds the lease and an encrypted
    artifact runtime credential. X25519 + HKDF-SHA256 + AES-GCM binds the ciphertext
    to all lease metadata. The repository write token stays in the controller job.
-4. A one-shot native worker fetches the mailbox over HTTPS. A local policy must
+4. A one-shot native worker resolves the mailbox ref using GitHub's public API,
+   then reads that immutable commit over HTTPS. Raw branch URLs may cache an
+   earlier lease for minutes. A local policy must
    explicitly approve the source commit and complete Python runtime hash. It
    never checks out code, installs packages, or runs commands from the mailbox.
    It reads the immutable data commit, compares state/config hashes and each task,
    then uses the ordinary retailer client. Requests retain its normal cooldowns.
+   Mailbox polling must respect GitHub's anonymous API quota; an unavailable or
+   rate-limited lookup does not authorize reuse of an older lease.
 5. The worker signs immutable response checkpoints with Ed25519, and uploads the
    last completed checkpoint using the official `@actions/artifact` library.
    The child process receives only the artifact credential. SDK diagnostics are
