@@ -6,7 +6,7 @@ permissions:
   contents: read
 jobs:
   probe:
-    if: github.event.label.name == 'run-yahoo-public-probe' && github.event.pull_request.head.repo.full_name == github.repository
+    if: (github.event.label.name == 'run-yahoo-public-probe' || github.event.label.name == 'run-yahoo-form-probe') && github.event.pull_request.head.repo.full_name == github.repository
     runs-on: ubuntu-latest
     timeout-minutes: 6
     steps:
@@ -17,10 +17,16 @@ jobs:
         with:
           python-version: '3.12'
       - run: pip install -e .
-      - name: Read six public pages without changing production state
+      - name: Read public pages without changing production state
         env:
           SOURCE_COMMIT: ${{ github.event.pull_request.head.sha }}
-        run: python -B -X utf8 -m tools.yahoo_public_probe --output yahoo-public-probe
+          FORM_ENTRY_ONLY: ${{ github.event.label.name == 'run-yahoo-form-probe' }}
+        run: |
+          if [ "$FORM_ENTRY_ONLY" = 'true' ]; then
+            python -B -X utf8 -m tools.yahoo_public_probe --output yahoo-public-probe --form-entry-only
+          else
+            python -B -X utf8 -m tools.yahoo_public_probe --output yahoo-public-probe
+          fi
       - uses: actions/upload-artifact@v4
         if: always()
         with:
