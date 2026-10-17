@@ -18,7 +18,7 @@ from .parsing import canonical, confirmed_empty_search, discover, parse_product,
 from .storage import Store
 from .scheduling import plan_comparison_refresh, select_task
 from .retrying import runnable, transient
-from . import koubou_search, sofmap_search, tsukumo_shipping, comparison_routing, comparison_priority
+from . import koubou_search, sofmap_search, tsukumo_shipping, comparison_routing, comparison_priority, yahoo_public
 
 
 def task_order(task: dict) -> tuple:
@@ -28,9 +28,9 @@ def task_order(task: dict) -> tuple:
         # priority. Descendants keep the original request time so a comparison
         # can finish without moving to the back of the next cycle's queue.
         stage = 2
-        step = {"product": 0, "list": 1, "yahoo": 1, "koubou_search": 1, "search": 2}.get(kind, 3)
+        step = {"product": 0, "list": 1, "yahoo": 1, "yahoo_public_search": 1, "koubou_search": 1, "search": 2}.get(kind, 3)
     else:
-        stage = 0 if kind in ("list", "dospara_list", "amazon_discovery") else 1
+        stage = 0 if kind in ("list", "dospara_list", "amazon_discovery", "yahoo_public_search") else 1
         step = 0
     return stage, task.get("priority", 3), task["created_at"], step
 
@@ -319,6 +319,29 @@ class Collector:
         self.state["list_pages"] += 1
         self.state["listed_candidates"] += len(products)
 
+    def process_yahoo_public(self, task: dict):
+        number = task.get("start", 1)
+        # API offsets and public HTML page numbers are different cursors.
+        if task["type"] == "yahoo" and number != 1:
+            raise FetchError("yahoo_api_cursor_requires_configuration")
+        url = task.get("url") or yahoo_public.search_url(task["query"], number)
+        page = self.page(url, allow_browser=False)
+        products, next_url, details = yahoo_public.parse_search(page, task["query"], number,
+            comparison=task.get("kind") == "comparison")
+        origin = {"created_at": task.get("created_at") or iso(), "priority": task.get("priority", 3),
+                  **comparison_priority.origin(task, self.store)}
+        for product in products:
+            self.enqueue({"type": "product", **product, **origin})
+        if next_url:
+            self.enqueue({"type": "yahoo_public_search", "query": task["query"], "start": number + 1,
+                          "url": next_url, "kind": task.get("kind", "sale"), **origin})
+        self.state.setdefault("yahoo_public_searches", {})[url] = {
+            **details, "observed_run_id": self.run_id, "created_at": origin["created_at"]}
+        self.state["list_pages"] += 1
+        self.state["listed_candidates"] += len(products)
+        if details["provider_window_truncated"]:
+            self.state["discovery_gaps"].append({"reason": "yahoo_public_provider_window", **details})
+
     def process(self, task: dict):
         kind = task["type"]
         if self.store == "koubou" and task.get("kind") == "comparison":
@@ -352,6 +375,9 @@ class Collector:
             for candidate in candidates:
                 self.enqueue({"type": "product", **candidate})
         elif kind == "yahoo":
+            if not os.environ.get("YAHOO_CLIENT_ID") and self.cfg.get("public_html_fallback"):
+                self.process_yahoo_public(task)
+                return
             offers, next_page, details = adapters.yahoo_page(self.client, task["query"], task.get("start", 1), comparison=task.get("kind") == "comparison")
             for offer in offers:
                 self.record(offer)
@@ -361,6 +387,8 @@ class Collector:
                 self.state["discovery_gaps"].append({"reason": "yahoo_provider_window", "query": task["query"], **details})
             if next_page:
                 self.enqueue({**task, "start": next_page})
+        elif kind == "yahoo_public_search" and self.store == "yahoo":
+            self.process_yahoo_public(task)
         elif kind == "search":
             home = self.page(self.cfg["seed_urls"][0])
             url = search_form(home, task["query"])
@@ -430,6 +458,8 @@ class Collector:
         elif kind == "product":
             if self.store == "amazon":
                 offer = adapters.amazon_product(self.client, task)
+            elif self.store == "yahoo":
+                offer = yahoo_public.parse_product(self.page(task["url"], allow_browser=False), task)
             else:
                 page = self.page(task["url"])
                 offer = parse_product(self.store, page, self.cfg, task)
@@ -494,7 +524,7 @@ class Collector:
         if self.store == "yahoo":
             self.state["errors"] = [e for e in self.state["errors"]
                                     if e.get("reason") != "YAHOO_CLIENT_ID_missing"]
-            if not os.environ.get("YAHOO_CLIENT_ID"):
+            if not os.environ.get("YAHOO_CLIENT_ID") and not self.cfg.get("public_html_fallback"):
                 self.state["status"] = "configuration_needed"
                 self.state["errors"].append({"reason": "YAHOO_CLIENT_ID_missing"})
                 self.save()
