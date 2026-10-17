@@ -7,7 +7,7 @@ def queries(task, store):
         return []
     saved = task.get('comparison_queries', [])
     values = set(q for q in saved if isinstance(q, str) and q) if isinstance(saved, list) else set()
-    if task.get('type') in ('search', 'koubou_search', 'yahoo') and isinstance(task.get('query'), str):
+    if task.get('type') in ('search', 'koubou_search', 'yahoo', 'yahoo_public_search') and isinstance(task.get('query'), str):
         values.add(task['query'])
     if store == 'sofmap':
         query = task.get('search_query') or task.get('query')
