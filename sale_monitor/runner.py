@@ -286,7 +286,7 @@ class Collector:
                 try:
                     self.pages[url] = self.client.get(url)
                 except FetchError as exc:
-                    if not allow_browser or str(exc) == "rate_limited_retry_later" or str(exc).startswith("transport_retry_later:") or (exc.page is not None and confirmed_empty_search(self.store, exc.page)) or not self.cfg.get("browser_fallback"):
+                    if not allow_browser or str(exc) in ("rate_limited_retry_later", "store_maintenance") or str(exc).startswith(("transport_retry_later:", "access_retry_later:")) or (exc.page is not None and confirmed_empty_search(self.store, exc.page)) or not self.cfg.get("browser_fallback"):
                         raise
                     self.pages[url] = self.client.rendered(url)
             except Exception as exc:
@@ -544,7 +544,7 @@ class Collector:
                 self.state["errors"] = [e for e in self.state["errors"] if e.get("task_id") != task_id]
                 error = {"task_id": task_id, "reason": reason, "url": task.get("url")}
                 page = getattr(exc, "page", None)
-                if isinstance(exc, ParserError) and isinstance(page, Page):
+                if (isinstance(exc, ParserError) or reason == "store_maintenance") and isinstance(page, Page):
                     error["response_evidence"] = {
                         "status": page.status, "method": page.method,
                         "body_bytes": len(page.body),
