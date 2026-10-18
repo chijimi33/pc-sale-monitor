@@ -156,10 +156,10 @@ def validate_metadata(metadata, policy, *, now=None):
     R.require(all(R.supported_task('yahoo', task) and (not task.get('url') or R.valid_url(task['url'])) for task in lease['tasks'].values()), 'unsupported_task')
 
 
-def open_packet(packet, private, policy, *, now=None):
+def open_packet(packet, private, policy, *, now=None, validator=validate_metadata):
     R.require(set(packet) == {'metadata','ephemeral','nonce','ciphertext'} and len(R.encode(packet)) <= MAX_PACKET, 'packet_schema')
     metadata = packet['metadata']
-    validate_metadata(metadata, policy, now=now)
+    validator(metadata, policy, now=now)
     try:
         nonce = bytes.fromhex(packet['nonce'])
         R.require(len(nonce) == 12, 'nonce_size')
@@ -210,7 +210,7 @@ def publish_packet(packet):
     except HTTPError as error:
         if error.code != 404:
             raise
-    body = {'message':'Issue isolated native receipt lease', 'branch':MAILBOX_BRANCH,
+    body = {'message':'Issue native collection session' if packet['metadata'].get('version')==2 else 'Issue isolated native receipt lease', 'branch':MAILBOX_BRANCH,
             'content':base64.b64encode(R.encode(packet)+b'\n').decode()}
     if previous:
         body['sha'] = previous

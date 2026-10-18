@@ -5,7 +5,7 @@ on:
     - cron: '17 */4 * * *'
   push:
     branches: [main]
-    paths: ['sale_monitor/**', 'config/**', 'scripts/**', '!scripts/qa/**', 'pyproject.toml', '.github/workflows/monitor.yml']
+    paths: ['sale_monitor/**', 'config/**', 'scripts/**', '!scripts/qa/**', 'tools/native-channel/**', 'pyproject.toml', '.github/workflows/monitor.yml']
 
 permissions:
   contents: read
@@ -30,10 +30,20 @@ jobs:
     needs: test
     runs-on: ubuntu-latest
     timeout-minutes: 45
+    outputs:
+      dospara: ${{ steps.receipt.outputs.dospara }}
+      ark: ${{ steps.receipt.outputs.ark }}
+      tsukumo: ${{ steps.receipt.outputs.tsukumo }}
+      sofmap: ${{ steps.receipt.outputs.sofmap }}
+      joshin: ${{ steps.receipt.outputs.joshin }}
+      bic: ${{ steps.receipt.outputs.bic }}
+      koubou: ${{ steps.receipt.outputs.koubou }}
+      yodobashi: ${{ steps.receipt.outputs.yodobashi }}
+      amazon: ${{ steps.receipt.outputs.amazon }}
     strategy:
       fail-fast: false
       matrix:
-        store: [dospara, ark, tsukumo, sofmap, joshin, bic, koubou, yodobashi, yahoo, amazon]
+        store: [dospara, ark, tsukumo, sofmap, joshin, bic, koubou, yodobashi, amazon]
     env:
       GITHUB_TOKEN: ${{ github.token }}
       YAHOO_CLIENT_ID: ${{ secrets.YAHOO_CLIENT_ID }}
@@ -58,15 +68,88 @@ jobs:
         if: always()
         run: python scripts/export_store.py --store ${{ matrix.store }}
       - uses: actions/upload-artifact@v4
+        id: upload
         if: always()
         with:
           name: state-${{ matrix.store }}
           path: outgoing/
           retention-days: 14
           if-no-files-found: warn
+      - name: Bind artifact ID to its trusted collection job
+        id: receipt
+        if: always() && steps.upload.outputs.artifact-id != ''
+        env:
+          STORE: ${{ matrix.store }}
+          ARTIFACT_ID: ${{ steps.upload.outputs.artifact-id }}
+        run: python scripts/native_artifact_ids.py record
+
+  yahoo:
+    needs: test
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    concurrency:
+      group: native-yahoo-worker
+      queue: max
+      cancel-in-progress: false
+    permissions:
+      contents: write
+    outputs:
+      yahoo: ${{ steps.upload.outputs.artifact-id }}
+    env:
+      GITHUB_TOKEN: ${{ github.token }}
+      SOURCE_COMMIT: ${{ github.sha }}
+      RUN_ID: ${{ github.run_id }}-${{ github.run_attempt }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - run: pip install -e .
+      - run: npm ci --ignore-scripts --prefix tools/native-channel
+      - run: python scripts/state_branch.py prepare
+      - name: Select configured Yahoo collection mode
+        id: mode
+        run: python scripts/native_artifact_ids.py mode
+      - name: Collect and verify native Yahoo batches
+        if: steps.mode.outputs.native == 'true'
+        uses: ./tools/native-channel
+        env:
+          NATIVE_SESSION_MODE: collect
+      - name: Collect configured Yahoo API path
+        if: steps.mode.outputs.native != 'true'
+        env:
+          YAHOO_CLIENT_ID: ${{ secrets.YAHOO_CLIENT_ID }}
+        run: python -m sale_monitor.cli collect --store yahoo --state state-repo/state --run-id "$RUN_ID" --seconds 2100
+      - name: Export API collection
+        if: always() && steps.mode.outputs.native == 'false'
+        run: python scripts/export_store.py --store yahoo
+      - uses: actions/upload-artifact@v4
+        id: upload
+        if: always()
+        with:
+          name: state-yahoo
+          path: outgoing/
+          retention-days: 14
+          if-no-files-found: warn
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: native-session-evidence
+          path: |
+            native-session/control.json
+            native-session/receiver.json
+            native-session/request.json
+            native-session/receipts/*-artifact.json
+          retention-days: 7
+          if-no-files-found: warn
 
   publish:
-    needs: [test, collect]
+    needs: [test, collect, yahoo]
     if: always() && needs.test.result == 'success'
     runs-on: ubuntu-latest
     timeout-minutes: 15
@@ -83,14 +166,25 @@ jobs:
           python-version: '3.12'
       - run: pip install -e .
       - run: python scripts/state_branch.py prepare
+      - name: Select only artifacts returned by trusted collection jobs
+        id: artifacts
+        env:
+          COLLECTION_OUTPUTS: ${{ toJSON(needs.collect.outputs) }}
+          YAHOO_OUTPUTS: ${{ toJSON(needs.yahoo.outputs) }}
+        run: python scripts/native_artifact_ids.py select
       - uses: actions/download-artifact@v4
+        if: steps.artifacts.outputs.ids != ''
         continue-on-error: true
         with:
-          pattern: state-*
+          artifact-ids: ${{ steps.artifacts.outputs.ids }}
           path: incoming
           merge-multiple: true
+      - name: Verify controller key against the real mailbox branch
+        if: hashFiles('incoming/native/yahoo.json') != ''
+        continue-on-error: true
+        run: python -m sale_monitor.native_operations trust
       - name: Checkpoint collected state before aggregation
-        run: python -m sale_monitor.cli checkpoint --incoming incoming --state state-repo/state --run-id "$RUN_ID"
+        run: python -m sale_monitor.cli checkpoint --incoming incoming --state state-repo/state --run-id "$RUN_ID" --native-trust native-trust.json --source-sha "$GITHUB_SHA" --data-sha "$(git -C state-repo rev-parse HEAD)"
       - name: Save collection progress without changing public results
         run: python scripts/state_branch.py publish --state-only
       - name: Verify run events for validation

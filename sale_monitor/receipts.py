@@ -17,10 +17,14 @@ from .http import Page, FetchError, Client
 from .retrying import runnable
 from .models import Offer, timestamp, iso, utcnow, allowed_url
 from .runner import Collector
+from .runner import task_order
+from .scheduling import select_task
+from .http_evidence import ResponseEvidence
 from . import yahoo_public
 
 DOMAIN=b'pc-sale-monitor.isolated-native-receipt.v1\x00'
 SCOPE='isolated_native_receipt_no_scheduled_credit'
+COLLECTION_SCOPE='native_collection_receipt_provenance_required'
 ERRORS={'RemoteDisconnected','TimeoutError','ConnectionResetError','ConnectionAbortedError',
         'ConnectionRefusedError','BrokenPipeError','IncompleteRead','URLError','OSError','Error',
         'http_403','http_404','http_429','http_500','http_502','http_503','http_504',
@@ -79,10 +83,12 @@ def transaction(path,update,hook=None):
         finally:
             if tmp.exists():tmp.unlink()
 
-def receiver(state,config,source_sha,data_sha,run_id,workers):
-    require(run_id.startswith('isolated-native-'),'isolated_run_required')
+def receiver(state,config,source_sha,data_sha,run_id,workers,*,scope=SCOPE):
+    require(scope in {SCOPE,COLLECTION_SCOPE},'receipt_scope')
+    require(run_id.startswith('isolated-native-') if scope==SCOPE else bool(re.fullmatch(r'[0-9]+-[0-9]+',run_id)),
+            'isolated_run_required' if scope==SCOPE else 'collection_run_required')
     require(all(re.fullmatch('[0-9a-f]{40}',s) for s in [source_sha,data_sha]),'invalid_source_binding')
-    return {'scope':SCOPE,'state':deepcopy(state),'config':deepcopy(config),'source_sha':source_sha,
+    return {'scope':scope,'state':deepcopy(state),'config':deepcopy(config),'source_sha':source_sha,
             'data_sha':data_sha,'runtime_sha256':runtime_hash(),'active_run_id':run_id,
             'workers':deepcopy(workers),'leases':{},'receipts':{}}
 
@@ -110,29 +116,42 @@ def supported_task(store,task):
     except (KeyError,ValueError,TypeError,FetchError):return False
 
 
-def issue(path,worker_id,task_ids,*,now=None,lifetime=timedelta(minutes=10)):
+def issue(path,worker_id,task_ids=None,*,now=None,lifetime=timedelta(minutes=10)):
     now=now or utcnow()
     require(0<lifetime.total_seconds()<=600,'invalid_lifetime')
-    require(isinstance(task_ids,list) and 1<=len(task_ids)<=4 and len(set(task_ids))==len(task_ids),'invalid_selection')
+    require(task_ids is None or (isinstance(task_ids,list) and 1<=len(task_ids)<=4 and len(set(task_ids))==len(task_ids)),'invalid_selection')
     def update(r):
         worker=r['workers'].get(worker_id);store=r['state']['store']
         require(worker and worker.get('enabled') is True and store in worker['stores'],'worker_not_authorized')
-        require(r['scope']==SCOPE and r['runtime_sha256']==runtime_hash(),'source_runtime_mismatch')
+        require(r['scope'] in {SCOPE,COLLECTION_SCOPE} and r['runtime_sha256']==runtime_hash(),'source_runtime_mismatch')
+        require(not any(k not in r['receipts'] and k not in r.get('abandoned',{}) and moment(v['expires_at'])>now
+                        for k,v in r['leases'].items()),'lease_in_flight')
         supported_runtime(store,r['config'])
         c=collector(r['state'],r['config'],r['active_run_id'],Client())
         ready,_=runnable(c.state['queue'],c.attempted,c.cfg,c.client,{},now.timestamp())
         ready_ids={key for key,task in ready}
-        require(set(task_ids)<=ready_ids,'tasks_waiting_or_already_attempted')
+        selected=task_ids
+        traces=[]
+        if selected is None:
+            selected=[];scheduler=deepcopy(c.state['scheduler'])
+            pending=[pair for pair in ready if supported_task(store,pair[1])]
+            for _ in range(min(4,len(pending))):
+                key,_=select_task(pending,scheduler,task_order,now,c.attempted)
+                selected.append(key);traces.append(deepcopy(scheduler))
+                pending=[pair for pair in pending if pair[0]!=key]
+        require(bool(selected),'no_runnable_tasks')
+        require(set(selected)<=ready_ids,'tasks_waiting_or_already_attempted')
         tasks={}
-        for key in task_ids:
+        for key in selected:
             task=r['state']['queue'].get(key)
             require(task and supported_task(store,task),'unsupported_task')
             require(not task.get('url') or valid_url(task['url']),'invalid_task_url')
             tasks[key]=deepcopy(task)
-        lease={'id':uuid.uuid4().hex,'worker_id':worker_id,'scope':SCOPE,'store':store,
+        lease={'id':uuid.uuid4().hex,'worker_id':worker_id,'scope':r['scope'],'store':store,
                'source_sha':r['source_sha'],'data_sha':r['data_sha'],'runtime_sha256':r['runtime_sha256'],
                'config_sha256':sha(encode(r['config'])),'base_state_sha256':sha(encode(r['state'])),
-               'run_id':r['active_run_id'],'created_at':iso(now),'expires_at':iso(now+lifetime),'tasks':tasks,'task_order':list(task_ids)}
+               'run_id':r['active_run_id'],'created_at':iso(now),'expires_at':iso(now+lifetime),'tasks':tasks,'task_order':list(selected)}
+        if traces:lease['scheduler_after']=traces
         r['leases'][lease['id']]=lease
         return r,deepcopy(lease)
     return transaction(path,update)
@@ -197,7 +216,7 @@ def _checkpoint(root,lease,started,entries,actions,key):
     """An immutable directory is visible only after all signed bytes are saved."""
     number=len(entries);final=root/f'checkpoint-{number:04d}'
     temporary=root/('pending-'+uuid.uuid4().hex);temporary.mkdir()
-    manifest={'schema_version':1,'scope':SCOPE,'lease':deepcopy(lease),'started_at':started,
+    manifest={'schema_version':1,'scope':lease['scope'],'lease':deepcopy(lease),'started_at':started,
               'ended_at':iso(),'entries':deepcopy(entries),'actions':deepcopy(actions)}
     raw=encode(manifest)
     try:
@@ -223,7 +242,10 @@ def produce(bundle,lease,state,config,client,private_key,*,limit=None,on_checkpo
     require(client.count==0,'client_must_be_fresh')
     tape=RecordingClient(client,bundle/'working');c=collector(state,config,lease['run_id'],tape)
     entries=[];started=iso();latest=None;pin=None
-    for key in lease['task_order'][:limit]:
+    for index,key in enumerate(lease['task_order'][:limit]):
+        # An interrupted batch advances only the acknowledged prefix.
+        if utcnow()>=moment(lease['expires_at']):break
+        if 'scheduler_after' in lease:c.state['scheduler']=deepcopy(lease['scheduler_after'][index])
         begin=len(tape.actions);c.attempt(key)
         entries.append({'task_id':key,'begin':begin,'end':len(tape.actions)})
         latest,pin=_checkpoint(bundle,lease,started,entries,tape.actions,private_key)
@@ -257,7 +279,7 @@ def read_bundle(bundle,r,now):
     bundle=Path(bundle);require(not bundle.is_symlink(),'artifact_path_escape')
     p=bundle/'manifest.json';require(not p.is_symlink() and p.stat().st_size<=500_000,'manifest_size_or_path')
     raw=p.read_bytes();m=json.loads(raw)
-    require(set(m)=={'schema_version','scope','lease','started_at','ended_at','entries','actions'} and m['schema_version']==1 and m['scope']==SCOPE,'manifest_schema')
+    require(set(m)=={'schema_version','scope','lease','started_at','ended_at','entries','actions'} and m['schema_version']==1 and m['scope']==r['scope'],'manifest_schema')
     lease=m['lease'];known=r['leases'].get(lease.get('id'));require(known==lease,'lease_mismatch')
     worker=r['workers'].get(lease['worker_id'])
     require(worker and worker.get('enabled') is True and lease['store'] in worker['stores'],'worker_not_authorized')
@@ -268,7 +290,8 @@ def read_bundle(bundle,r,now):
     if prior:
         require(prior['manifest_sha256']==sha(raw),'lease_already_consumed')
         return None,{'status':'already_received','lease_id':lease['id'],'scheduled_credit':False}
-    require(r['scope']==SCOPE and r['active_run_id']==lease['run_id'],'run_mismatch')
+    require(lease['id'] not in r.get('abandoned',{}),'lease_abandoned')
+    require(r['scope'] in {SCOPE,COLLECTION_SCOPE} and r['active_run_id']==lease['run_id'],'run_mismatch')
     require(r['source_sha']==lease['source_sha'] and r['data_sha']==lease['data_sha'],'source_data_mismatch')
     require(r['runtime_sha256']==lease['runtime_sha256']==runtime_hash(),'source_runtime_mismatch')
     require(sha(encode(r['config']))==lease['config_sha256'],'config_changed')
@@ -308,20 +331,46 @@ def read_bundle(bundle,r,now):
         body=f.read_bytes();require(sha(body)==p['sha256'],'body_hash_mismatch');bodies[p['path']]=body
     require({p.name for p in bundle.iterdir()}==set(bodies)|{'manifest.json','signature.bin'},'unexpected_artifact_files')
     replay=ReplayClient(actions,bodies);c=collector(r['state'],r['config'],lease['run_id'],replay);results=[]
-    for e in entries:
+    for index,e in enumerate(entries):
+        if 'scheduler_after' in lease:c.state['scheduler']=deepcopy(lease['scheduler_after'][index])
         replay.end=e['end']
         try:c.attempt(e['task_id'])
         except InvalidTape as exc:raise Rejected(str(exc)) from None
         require(replay.index==e['end'],'unused_dependency')
         task=c.state['queue'].get(e['task_id'])
         results.append({'task_id':e['task_id'],'result':'retry' if task else 'complete','reason':task.get('last_error') if task else None})
-    c.state.update(status='isolated_native_receipt',pending_count=len(c.state['queue']),cycle_complete=not c.state['queue'])
+    c.state.update(status='isolated_native_receipt' if r['scope']==SCOPE else 'native_partial',pending_count=len(c.state['queue']),cycle_complete=not c.state['queue'])
+    if r['scope']==COLLECTION_SCOPE and r['state'].get('started_at'):
+        c.state['started_at']=r['state']['started_at']
     receipt={'status':'accepted','lease_id':lease['id'],'manifest_sha256':sha(raw),'worker_id':lease['worker_id'],
              'run_id':lease['run_id'],'received_at':iso(now),'requests':replay.count,'results':results,
              'successes':sum(x['result']=='complete' for x in results),'failures':sum(x['result']=='retry' for x in results),
              'unattempted':len(lease['tasks'])-len(entries),'scheduled_credit':False,'formal_audit_added':False}
+    # Each tape is cumulative within a lease. Add only its final snapshot once.
+    receipt['http_evidence']=deepcopy(actions[-1]['evidence']) if actions else ResponseEvidence().snapshot()
     result=deepcopy(r);result['state']=c.state;result['receipts'][lease['id']]=receipt
+    if r['scope']==COLLECTION_SCOPE:
+        apply_totals(result)
     return result,receipt
+
+
+def apply_totals(receiver):
+    evidence=ResponseEvidence().snapshot()
+    evidence.update(scope='accepted_native_receipts; missing_receipts_excluded',run_id=receiver['active_run_id'])
+    receipts=list(receiver['receipts'].values())
+    if receipts:evidence['started_at']=min(item['http_evidence']['started_at'] for item in receipts)
+    for receipt in receipts:
+        last=receipt['http_evidence']
+        for category in ('response_status_counts','exception_counts'):
+            for method,counts in last[category].items():
+                for key,count in counts.items():
+                    bucket=evidence[category][method];bucket[key]=bucket.get(key,0)+count
+        evidence['failure_observations']+=last['failure_observations']
+        evidence['failure_samples'].extend(last['failure_samples'])
+    evidence['failure_samples']=evidence['failure_samples'][-12:]
+    evidence['omitted_failure_samples']=evidence['failure_observations']-len(evidence['failure_samples'])
+    state=receiver['state'];state['http_evidence']=evidence
+    state['request_count']=sum(item['requests'] for item in receipts)
 
 def receive(bundle,path,*,now=None,hook=None):
     now=now or utcnow()

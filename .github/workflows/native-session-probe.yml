@@ -1,0 +1,64 @@
+name: Isolated native session and publication validation
+on:
+  pull_request:
+    types: [labeled]
+permissions:
+  contents: read
+concurrency:
+  group: native-yahoo-worker
+  queue: max
+  cancel-in-progress: false
+jobs:
+  session:
+    if: github.event.label.name == 'run-native-session-probe' && github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    permissions:
+      contents: write
+    env:
+      SOURCE_COMMIT: ${{ github.event.pull_request.head.sha }}
+      GITHUB_TOKEN: ${{ github.token }}
+      RUN_ID: ${{ github.run_id }}-${{ github.run_attempt }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - run: pip install -e .
+      - run: npm ci --ignore-scripts --prefix tools/native-channel
+      - run: node --test tools/native-channel/session.test.mjs
+      - run: python scripts/state_branch.py prepare
+      - name: Preserve original state for isolated publisher check
+        run: |
+          mkdir -p publication-check/stores
+          cp state-repo/state/stores/yahoo.json publication-check/stores/yahoo.json
+      - name: Exercise the production protocol without publishing state
+        uses: ./tools/native-channel
+        env:
+          NATIVE_SESSION_MODE: collect
+          NATIVE_SESSION_SECONDS: '2100'
+          NATIVE_SESSION_BATCHES: '200'
+      - name: Authenticate controller key from real mailbox history
+        run: python -m sale_monitor.native_operations trust --incoming outgoing
+      - name: Verify publisher acceptance and repeat delivery on a copy
+        run: python scripts/check_native_publication.py
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: native-session-validation-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            native-session/control.json
+            native-session/receiver.json
+            native-session/request.json
+            native-session/receipts/*-artifact.json
+            native-session/publication-check.json
+            outgoing/
+            native-trust.json
+          retention-days: 7
+          if-no-files-found: warn

@@ -19,6 +19,9 @@ def main(argv=None):
     parser.add_argument("--config", type=Path, default=Path("config/sources.json"))
     parser.add_argument("--store", choices=STORES)
     parser.add_argument("--incoming", type=Path)
+    parser.add_argument("--native-trust", type=Path)
+    parser.add_argument("--source-sha")
+    parser.add_argument("--data-sha")
     parser.add_argument("--seconds", type=int, default=2100, help="Runner時間制限。中断位置は永続化し次回再開。Web呼出数の上限ではない。")
     parser.add_argument("--run-id", default=utcnow().strftime("%Y%m%dT%H%M%SZ"))
     parser.add_argument("--event-id", action="append", default=[])
@@ -43,9 +46,15 @@ def main(argv=None):
     elif args.command == "checkpoint":
         if args.incoming is None:
             parser.error("checkpoint requires --incoming")
-        print(json.dumps(checkpoint(args.state, args.incoming, args.run_id), ensure_ascii=False))
+        config = read_json(args.config, {})
+        required = config.get("stores", {}).get("yahoo", {}).get("native_collection") is True
+        trust = read_json(args.native_trust, None) if args.native_trust else None
+        print(json.dumps(checkpoint(args.state, args.incoming, args.run_id, native_required=required,
+            native_trust=trust, source_sha=args.source_sha, data_sha=args.data_sha), ensure_ascii=False))
     elif args.command == "aggregate":
         if args.incoming:
+            if read_json(args.config, {}).get("stores", {}).get("yahoo", {}).get("native_collection") is True:
+                parser.error("native collection requires authenticated checkpoint before aggregate")
             merge_incoming(args.state, args.incoming)
         result = aggregate(args.state, args.public, args.run_id)
         print(json.dumps({"run_id": args.run_id, "complete_stores": result["complete_stores"], "notifications": result["notification_count"], "review": result["review_count"]}))

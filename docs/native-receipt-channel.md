@@ -1,10 +1,57 @@
-# Native receipt channel: isolated validation
+# Native receipt channel
 
-This branch connects the signed native receipt implementation to a real GitHub
-Actions job. It does not change the four-hour production workflow, publish to
-`monitor-data`, run a self-hosted Actions runner, enable Qwen, or install a local
-scheduled task. The source/config/data/run bindings and strict product checks
-remain mandatory. A successful discovery receipt is not a verified price.
+The four-hour workflow has a dedicated Yahoo controller that delegates public
+requests to fixed, locally approved Windows code. GitHub owns the queue, reparses
+signed response bodies, and publishes verified state through the existing global
+state-writer concurrency group. The standalone validation workflows never publish
+`monitor-data`. Neither the channel nor CI success enables Qwen. Deployment and
+genuine scheduled validation must be recorded separately from code/test results.
+A successful discovery receipt is not a verified price.
+
+## Repeated sessions and publication
+
+The production session lasts up to 35 minutes, with at most 200 batches of up to
+four tasks. The existing persisted lane/age/retry scheduler selects tasks. Each
+batch is signed by a fresh controller key and carries the authoritative current
+state; only the prefix actually received advances the scheduler. The request
+artifact is verified against the controller key from the encrypted session
+bootstrap. The controller's private key stays outside all artifact directories.
+The old two-task probe below remains available as a separate protocol check.
+
+Before its first retailer request the Windows worker atomically saves a claim.
+After interruption, the same claim can only deliver a completed, signed prefix;
+it cannot fetch again. A claim with no checkpoint is reported as ambiguous and
+left pending. Expired checkpoints stay local and cannot be retimestamped. Upload
+retries first find the existing artifact and compare its exact signed bytes and
+bodies. They never overwrite a conflicting artifact. A controller-signed finish
+notice lets the worker leave a completed session promptly.
+
+Each receipt contributes its final cumulative HTTP counters once. A missing
+receipt or partial batch makes the total request count unknown; the count of
+verified received requests remains available separately. Prices, seller identity,
+shipping requirements and scheduled-run provenance use the existing gates.
+
+Artifact runtime credentials permit uploads, so artifact names are not a trust
+boundary. The publisher downloads only artifact IDs returned by the trusted
+collection jobs (including unique matrix outputs). It also requires Yahoo's
+controller-signed export, the actual source/run/data bindings, and a matching
+initial state hash. The controller key is read only after proving its commit is
+an ancestor of the real `native-worker-mailbox` branch. An unchanged repeated
+export is idempotent; a changed destination rejects intake and preserves it.
+Omitting a native flag from incoming state cannot bypass the configured check.
+
+`run-native-session-probe` exercises the same collection scope and publisher on a
+disposable copy. It uses the real numeric Actions run ID, whose event is a PR
+label, and explicitly records zero production writes and no scheduled/formal
+credit. It requires at least two accepted batches and byte-stable repeated intake.
+The native job and both probes share `native-yahoo-worker` concurrency.
+
+The per-job limit is 500 artifacts; 200 request/receipt pairs leave room for the
+finish notice, state export and validation index. Bodies already saved in receipt
+artifacts are not duplicated in the index artifact. Session credentials use
+GitHub's artifact service, not continuous GitHub REST polling. The idle mailbox
+lookup must remain at most once every two minutes. Storage/throughput still need
+to be measured in the real deployment.
 
 ## Authority and data flow
 
@@ -68,12 +115,14 @@ Duplicate receipt delivery is idempotent; a different checkpoint cannot replace
 an already consumed lease. Concurrent receiver writers are locked and the state
 replacement is atomic. A source/config/base-state mismatch rejects intake.
 
-## Remaining production work
+## Deployment and acceptance boundary
 
-The probe's two-task selection is an integration sample, not a production queue
-scheduler. Deployment still needs persistent fair selection, resumable delivery,
-atomic intake coordinated with the production state writer, explicit collection
-metrics/provenance, and validation of the genuine scheduled runs. This PR alone
+The older probe's two-task selection is an integration sample. The session worker
+entry point is `python -m sale_monitor.native_operations work --root <owned-runtime>
+--key <DPAPI-key> --policy <approved-policy> --sdk <locked-session.mjs>` from the
+exact approved source directory. A separately provisioned scheduled task must use
+that fixed command, ignore overlapping starts, and preserve unrelated services.
+Do not automatically approve the source hash found in the mailbox. This code alone
 does not satisfy coverage, age, shipping, seller identity, formal audit, scheduled
 stability, or Qwen handoff gates. Unknown shipping remains pending.
 
@@ -90,3 +139,6 @@ Upstream implementation references:
 - https://github.com/actions/toolkit/tree/main/packages/artifact
 - https://github.com/actions/toolkit/blob/main/packages/artifact/src/internal/shared/config.ts
 - https://docs.github.com/en/actions/reference/security/secure-use
+- https://github.com/actions/upload-artifact#number-of-artifacts
+- https://github.com/actions/download-artifact/tree/v4#download-artifacts-by-id
+- https://docs.github.com/en/actions/reference/workflows-and-actions/workflow-syntax#using-job-outputs-in-a-matrix-job

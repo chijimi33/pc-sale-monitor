@@ -5,7 +5,8 @@ on:
 permissions:
   contents: read
 concurrency:
-  group: native-channel-validation
+  group: native-yahoo-worker
+  queue: max
   cancel-in-progress: false
 jobs:
   channel:

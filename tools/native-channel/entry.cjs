@@ -1,6 +1,6 @@
 (async () => {
   try {
-    const {controller} = await import('./artifact.mjs');
+    const {controller} = await import(process.env.NATIVE_SESSION_MODE ? './session.mjs' : './artifact.mjs');
     await controller();
   } catch (error) {
     // Only our fixed error codes, never SDK URLs or response bodies.
