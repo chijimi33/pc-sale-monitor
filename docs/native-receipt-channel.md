@@ -126,6 +126,19 @@ Do not automatically approve the source hash found in the mailbox. This code alo
 does not satisfy coverage, age, shipping, seller identity, formal audit, scheduled
 stability, or Qwen handoff gates. Unknown shipping remains pending.
 
+For a provisioned installation, `scripts/native_worker_runner.py --config
+<installation.json> --verify-only` checks the complete source manifest, approved
+runtime, policy and SDK path without opening the private key or using the network.
+The normal launcher assigns its waiting child to a Windows Job before allowing
+collection; closing the launcher terminates only its owned worker descendants.
+It saves a bounded, sanitized result to `last-status.json`. That file records a
+past observation; confirm the scheduled task/process when checking current life.
+`scripts/register_native_worker.ps1 -Root <installation>` installs the validated
+windowless entry point for the current interactive user, polls every two minutes,
+and ignores overlapping starts. It refuses unrelated or running tasks with the
+same name and reads back the registered action, directory, interval and principal.
+It does not alter the four-hour collection schedule or enable Qwen.
+
 Protocol tests cover native state preservation, signed-body replay, duplicate and
 stale receipts, encryption tampering, local approval, expiry, credential host
 constraints, ZIP traversal/duplicates/symlinks/size, and Windows DPAPI persistence.
