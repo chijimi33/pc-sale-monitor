@@ -33,7 +33,7 @@ class NativeInstallation(unittest.TestCase):
         self.manifest={'commit':'a'*40,'files':[{'path':p,'sha256':runner.sha(b)} for p,b in self.files.items()]}
         (self.root/'manifest.json').write_text(json.dumps(self.manifest))
         self.config={'schema_version':1,'source_sha':'a'*40,'root':str(self.root),'source':str(self.source),
-                     'python':sys.executable,'node':sys.executable,'sdk':str(self.source/'tools/native-channel/session.mjs'),
+                     'python':str(Path(sys.executable).resolve()),'node':str(Path(sys.executable).resolve()),'sdk':str(self.source/'tools/native-channel/session.mjs'),
                      'key':str(self.root/'key.dpapi'),'policy':str(self.root/'policy.json'),'manifest':str(self.root/'manifest.json')}
         self.path=self.root/'installation.json';self.path.write_text(json.dumps(self.config))
 
