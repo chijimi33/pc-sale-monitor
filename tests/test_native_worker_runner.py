@@ -8,6 +8,8 @@ import sys
 import tempfile
 import time
 import unittest
+from unittest.mock import patch
+from types import SimpleNamespace
 
 REPO=Path(__file__).resolve().parents[1]
 spec=importlib.util.spec_from_file_location('native_worker_runner',REPO/'scripts/native_worker_runner.py')
@@ -23,7 +25,7 @@ class NativeInstallation(unittest.TestCase):
             'scripts/qa/process_guard.py':(REPO/'scripts/qa/process_guard.py').read_bytes(),
             'tools/native-channel/session.mjs':b'// offline fixture\n',
             'sale_monitor/__init__.py':b'',
-            'sale_monitor/native_operations.py':b'import time\nfrom pathlib import Path\ndef main():\n Path("started.txt").write_text(str(__import__("os").getpid()))\n time.sleep(60)\n'}
+            'sale_monitor/native_operations.py':b'import time\nfrom pathlib import Path\ndef main():\n p=Path("starting.tmp")\n p.write_text(str(__import__("os").getpid()))\n p.replace("started.txt")\n time.sleep(60)\n'}
         for name,raw in self.files.items():
             target=self.source/name;target.parent.mkdir(parents=True,exist_ok=True);target.write_bytes(raw)
         digest=runner.sha(json.dumps({Path(p).name:runner.sha(b) for p,b in self.files.items() if p.startswith('sale_monitor/')},sort_keys=True,separators=(',',':')).encode())
@@ -61,6 +63,24 @@ class NativeInstallation(unittest.TestCase):
         with self.assertRaisesRegex(ValueError,'manifest_path'):runner.validate(self.path)
         self.config['source']=str(self.root.parent);self.path.write_text(json.dumps(self.config))
         with self.assertRaisesRegex(ValueError,'source_outside_installation'):runner.validate(self.path)
+
+    @unittest.skipUnless(os.name=='nt','Windows worker launcher')
+    def test_low_disk_stops_before_child_or_key_access(self):
+        with patch.object(runner.shutil,'disk_usage',return_value=SimpleNamespace(free=runner.START_FREE_BYTES-1)), \
+             patch.object(runner.subprocess,'Popen',side_effect=AssertionError('must not start')):
+            self.assertEqual(runner.run(self.path),1)
+        self.assertEqual(json.loads((self.root/'last-status.json').read_bytes())['status'],'storage_required')
+        self.assertFalse((self.source/'started.txt').exists())
+
+    @unittest.skipUnless(os.name=='nt','Windows worker launcher')
+    def test_disk_loss_terminates_only_the_owned_child_and_keeps_state(self):
+        (self.root/'state').mkdir();(self.root/'state/keep.json').write_bytes(b'original state')
+        with patch.object(runner.shutil,'disk_usage',side_effect=[SimpleNamespace(free=runner.START_FREE_BYTES),SimpleNamespace(free=runner.STOP_FREE_BYTES-1)]), \
+             patch.object(runner,'STORAGE_CHECK_SECONDS',.5):
+            self.assertEqual(runner.run(self.path),1)
+        self.assertEqual(json.loads((self.root/'last-status.json').read_bytes())['status'],'worker_storage_stop')
+        self.assertEqual((self.root/'state/keep.json').read_bytes(),b'original state')
+        self.assertTrue((self.source/'started.txt').exists())
 
     @unittest.skipUnless(os.name=='nt','Windows process ownership')
     def test_owned_worker_ends_when_its_launcher_is_killed(self):

@@ -7,10 +7,16 @@ import importlib.util
 import json
 import os
 from pathlib import Path, PurePosixPath
+import shutil
 import subprocess
 import sys
+import time
 from datetime import datetime, timezone
 import uuid
+
+START_FREE_BYTES=40*1024**3
+STOP_FREE_BYTES=8*1024**3
+STORAGE_CHECK_SECONDS=10
 
 
 def sha(raw):return hashlib.sha256(raw).hexdigest()
@@ -82,24 +88,35 @@ def child(config):
 def run(config):
     if os.name!='nt':raise ValueError('windows_worker_required')
     value,paths=validate(config);root=paths['root'];(root/'tmp').mkdir(exist_ok=True)
+    started=now();status=root/'last-status.json'
+    free=shutil.disk_usage(root).free
+    if free<START_FREE_BYTES:
+        atomic(status,{'status':'storage_required','started_at':started,'ended_at':now(),
+                       'source_sha':value['source_sha'],'free_bytes':free,'required_free_bytes':START_FREE_BYTES})
+        return 1
     guard_path=paths['source']/'scripts/qa/process_guard.py'
     spec=importlib.util.spec_from_file_location('native_process_guard',guard_path)
     guard=importlib.util.module_from_spec(spec);spec.loader.exec_module(guard)
     env={k:v for k,v in os.environ.items() if k.upper() in {'SYSTEMROOT','WINDIR','COMSPEC','PATH','PATHEXT','USERPROFILE','LOCALAPPDATA','APPDATA'}}
     env.update(TEMP=str(root/'tmp'),TMP=str(root/'tmp'),PYTHONIOENCODING='utf-8',PYTHONDONTWRITEBYTECODE='1')
-    started=now();status=root/'last-status.json'
     atomic(status,{'status':'running','started_at':started,'pid':os.getpid(),'source_sha':value['source_sha']})
     process=subprocess.Popen([str(paths['python']),'-B',str(paths['source']/'scripts/native_worker_runner.py'),
                               '--child','--config',str(Path(config).resolve())],cwd=paths['source'],env=env,
                              stdin=subprocess.PIPE,stdout=subprocess.PIPE,stderr=subprocess.PIPE,
                              encoding='utf-8',creationflags=subprocess.CREATE_NO_WINDOW)
     guard.attach(process)
-    try:
-        stdout,stderr=process.communicate('start\n',timeout=48*60)
-    except subprocess.TimeoutExpired:
-        process.kill();stdout,stderr=process.communicate()
-        atomic(status,{'status':'worker_timeout','started_at':started,'ended_at':now(),'source_sha':value['source_sha']})
-        return 1
+    deadline=time.monotonic()+48*60
+    process.stdin.write('start\n');process.stdin.flush();process.stdin.close();process.stdin=None
+    while True:
+        try:
+            stdout,stderr=process.communicate(timeout=STORAGE_CHECK_SECONDS);break
+        except subprocess.TimeoutExpired:
+            free=shutil.disk_usage(root).free
+            if free<STOP_FREE_BYTES or time.monotonic()>=deadline:
+                process.kill();stdout,stderr=process.communicate()
+                atomic(status,{'status':'worker_storage_stop' if free<STOP_FREE_BYTES else 'worker_timeout',
+                               'started_at':started,'ended_at':now(),'source_sha':value['source_sha'],'free_bytes':free})
+                return 1
     result={'status':'worker_completed' if process.returncode==0 else 'worker_failed',
             'started_at':started,'ended_at':now(),'exit_code':process.returncode,'source_sha':value['source_sha']}
     if process.returncode==0:

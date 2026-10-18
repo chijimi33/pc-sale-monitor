@@ -138,6 +138,11 @@ windowless entry point for the current interactive user, polls every two minutes
 and ignores overlapping starts. It refuses unrelated or running tasks with the
 same name and reads back the registered action, directory, interval and principal.
 It does not alter the four-hour collection schedule or enable Qwen.
+The launcher requires 40 GiB free before starting and stops its owned worker if
+free space falls below 8 GiB during a session. It preserves all local receipts;
+it never deletes old evidence to meet the threshold. These are capacity guards,
+not a retention policy. Review recorded disk growth before prolonged unattended
+use; archiving or a retention policy remains a separate deployment requirement.
 
 Protocol tests cover native state preservation, signed-body replay, duplicate and
 stale receipts, encryption tampering, local approval, expiry, credential host
