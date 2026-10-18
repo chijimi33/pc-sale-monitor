@@ -1,0 +1,118 @@
+name: Isolated trusted artifact selection validation
+on:
+  pull_request:
+    types: [labeled]
+permissions:
+  contents: read
+concurrency:
+  group: native-artifact-validation
+  cancel-in-progress: false
+jobs:
+  collect:
+    if: github.event.label.name == 'run-native-artifact-probe' && github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    outputs:
+      dospara: ${{ steps.receipt.outputs.dospara }}
+      ark: ${{ steps.receipt.outputs.ark }}
+      tsukumo: ${{ steps.receipt.outputs.tsukumo }}
+      sofmap: ${{ steps.receipt.outputs.sofmap }}
+      joshin: ${{ steps.receipt.outputs.joshin }}
+      bic: ${{ steps.receipt.outputs.bic }}
+      koubou: ${{ steps.receipt.outputs.koubou }}
+      yodobashi: ${{ steps.receipt.outputs.yodobashi }}
+      amazon: ${{ steps.receipt.outputs.amazon }}
+    strategy:
+      fail-fast: false
+      matrix:
+        store: [dospara, ark, tsukumo, sofmap, joshin, bic, koubou, yodobashi, amazon]
+    env:
+      STORE: ${{ matrix.store }}
+      SOURCE_COMMIT: ${{ github.event.pull_request.head.sha }}
+      PYTHONPATH: .
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: python scripts/check_native_artifacts.py fixture
+      - uses: actions/upload-artifact@v4
+        id: upload
+        with:
+          name: state-${{ matrix.store }}
+          path: fixture/
+          retention-days: 1
+          if-no-files-found: error
+      - id: receipt
+        env:
+          ARTIFACT_ID: ${{ steps.upload.outputs.artifact-id }}
+        run: python scripts/native_artifact_ids.py record
+  yahoo:
+    if: github.event.label.name == 'run-native-artifact-probe' && github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    outputs:
+      yahoo: ${{ steps.upload.outputs.artifact-id }}
+    env:
+      STORE: yahoo
+      SOURCE_COMMIT: ${{ github.event.pull_request.head.sha }}
+      PYTHONPATH: .
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: python scripts/check_native_artifacts.py fixture
+      - uses: actions/upload-artifact@v4
+        id: upload
+        with:
+          name: state-yahoo
+          path: fixture/
+          retention-days: 1
+          if-no-files-found: error
+      - run: |
+          mkdir -p untrusted/stores
+          echo '{"synthetic":true,"must_not_be_imported":true}' > untrusted/stores/injected.json
+      - uses: actions/upload-artifact@v4
+        with:
+          name: state-untrusted
+          path: untrusted/
+          retention-days: 1
+          if-no-files-found: error
+  verify:
+    needs: [collect, yahoo]
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      COLLECTION_OUTPUTS: ${{ toJSON(needs.collect.outputs) }}
+      YAHOO_OUTPUTS: ${{ toJSON(needs.yahoo.outputs) }}
+      SOURCE_COMMIT: ${{ github.event.pull_request.head.sha }}
+      PYTHONPATH: .
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - id: artifacts
+        run: python scripts/native_artifact_ids.py select
+      - uses: actions/download-artifact@v4
+        with:
+          artifact-ids: ${{ steps.artifacts.outputs.ids }}
+          path: incoming
+          merge-multiple: true
+      - run: python scripts/check_native_artifacts.py verify
+      - uses: actions/upload-artifact@v4
+        with:
+          name: native-artifact-selection-proof
+          path: artifact-selection-proof.json
+          retention-days: 7
+          if-no-files-found: error

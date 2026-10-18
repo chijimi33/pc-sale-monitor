@@ -1,0 +1,43 @@
+name: Isolated native receipt channel
+on:
+  pull_request:
+    types: [labeled]
+permissions:
+  contents: read
+concurrency:
+  group: native-yahoo-worker
+  queue: max
+  cancel-in-progress: false
+jobs:
+  channel:
+    if: github.event.label.name == 'run-native-channel-probe' && github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    timeout-minutes: 16
+    permissions:
+      contents: write
+    env:
+      SOURCE_COMMIT: ${{ github.event.pull_request.head.sha }}
+      GITHUB_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - run: pip install -e .
+      - run: npm ci --ignore-scripts --prefix tools/native-channel
+      - run: python scripts/state_branch.py prepare
+      - name: Issue encrypted lease and verify signed result
+        uses: ./tools/native-channel
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: native-channel-validation-${{ github.run_id }}-${{ github.run_attempt }}
+          path: native-validation/
+          retention-days: 7
+          if-no-files-found: warn

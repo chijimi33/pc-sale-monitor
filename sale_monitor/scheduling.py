@@ -56,7 +56,7 @@ def plan_comparison_refresh(offers: dict, requests, candidate_identities=()) -> 
 def lane(task: dict) -> str:
     if task.get("kind") == "comparison":
         return "comparison"
-    return "discovery" if task["type"] in ("list", "dospara_list", "amazon_discovery") else "sale"
+    return "discovery" if task["type"] in ("list", "dospara_list", "amazon_discovery", "yahoo_public_search") else "sale"
 
 
 def select_task(pending: list[tuple[str, dict]], scheduler: dict, order, now, attempted=None):

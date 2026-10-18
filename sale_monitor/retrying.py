@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from collections import Counter
+import os
 from urllib.parse import urlsplit
 
 
@@ -22,6 +23,8 @@ def dependency_url(task: dict, cfg: dict) -> str | None:
         return cfg.get("source_url")
     # These adapters start with a fixed API request rather than a queued URL.
     if task["type"] == "yahoo":
+        if cfg.get("public_html_fallback") and not os.environ.get("YAHOO_CLIENT_ID"):
+            return "https://shopping.yahoo.co.jp/search/"
         return "https://shopping.yahooapis.jp/ShoppingWebService/V3/itemSearch"
     if task["type"] == "dospara_product":
         return "https://www.dospara.co.jp/s/dospara/api/getProducts"

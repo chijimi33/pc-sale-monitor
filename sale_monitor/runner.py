@@ -18,7 +18,7 @@ from .parsing import canonical, confirmed_empty_search, discover, parse_product,
 from .storage import Store
 from .scheduling import plan_comparison_refresh, select_task
 from .retrying import runnable, transient
-from . import koubou_search, sofmap_search, tsukumo_shipping, comparison_routing, comparison_priority
+from . import koubou_search, sofmap_search, tsukumo_shipping, comparison_routing, comparison_priority, yahoo_public
 
 
 def task_order(task: dict) -> tuple:
@@ -28,18 +28,18 @@ def task_order(task: dict) -> tuple:
         # priority. Descendants keep the original request time so a comparison
         # can finish without moving to the back of the next cycle's queue.
         stage = 2
-        step = {"product": 0, "list": 1, "yahoo": 1, "koubou_search": 1, "search": 2}.get(kind, 3)
+        step = {"product": 0, "list": 1, "yahoo": 1, "yahoo_public_search": 1, "koubou_search": 1, "search": 2}.get(kind, 3)
     else:
-        stage = 0 if kind in ("list", "dospara_list", "amazon_discovery") else 1
+        stage = 0 if kind in ("list", "dospara_list", "amazon_discovery", "yahoo_public_search") else 1
         step = 0
     return stage, task.get("priority", 3), task["created_at"], step
 
 
 class Collector:
-    def __init__(self, root: Path, store: str, config: dict, run_id: str, client: Client | None = None):
+    def __init__(self, root: Path, store: str, config: dict, run_id: str, client: Client | None = None, *, disk: Store | None = None):
         if store not in STORES:
             raise ValueError("excluded_store")
-        self.disk = Store(root)
+        self.disk = disk if disk is not None else Store(root)
         self.store = store
         self.cfg = config["stores"][store]
         self.config = config
@@ -319,6 +319,29 @@ class Collector:
         self.state["list_pages"] += 1
         self.state["listed_candidates"] += len(products)
 
+    def process_yahoo_public(self, task: dict):
+        number = task.get("start", 1)
+        # API offsets and public HTML page numbers are different cursors.
+        if task["type"] == "yahoo" and number != 1:
+            raise FetchError("yahoo_api_cursor_requires_configuration")
+        url = task.get("url") or yahoo_public.search_url(task["query"], number)
+        page = self.page(url, allow_browser=False)
+        products, next_url, details = yahoo_public.parse_search(page, task["query"], number,
+            comparison=task.get("kind") == "comparison")
+        origin = {"created_at": task.get("created_at") or iso(), "priority": task.get("priority", 3),
+                  **comparison_priority.origin(task, self.store)}
+        for product in products:
+            self.enqueue({"type": "product", **product, **origin})
+        if next_url:
+            self.enqueue({"type": "yahoo_public_search", "query": task["query"], "start": number + 1,
+                          "url": next_url, "kind": task.get("kind", "sale"), **origin})
+        self.state.setdefault("yahoo_public_searches", {})[url] = {
+            **details, "observed_run_id": self.run_id, "created_at": origin["created_at"]}
+        self.state["list_pages"] += 1
+        self.state["listed_candidates"] += len(products)
+        if details["provider_window_truncated"]:
+            self.state["discovery_gaps"].append({"reason": "yahoo_public_provider_window", **details})
+
     def process(self, task: dict):
         kind = task["type"]
         if self.store == "koubou" and task.get("kind") == "comparison":
@@ -352,6 +375,9 @@ class Collector:
             for candidate in candidates:
                 self.enqueue({"type": "product", **candidate})
         elif kind == "yahoo":
+            if not os.environ.get("YAHOO_CLIENT_ID") and self.cfg.get("public_html_fallback"):
+                self.process_yahoo_public(task)
+                return
             offers, next_page, details = adapters.yahoo_page(self.client, task["query"], task.get("start", 1), comparison=task.get("kind") == "comparison")
             for offer in offers:
                 self.record(offer)
@@ -361,6 +387,8 @@ class Collector:
                 self.state["discovery_gaps"].append({"reason": "yahoo_provider_window", "query": task["query"], **details})
             if next_page:
                 self.enqueue({**task, "start": next_page})
+        elif kind == "yahoo_public_search" and self.store == "yahoo":
+            self.process_yahoo_public(task)
         elif kind == "search":
             home = self.page(self.cfg["seed_urls"][0])
             url = search_form(home, task["query"])
@@ -430,6 +458,8 @@ class Collector:
         elif kind == "product":
             if self.store == "amazon":
                 offer = adapters.amazon_product(self.client, task)
+            elif self.store == "yahoo":
+                offer = yahoo_public.parse_product(self.page(task["url"], allow_browser=False), task)
             else:
                 page = self.page(task["url"])
                 offer = parse_product(self.store, page, self.cfg, task)
@@ -484,6 +514,60 @@ class Collector:
         self.state["list_pages"] += 1 + bool(source)
         self.state["listed_candidates"] += len(products)
 
+    def attempt(self, task_id: str) -> bool:
+        """Process one existing task; return True when access requires a stop."""
+        task = self.state["queue"][task_id]
+        self.attempted.add(task_id)
+        if task.get("retry_at_epoch_seconds") is not None:
+            self.state["retry_activity"]["retries_started"] += 1
+        try:
+            self.process(task)
+            if task.get("last_error"):
+                self.state["retry_activity"]["recovered_tasks"] += 1
+                self.state.setdefault("recovered_errors", []).append({"task_id": task_id,
+                    "reason": task["last_error"], "attempts": task.get("attempts", 0), "recovered_at": iso()})
+                self.state["errors"] = [e for e in self.state["errors"] if e.get("task_id") != task_id]
+            self.state["done"].append(task_id)
+            del self.state["queue"][task_id]
+        except Exception as exc:
+            task = self.state["queue"][task_id]
+            # Only sanitized error types/codes are persisted; URLs with API
+            # credentials and raw exception messages never enter the feed.
+            reason = str(exc) if isinstance(exc, FetchError) and "http" not in str(exc)[5:] and len(str(exc)) < 100 else type(exc).__name__
+            task.update(attempts=task.get("attempts", 0)+1, last_error=reason, last_attempt_at=iso(),
+                        last_attempt_run_id=self.run_id)
+            task.pop("retry_at_epoch_seconds", None)
+            if transient(reason):
+                task["retry_at_epoch_seconds"] = time.time() + 300
+            # Error counts describe unresolved tasks, not repeated attempts.
+            self.state["errors"] = [e for e in self.state["errors"] if e.get("task_id") != task_id]
+            error = {"task_id": task_id, "reason": reason, "url": task.get("url")}
+            page = getattr(exc, "page", None)
+            if isinstance(exc, ParserError) and isinstance(page, Page):
+                error["response_evidence"] = {
+                    "status": page.status, "method": page.method,
+                    "body_bytes": len(page.body),
+                    "body_sha256": hashlib.sha256(page.body).hexdigest(),
+                    "observed_at": page.observed_at,
+                }
+            self.state["errors"].append(error)
+            if task["type"] == "product":
+                self.complete_comparison_routes(task, reason=reason)
+                for row in self.state["offers"].values():
+                    if canonical(row["url"]) == canonical(task["url"]):
+                        row["issues"] = sorted(set(row.get("issues", []) + ["latest_fetch_failed"]))
+            if self.store == "amazon" and reason == "amazon_access_challenge":
+                page = exc.page if isinstance(exc, FetchError) else None
+                self.state["access_block"] = {
+                    "run_id": self.run_id, "reason": reason, "url": task.get("url"),
+                    "checked_at": page.observed_at if page else iso(),
+                    "body_sha256": hashlib.sha256(page.body).hexdigest() if page else None,
+                }
+                self.save()
+                return True
+        self.save()
+        return False
+
     def collect(self, seconds: int = 2100, review_root: Path = Path("config/flyer_reviews")) -> dict:
         self.seed()
         if self.state.get("access_block", {}).get("run_id") == self.run_id:
@@ -494,7 +578,7 @@ class Collector:
         if self.store == "yahoo":
             self.state["errors"] = [e for e in self.state["errors"]
                                     if e.get("reason") != "YAHOO_CLIENT_ID_missing"]
-            if not os.environ.get("YAHOO_CLIENT_ID"):
+            if not os.environ.get("YAHOO_CLIENT_ID") and not self.cfg.get("public_html_fallback"):
                 self.state["status"] = "configuration_needed"
                 self.state["errors"].append({"reason": "YAHOO_CLIENT_ID_missing"})
                 self.save()
@@ -519,54 +603,8 @@ class Collector:
                 self.state["retry_activity"]["wait_seconds"] += delay
                 continue
             task_id, task = select_task(pending, self.state["scheduler"], task_order, utcnow(), self.attempted)
-            self.attempted.add(task_id)
-            if task.get("retry_at_epoch_seconds") is not None:
-                self.state["retry_activity"]["retries_started"] += 1
-            try:
-                self.process(task)
-                if task.get("last_error"):
-                    self.state["retry_activity"]["recovered_tasks"] += 1
-                    self.state.setdefault("recovered_errors", []).append({"task_id": task_id,
-                        "reason": task["last_error"], "attempts": task.get("attempts", 0), "recovered_at": iso()})
-                    self.state["errors"] = [e for e in self.state["errors"] if e.get("task_id") != task_id]
-                self.state["done"].append(task_id)
-                del self.state["queue"][task_id]
-            except Exception as exc:
-                # Only sanitized error types/codes are persisted; URLs with API
-                # credentials and raw exception messages never enter the feed.
-                reason = str(exc) if isinstance(exc, FetchError) and "http" not in str(exc)[5:] and len(str(exc)) < 100 else type(exc).__name__
-                task.update(attempts=task.get("attempts", 0)+1, last_error=reason, last_attempt_at=iso(),
-                            last_attempt_run_id=self.run_id)
-                task.pop("retry_at_epoch_seconds", None)
-                if transient(reason):
-                    task["retry_at_epoch_seconds"] = time.time() + 300
-                # Error counts describe unresolved tasks, not repeated attempts.
-                self.state["errors"] = [e for e in self.state["errors"] if e.get("task_id") != task_id]
-                error = {"task_id": task_id, "reason": reason, "url": task.get("url")}
-                page = getattr(exc, "page", None)
-                if isinstance(exc, ParserError) and isinstance(page, Page):
-                    error["response_evidence"] = {
-                        "status": page.status, "method": page.method,
-                        "body_bytes": len(page.body),
-                        "body_sha256": hashlib.sha256(page.body).hexdigest(),
-                        "observed_at": page.observed_at,
-                    }
-                self.state["errors"].append(error)
-                if task["type"] == "product":
-                    self.complete_comparison_routes(task, reason=reason)
-                    for row in self.state["offers"].values():
-                        if canonical(row["url"]) == canonical(task["url"]):
-                            row["issues"] = sorted(set(row.get("issues", []) + ["latest_fetch_failed"]))
-                if self.store == "amazon" and reason == "amazon_access_challenge":
-                    page = exc.page if isinstance(exc, FetchError) else None
-                    self.state["access_block"] = {
-                        "run_id": self.run_id, "reason": reason, "url": task.get("url"),
-                        "checked_at": page.observed_at if page else iso(),
-                        "body_sha256": hashlib.sha256(page.body).hexdigest() if page else None,
-                    }
-                    self.save()
-                    break
-            self.save()
+            if self.attempt(task_id):
+                break
         if self.store == "koubou":
             try:
                 offers, metadata = collect_flyer(self.client, self.disk, self.config["flyer"], review_root)

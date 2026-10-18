@@ -69,6 +69,7 @@ def health(state: dict, now) -> dict:
             "diagnostic_request_count": (state.get("transport_diagnostic") or {}).get("diagnostic_request_count")
                 if (state.get("transport_diagnostic") or {}).get("run_id") == state.get("run_id") and state.get("status") != "job_missing" else None,
             "http_evidence": http_summary(state),
+            "native_collection": state.get("native_collection"),
             "comparison_no_results": sum(r.get("result") == "no_results" and r.get("observed_run_id") == state.get("run_id") for r in state.get("comparison_searches", {}).values()),
             "pending_over_24h": sum(now - t > timedelta(hours=24) for t in created), "errors": summarize_errors(state.get("errors", [])),
             "discovery_gaps": state.get("discovery_gaps", []), "source_metadata": state.get("source_metadata"), "flyer": state.get("flyer")}
@@ -90,7 +91,8 @@ def merge_incoming(root: Path, incoming: Path):
             atomic_json(root / relative, read_json(source, None))
 
 
-def checkpoint(root: Path, incoming: Path, run_id: str) -> dict:
+def checkpoint(root: Path, incoming: Path, run_id: str, *, native_required=False, native_trust=None,
+               source_sha=None, data_sha=None) -> dict:
     """Persist collected snapshots before evaluation without publishing results.
 
     Journals stay in the snapshots until aggregate archives them. A later
@@ -120,6 +122,17 @@ def checkpoint(root: Path, incoming: Path, run_id: str) -> dict:
                   not isinstance(value.get("done", []), list)):
                 reason = "artifact_invalid_containers"
             else:
+                if name == "yahoo" and native_required:
+                    from .native_sessions import verify_export
+                    try:
+                        if native_trust is None:
+                            raise ValueError("native_trust_missing")
+                        verify_export(incoming, value, read_json(root / "stores/yahoo.json", None), native_trust,
+                                      source_sha=source_sha, run_id=run_id, data_sha=data_sha)
+                    except (OSError, ValueError, KeyError, TypeError) as exc:
+                        # No worker-origin exception text goes into public output.
+                        result["rejected_stores"].append({"store":name,"reason":"native_export_unverified"})
+                        continue
                 # Preserve every queued task and journal row verbatim in JSON.
                 # A write failure aborts before the workflow can commit it.
                 atomic_json(root / "stores" / source.name, value)
