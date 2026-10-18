@@ -9,7 +9,7 @@ def transient(reason: str) -> bool:
     return reason in {
         "RemoteDisconnected", "TimeoutError", "ConnectionResetError", "ConnectionAbortedError",
         "ConnectionRefusedError", "BrokenPipeError", "IncompleteRead", "rate_limited_retry_later",
-        "http_429", "http_500", "http_502", "http_503", "http_504",
+        "http_429", "http_500", "http_502", "http_503", "http_504", "store_maintenance",
     } or reason.startswith(("transport_retry_later:", "access_retry_later:"))
 
 
