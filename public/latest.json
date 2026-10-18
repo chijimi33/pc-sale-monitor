@@ -1,39 +1,42 @@
 {
   "collection_completion_rate": 0.1,
   "comparison_planning": {
-    "eligible_sale_offers": 969,
+    "eligible_sale_offers": 448,
     "existing_queue_policy": "retained_with_original_age_and_attempts",
     "held_reasons": {
+      "amazon_shipper_unverified": 1,
       "bto_configuration_review_needed": 39,
-      "bundle_contents_review_needed": 73,
+      "bundle_contents_review_needed": 6,
+      "condition_unknown": 1,
       "coupon_unavailable": 10,
       "coupon_unverified": 10,
       "coupon_verification_failed": 10,
-      "expiry_conflict_review_needed": 114,
+      "expiry_conflict_review_needed": 112,
       "identity_missing": 24,
-      "price_unknown": 40,
-      "shipping_unknown": 279,
-      "stock_out_of_stock": 309,
-      "stock_preorder": 40,
-      "stock_unknown": 4,
-      "unverified_product": 261
+      "price_unknown": 41,
+      "seller_unknown": 1,
+      "shipping_unknown": 271,
+      "stock_out_of_stock": 148,
+      "stock_preorder": 32,
+      "stock_unknown": 1,
+      "unverified_product": 193
     },
-    "held_sale_offers": 725,
-    "known_comparator_hold_offers": 2,
+    "held_sale_offers": 506,
+    "known_comparator_hold_offers": 0,
     "new_requests_by_store": {
-      "amazon": 954,
-      "ark": 539,
-      "bic": 954,
-      "dospara": 932,
-      "joshin": 954,
-      "koubou": 954,
-      "sofmap": 954,
-      "tsukumo": 452,
-      "yahoo": 954,
-      "yodobashi": 954
+      "amazon": 448,
+      "ark": 23,
+      "bic": 448,
+      "dospara": 426,
+      "joshin": 448,
+      "koubou": 447,
+      "sofmap": 448,
+      "tsukumo": 448,
+      "yahoo": 448,
+      "yodobashi": 448
     },
     "policy": "eligible_sale_candidates_only",
-    "refresh_candidate_identities": 2326
+    "refresh_candidate_identities": 2345
   },
   "complete_stores": 1,
   "delivery_guarantee": "at_least_once_best_effort; publication_and_delivery_are_distinct",
@@ -51,22 +54,22 @@
     "validation": "validation.json"
   },
   "full_rescan_needed": false,
-  "generated_at": "2026-10-17T22:55:10.713398+00:00",
+  "generated_at": "2026-10-18T05:05:30.889376+00:00",
   "mode": "parallel_validation",
   "monitored_store_count": 10,
-  "notification_count": 1,
-  "review_count": 1692,
-  "run_id": "39074389382-1",
+  "notification_count": 0,
+  "review_count": 954,
+  "run_id": "39097204516-1",
   "run_provenance": {
-    "api_url": "https://api.github.com/repos/chijimi33/pc-sale-monitor/actions/runs/39074389382",
+    "api_url": "https://api.github.com/repos/chijimi33/pc-sale-monitor/actions/runs/39097204516",
     "attempt": 1,
-    "checked_at": "2026-10-17T22:55:08.080854+00:00",
-    "created_at": "2026-10-17T22:16:26Z",
+    "checked_at": "2026-10-18T05:05:28.681923+00:00",
+    "created_at": "2026-10-18T04:28:21Z",
     "event": "schedule",
     "head_sha": "8a114a88087193402b73f73227b5921d3e85ee6a",
     "max_attempt": 1,
     "repository": "chijimi33/pc-sale-monitor",
-    "run_id": "39074389382",
+    "run_id": "39097204516",
     "source": "github_actions_api",
     "workflow_path": ".github/workflows/monitor.yml"
   },
@@ -74,14 +77,14 @@
   "stores": {
     "amazon": {
       "access_block": {
-        "body_sha256": "944dcbe5d4e836e8eab2a8ceb47ed7d1934f4b34f12753dff758bf84b4629afb",
-        "checked_at": "2026-10-17T22:18:22.577897+00:00",
+        "body_sha256": "ebe4680d749a0e7068da6f1854d105e39acc488ac9462c679d9dc92fcee1461f",
+        "checked_at": "2026-10-18T04:30:23.331607+00:00",
         "reason": "amazon_access_challenge",
-        "run_id": "39074389382-1",
-        "url": "https://www.amazon.co.jp/dp/B08K8W6165"
+        "run_id": "39097204516-1",
+        "url": "https://www.amazon.co.jp/dp/B0FPLP6N4F"
       },
       "access_retry_after": {},
-      "checkpoint_at": "2026-10-17T22:18:22.597460+00:00",
+      "checkpoint_at": "2026-10-18T04:30:23.348147+00:00",
       "comparison_no_results": 0,
       "comparison_refresh": {
         "existing_queue_policy": "retained_with_original_age_and_attempts",
@@ -91,8 +94,8 @@
         "policy": "requested_or_known_sale_candidate_identity_or_unresolved",
         "reasons": {},
         "request_plan_verified": true,
-        "requested_identity_count": 957,
-        "sale_candidate_identity_count": 2304,
+        "requested_identity_count": 954,
+        "sale_candidate_identity_count": 2326,
         "selected_for_refresh": 0
       },
       "comparison_routing": {
@@ -104,7 +107,7 @@
         "status": "not_recorded"
       },
       "comparison_search_pages": 0,
-      "current_offers": 0,
+      "current_offers": 1,
       "cycle_complete": false,
       "diagnostic_request_count": null,
       "discovery_gaps": [],
@@ -114,10 +117,10 @@
           "affected_tasks": 1,
           "distinct_urls": 1,
           "example_urls": [
-            "https://www.amazon.co.jp/dp/B08K8W6165"
+            "https://www.amazon.co.jp/dp/B0FPLP6N4F"
           ],
           "reason": "amazon_access_challenge",
-          "url": "https://www.amazon.co.jp/dp/B08K8W6165"
+          "url": "https://www.amazon.co.jp/dp/B0FPLP6N4F"
         }
       ],
       "flyer": null,
@@ -130,83 +133,83 @@
         "response_status_counts": {
           "browser": {},
           "http": {
-            "200": 1
+            "200": 3
           }
         },
-        "run_id": "39074389382-1",
+        "run_id": "39097204516-1",
         "scope": "current_client_instance; redirects_and_browser_subresources_excluded",
-        "started_at": "2026-10-17T22:18:22.346910+00:00",
+        "started_at": "2026-10-18T04:30:21.161563+00:00",
         "status": "current"
       },
       "known_offers": 407,
-      "list_pages": 0,
-      "listed_candidates": 0,
+      "list_pages": 1,
+      "listed_candidates": 291,
       "mandatory_field_coverage": {
         "condition": {
           "known": 0,
-          "total": 0
+          "total": 1
         },
         "evidence": {
           "known": 0,
-          "total": 0
+          "total": 1
         },
         "identity": {
-          "known": 0,
-          "total": 0
+          "known": 1,
+          "total": 1
         },
         "price": {
           "known": 0,
-          "total": 0
+          "total": 1
         },
         "seller": {
           "known": 0,
-          "total": 0
+          "total": 1
         },
         "shipping": {
           "known": 0,
-          "total": 0
+          "total": 1
         },
         "stock": {
           "known": 0,
-          "total": 0
+          "total": 1
         }
       },
-      "oldest_pending_at": "2026-10-04T14:05:33.498643+00:00",
+      "oldest_pending_at": "2026-10-04T14:05:33.498667+00:00",
       "pending_by_type": {
-        "amazon_discovery:sale": 1,
-        "product:sale": 293
+        "product:sale": 292
       },
-      "pending_count": 294,
-      "pending_over_24h": 267,
-      "request_count": 1,
+      "pending_count": 292,
+      "pending_over_24h": 278,
+      "request_count": 3,
       "request_count_scope": "collection_http_attempts_plus_browser_navigations; diagnostic_requests_and_browser_subresources_excluded",
       "retry_activity": {
-        "recovered_tasks": 0,
+        "recovered_tasks": 1,
         "retries_started": 0,
         "wait_seconds": 0
       },
       "retry_after_epoch_seconds": {},
-      "run_id": "39074389382-1",
+      "run_id": "39097204516-1",
       "scheduler": {
         "cursor": 0,
         "retry_cursor_by_group": {
-          "discovery": 2,
-          "sale": 3
+          "discovery": 3,
+          "sale": 1
         },
         "selected_by_attempt_kind": {
-          "first_attempt_this_run": 1
+          "first_attempt_this_run": 3
         },
         "selected_by_lane": {
-          "sale": 1
+          "discovery": 1,
+          "sale": 2
         }
       },
       "source_metadata": {
-        "read_at": "2026-10-17T20:21:50.546588+00:00",
-        "source_unchanged": true,
-        "source_updated_at": "2026/10/18 00:06",
+        "read_at": "2026-10-18T04:30:21.653046+00:00",
+        "source_unchanged": false,
+        "source_updated_at": "2026/10/18 12:06",
         "source_url": "https://raw.githubusercontent.com/chijimi33/Chimolog-price-tool/main/public/chimolog_products.json",
         "stale_source": false,
-        "transcribed_at": "2026-10-17T15:30:55.128474+00:00"
+        "transcribed_at": "2026-10-18T04:28:11.012527+00:00"
       },
       "status": "access_required",
       "transport_retry_after": {},
@@ -215,7 +218,7 @@
     "ark": {
       "access_block": null,
       "access_retry_after": {},
-      "checkpoint_at": "2026-10-17T22:50:17.179197+00:00",
+      "checkpoint_at": "2026-10-18T04:59:13.047759+00:00",
       "comparison_no_results": 0,
       "comparison_refresh": {
         "existing_queue_policy": "retained_with_original_age_and_attempts",
@@ -230,8 +233,8 @@
           "sale_candidate_identity": 88
         },
         "request_plan_verified": true,
-        "requested_identity_count": 540,
-        "sale_candidate_identity_count": 2304,
+        "requested_identity_count": 539,
+        "sale_candidate_identity_count": 2326,
         "selected_for_refresh": 218
       },
       "comparison_routing": {
@@ -239,28 +242,28 @@
         "receipt_results": {
           "verified_current_product": 87
         },
-        "request_count": 540,
+        "request_count": 539,
         "request_reasons": {
-          "compatible_known_url_missing": 453,
+          "compatible_known_url_missing": 452,
           "known_urls_first": 87
         },
-        "run_id": "39074389382-1",
+        "run_id": "39097204516-1",
         "status": "current"
       },
       "comparison_search_pages": 0,
-      "current_offers": 1123,
+      "current_offers": 1115,
       "cycle_complete": false,
       "diagnostic_request_count": null,
       "discovery_gaps": [],
-      "eligible_offers": 547,
+      "eligible_offers": 543,
       "errors": [
         {
-          "affected_tasks": 8,
-          "distinct_urls": 8,
+          "affected_tasks": 12,
+          "distinct_urls": 12,
           "example_urls": [
-            "https://www.ark-pc.co.jp/i/50287411/",
-            "https://www.ark-pc.co.jp/search/?unselect=1&key=0810074848329",
-            "https://www.ark-pc.co.jp/i/50287726/"
+            "https://www.ark-pc.co.jp/i/10401689/",
+            "https://www.ark-pc.co.jp/i/50287468/",
+            "https://www.ark-pc.co.jp/i/72003206/"
           ],
           "reason": "http_403",
           "url": null
@@ -272,86 +275,87 @@
           "browser": {},
           "http": {}
         },
-        "failure_observations": 10,
+        "failure_observations": 13,
         "response_status_counts": {
           "browser": {},
           "http": {
-            "200": 1588,
-            "403": 8,
-            "429": 2
+            "200": 1583,
+            "403": 12,
+            "429": 1
           }
         },
-        "run_id": "39074389382-1",
+        "run_id": "39097204516-1",
         "scope": "current_client_instance; redirects_and_browser_subresources_excluded",
-        "started_at": "2026-10-17T22:18:26.456990+00:00",
+        "started_at": "2026-10-18T04:30:17.729819+00:00",
         "status": "current"
       },
       "known_offers": 1293,
-      "list_pages": 465,
-      "listed_candidates": 333,
+      "list_pages": 468,
+      "listed_candidates": 334,
       "mandatory_field_coverage": {
         "condition": {
-          "known": 1123,
-          "total": 1123
+          "known": 1115,
+          "total": 1115
         },
         "evidence": {
-          "known": 927,
-          "total": 1123
+          "known": 921,
+          "total": 1115
         },
         "identity": {
-          "known": 1098,
-          "total": 1123
+          "known": 1090,
+          "total": 1115
         },
         "price": {
-          "known": 1080,
-          "total": 1123
+          "known": 1072,
+          "total": 1115
         },
         "seller": {
-          "known": 1123,
-          "total": 1123
+          "known": 1115,
+          "total": 1115
         },
         "shipping": {
-          "known": 831,
-          "total": 1123
+          "known": 824,
+          "total": 1115
         },
         "stock": {
-          "known": 1123,
-          "total": 1123
+          "known": 1115,
+          "total": 1115
         }
       },
-      "oldest_pending_at": "2026-10-17T22:18:26.554977+00:00",
+      "oldest_pending_at": "2026-10-18T04:30:17.803026+00:00",
       "pending_by_type": {
-        "list:comparison": 6,
-        "product:sale": 2
+        "list:comparison": 2,
+        "product:comparison": 1,
+        "product:sale": 9
       },
-      "pending_count": 8,
+      "pending_count": 12,
       "pending_over_24h": 0,
-      "request_count": 1598,
+      "request_count": 1596,
       "request_count_scope": "collection_http_attempts_plus_browser_navigations; diagnostic_requests_and_browser_subresources_excluded",
       "retry_activity": {
-        "recovered_tasks": 2,
-        "retries_started": 2,
-        "wait_seconds": 239.59858965873718
+        "recovered_tasks": 9,
+        "retries_started": 1,
+        "wait_seconds": 119.7918918132782
       },
       "retry_after_epoch_seconds": {},
-      "run_id": "39074389382-1",
+      "run_id": "39097204516-1",
       "scheduler": {
-        "comparison_cursor": 3,
+        "comparison_cursor": 1,
         "cursor": 3,
         "retry_cursor_by_group": {
-          "comparison:other": 3,
-          "comparison:requested": 1,
-          "discovery": 3,
-          "sale": 1
+          "comparison:other": 0,
+          "comparison:requested": 2,
+          "discovery": 1,
+          "sale": 0
         },
         "selected_by_attempt_kind": {
-          "first_attempt_this_run": 2056,
-          "retry_same_run": 2
+          "first_attempt_this_run": 2054,
+          "retry_same_run": 1
         },
         "selected_by_lane": {
-          "comparison": 1132,
+          "comparison": 1130,
           "discovery": 18,
-          "sale": 908
+          "sale": 907
         }
       },
       "source_metadata": null,
@@ -362,7 +366,7 @@
     "bic": {
       "access_block": null,
       "access_retry_after": {},
-      "checkpoint_at": "2026-10-17T22:51:31.603992+00:00",
+      "checkpoint_at": "2026-10-18T05:03:27.061856+00:00",
       "comparison_no_results": 0,
       "comparison_refresh": {
         "existing_queue_policy": "retained_with_original_age_and_attempts",
@@ -372,18 +376,18 @@
         "policy": "requested_or_known_sale_candidate_identity_or_unresolved",
         "reasons": {},
         "request_plan_verified": true,
-        "requested_identity_count": 957,
-        "sale_candidate_identity_count": 2304,
+        "requested_identity_count": 954,
+        "sale_candidate_identity_count": 2326,
         "selected_for_refresh": 0
       },
       "comparison_routing": {
         "receipt_count": 0,
         "receipt_results": {},
-        "request_count": 957,
+        "request_count": 954,
         "request_reasons": {
-          "compatible_known_url_missing": 957
+          "compatible_known_url_missing": 954
         },
-        "run_id": "39074389382-1",
+        "run_id": "39097204516-1",
         "status": "current"
       },
       "comparison_search_pages": 0,
@@ -394,7 +398,7 @@
       "eligible_offers": 0,
       "errors": [
         {
-          "affected_tasks": 4,
+          "affected_tasks": 3,
           "distinct_urls": 1,
           "example_urls": [
             "https://www.biccamera.com/bc/main/"
@@ -416,9 +420,9 @@
           "browser": {},
           "http": {}
         },
-        "run_id": "39074389382-1",
+        "run_id": "39097204516-1",
         "scope": "current_client_instance; redirects_and_browser_subresources_excluded",
-        "started_at": "2026-10-17T22:18:22.303267+00:00",
+        "started_at": "2026-10-18T04:30:17.590859+00:00",
         "status": "current"
       },
       "known_offers": 0,
@@ -466,21 +470,21 @@
       "retry_activity": {
         "recovered_tasks": 0,
         "retries_started": 6,
-        "wait_seconds": 1499.2092015743256
+        "wait_seconds": 1499.212744474411
       },
       "retry_after_epoch_seconds": {},
-      "run_id": "39074389382-1",
+      "run_id": "39097204516-1",
       "scheduler": {
-        "comparison_cursor": 0,
+        "comparison_cursor": 3,
         "cursor": 3,
         "retry_cursor_by_group": {
           "comparison:other": 1,
-          "comparison:requested": 2,
-          "discovery": 3
+          "comparison:requested": 1,
+          "discovery": 2
         },
         "selected_by_attempt_kind": {
-          "first_attempt_this_run": 4,
-          "retry_same_run": 2
+          "first_attempt_this_run": 3,
+          "retry_same_run": 3
         },
         "selected_by_lane": {
           "comparison": 3,
@@ -495,20 +499,20 @@
           "affected_tasks": 2012,
           "host": "www.biccamera.com",
           "reason": "shared_page_retry",
-          "until_epoch_seconds": 1792277791.5711055
+          "until_epoch_seconds": 1792300107.0297694
         },
         {
           "affected_tasks": 1,
           "host": "www.biccamera.com",
           "reason": "TimeoutError",
-          "until_epoch_seconds": 1792277791.5711257
+          "until_epoch_seconds": 1792300107.029789
         }
       ]
     },
     "dospara": {
       "access_block": null,
       "access_retry_after": {},
-      "checkpoint_at": "2026-10-17T22:21:12.477172+00:00",
+      "checkpoint_at": "2026-10-18T04:33:03.169646+00:00",
       "comparison_no_results": 0,
       "comparison_refresh": {
         "existing_queue_policy": "retained_with_original_age_and_attempts",
@@ -518,8 +522,8 @@
         "policy": "requested_or_known_sale_candidate_identity_or_unresolved",
         "reasons": {},
         "request_plan_verified": true,
-        "requested_identity_count": 935,
-        "sale_candidate_identity_count": 2304,
+        "requested_identity_count": 932,
+        "sale_candidate_identity_count": 2326,
         "selected_for_refresh": 0
       },
       "comparison_routing": {
@@ -550,9 +554,9 @@
             "200": 141
           }
         },
-        "run_id": "39074389382-1",
+        "run_id": "39097204516-1",
         "scope": "current_client_instance; redirects_and_browser_subresources_excluded",
-        "started_at": "2026-10-17T22:18:25.428357+00:00",
+        "started_at": "2026-10-18T04:30:14.392373+00:00",
         "status": "current"
       },
       "known_offers": 149,
@@ -600,11 +604,11 @@
         "wait_seconds": 0
       },
       "retry_after_epoch_seconds": {},
-      "run_id": "39074389382-1",
+      "run_id": "39097204516-1",
       "scheduler": {
         "cursor": 1,
         "retry_cursor_by_group": {
-          "discovery": 3,
+          "discovery": 0,
           "sale": 0
         },
         "selected_by_attempt_kind": {
@@ -623,7 +627,7 @@
     "joshin": {
       "access_block": null,
       "access_retry_after": {},
-      "checkpoint_at": "2026-10-17T22:18:54.709372+00:00",
+      "checkpoint_at": "2026-10-18T04:30:48.694207+00:00",
       "comparison_no_results": 0,
       "comparison_refresh": {
         "existing_queue_policy": "retained_with_original_age_and_attempts",
@@ -633,18 +637,18 @@
         "policy": "requested_or_known_sale_candidate_identity_or_unresolved",
         "reasons": {},
         "request_plan_verified": true,
-        "requested_identity_count": 957,
-        "sale_candidate_identity_count": 2304,
+        "requested_identity_count": 954,
+        "sale_candidate_identity_count": 2326,
         "selected_for_refresh": 0
       },
       "comparison_routing": {
         "receipt_count": 0,
         "receipt_results": {},
-        "request_count": 957,
+        "request_count": 954,
         "request_reasons": {
-          "compatible_known_url_missing": 957
+          "compatible_known_url_missing": 954
         },
-        "run_id": "39074389382-1",
+        "run_id": "39097204516-1",
         "status": "current"
       },
       "comparison_search_pages": 0,
@@ -677,9 +681,9 @@
             "403": 1
           }
         },
-        "run_id": "39074389382-1",
+        "run_id": "39097204516-1",
         "scope": "current_client_instance; redirects_and_browser_subresources_excluded",
-        "started_at": "2026-10-17T22:18:26.130604+00:00",
+        "started_at": "2026-10-18T04:30:15.701312+00:00",
         "status": "current"
       },
       "known_offers": 0,
@@ -730,14 +734,14 @@
         "wait_seconds": 0
       },
       "retry_after_epoch_seconds": {},
-      "run_id": "39074389382-1",
+      "run_id": "39097204516-1",
       "scheduler": {
         "comparison_cursor": 2,
         "cursor": 3,
         "retry_cursor_by_group": {
-          "comparison:other": 2,
-          "comparison:requested": 0,
-          "discovery": 1
+          "comparison:other": 0,
+          "comparison:requested": 2,
+          "discovery": 2
         },
         "selected_by_attempt_kind": {
           "first_attempt_this_run": 2013
@@ -755,52 +759,52 @@
     "koubou": {
       "access_block": null,
       "access_retry_after": {},
-      "checkpoint_at": "2026-10-17T22:50:18.197592+00:00",
-      "comparison_no_results": 3,
+      "checkpoint_at": "2026-10-18T05:02:49.817651+00:00",
+      "comparison_no_results": 6,
       "comparison_refresh": {
         "existing_queue_policy": "retained_with_original_age_and_attempts",
         "historical_offer_policy": "retained_not_current_without_new_observation",
-        "known_comparison_offers": 229,
+        "known_comparison_offers": 232,
         "not_newly_refreshed": 13,
         "policy": "requested_or_known_sale_candidate_identity_or_unresolved",
         "reasons": {
           "identity_unresolved": 9,
           "not_requested_identity": 13,
-          "requested_identity": 188,
-          "sale_candidate_identity": 19
+          "requested_identity": 190,
+          "sale_candidate_identity": 20
         },
         "request_plan_verified": true,
-        "requested_identity_count": 957,
-        "sale_candidate_identity_count": 2304,
-        "selected_for_refresh": 216
+        "requested_identity_count": 954,
+        "sale_candidate_identity_count": 2326,
+        "selected_for_refresh": 219
       },
       "comparison_routing": {
         "receipt_count": 1,
         "receipt_results": {
           "verified_current_product": 1
         },
-        "request_count": 957,
+        "request_count": 954,
         "request_reasons": {
-          "compatible_known_url_missing": 837,
-          "known_urls_first": 120
+          "compatible_known_url_missing": 833,
+          "known_urls_first": 121
         },
-        "run_id": "39074389382-1",
+        "run_id": "39097204516-1",
         "status": "current"
       },
-      "comparison_search_pages": 5,
-      "current_offers": 4,
+      "comparison_search_pages": 11,
+      "current_offers": 3,
       "cycle_complete": false,
       "diagnostic_request_count": null,
       "discovery_gaps": [],
-      "eligible_offers": 3,
+      "eligible_offers": 2,
       "errors": [
         {
-          "affected_tasks": 12,
-          "distinct_urls": 12,
+          "affected_tasks": 18,
+          "distinct_urls": 18,
           "example_urls": [
             "https://www.pc-koubou.jp/products/detail.php?product_id=1261884",
             "https://www.pc-koubou.jp/products/detail.php?product_id=1161758",
-            "https://www.pc-koubou.jp/products/detail.php?product_id=1263510"
+            "https://www.pc-koubou.jp/products/detail.php?product_id=1161910"
           ],
           "reason": "http_404",
           "url": null
@@ -809,16 +813,16 @@
           "affected_tasks": 3,
           "distinct_urls": 3,
           "example_urls": [
-            "https://www.pc-koubou.jp/products/detail.php?product_id=1268136",
-            "https://www.pc-koubou.jp/products/detail.php?product_id=1268142",
-            "https://www.pc-koubou.jp/products/detail.php?product_id=1268149"
+            "https://www.pc-koubou.jp/products/detail.php?product_id=1268155",
+            "https://www.pc-koubou.jp/products/detail.php?product_id=1268147",
+            "https://www.pc-koubou.jp/products/detail.php?product_id=1268146"
           ],
           "reason": "rate_limited_retry_later",
           "url": null
         }
       ],
       "flyer": {
-        "checked_at": "2026-10-17T22:50:18.190623+00:00",
+        "checked_at": "2026-10-18T05:02:49.810508+00:00",
         "reason": "FetchError",
         "status": "fetch_failed"
       },
@@ -827,92 +831,93 @@
           "browser": {},
           "http": {}
         },
-        "failure_observations": 38,
+        "failure_observations": 48,
         "response_status_counts": {
           "browser": {
             "200": 4,
-            "404": 12,
-            "429": 7
+            "404": 18,
+            "429": 5
           },
           "http": {
-            "200": 13,
-            "404": 19
+            "200": 18,
+            "404": 23,
+            "429": 2
           }
         },
-        "run_id": "39074389382-1",
+        "run_id": "39097204516-1",
         "scope": "current_client_instance; redirects_and_browser_subresources_excluded",
-        "started_at": "2026-10-17T22:18:22.366813+00:00",
+        "started_at": "2026-10-18T04:30:18.959935+00:00",
         "status": "current"
       },
-      "known_offers": 591,
-      "list_pages": 9,
-      "listed_candidates": 122,
+      "known_offers": 593,
+      "list_pages": 15,
+      "listed_candidates": 127,
       "mandatory_field_coverage": {
         "condition": {
-          "known": 4,
-          "total": 4
+          "known": 3,
+          "total": 3
         },
         "evidence": {
-          "known": 4,
-          "total": 4
+          "known": 3,
+          "total": 3
         },
         "identity": {
-          "known": 4,
-          "total": 4
+          "known": 3,
+          "total": 3
         },
         "price": {
-          "known": 4,
-          "total": 4
+          "known": 3,
+          "total": 3
         },
         "seller": {
-          "known": 4,
-          "total": 4
+          "known": 3,
+          "total": 3
         },
         "shipping": {
-          "known": 3,
-          "total": 4
+          "known": 2,
+          "total": 3
         },
         "stock": {
-          "known": 4,
-          "total": 4
+          "known": 3,
+          "total": 3
         }
       },
       "oldest_pending_at": "2026-09-23T04:43:31.679802+00:00",
       "pending_by_type": {
-        "product:comparison": 218,
-        "product:sale": 274,
-        "search:comparison": 969
+        "product:comparison": 223,
+        "product:sale": 273,
+        "search:comparison": 960
       },
-      "pending_count": 1461,
-      "pending_over_24h": 1358,
-      "request_count": 55,
+      "pending_count": 1456,
+      "pending_over_24h": 1361,
+      "request_count": 70,
       "request_count_scope": "collection_http_attempts_plus_browser_navigations; diagnostic_requests_and_browser_subresources_excluded",
       "retry_activity": {
-        "recovered_tasks": 1,
-        "retries_started": 6,
-        "wait_seconds": 1797.136854171753
+        "recovered_tasks": 0,
+        "retries_started": 10,
+        "wait_seconds": 1797.0902707576752
       },
       "retry_after_epoch_seconds": {
-        "www.pc-koubou.jp": 1792277718.059311
+        "www.pc-koubou.jp": 1792300069.7206886
       },
-      "run_id": "39074389382-1",
+      "run_id": "39097204516-1",
       "scheduler": {
-        "comparison_cursor": 1,
+        "comparison_cursor": 2,
         "cursor": 0,
         "retry_cursor_by_group": {
-          "comparison:other": 0,
-          "comparison:requested": 0,
+          "comparison:other": 3,
+          "comparison:requested": 2,
           "discovery": 1,
-          "sale": 0
+          "sale": 2
         },
         "selected_by_attempt_kind": {
-          "first_attempt_this_run": 28,
+          "first_attempt_this_run": 39,
           "retry_same_run": 4
         },
         "selected_by_lane": {
-          "comparison": 9,
+          "comparison": 13,
           "discovery": 4,
-          "sale": 19
+          "sale": 26
         }
       },
       "source_metadata": null,
@@ -920,16 +925,16 @@
       "transport_retry_after": {},
       "waiting_dependencies": [
         {
-          "affected_tasks": 1448,
+          "affected_tasks": 1437,
           "host": "www.pc-koubou.jp",
           "reason": "rate_limited_retry_later",
-          "until_epoch_seconds": 1792277718.059311
+          "until_epoch_seconds": 1792300069.7206886
         },
         {
           "affected_tasks": 1,
           "host": "www.pc-koubou.jp",
           "reason": "rate_limited_retry_later",
-          "until_epoch_seconds": 1792277718.1011171
+          "until_epoch_seconds": 1792300069.720793
         }
       ]
     },
@@ -938,47 +943,47 @@
       "access_retry_after": {
         "www.sofmap.com": {
           "reason": "http_403",
-          "until": 1792277796.5938635
+          "until": 1792300094.6639276
         }
       },
-      "checkpoint_at": "2026-10-17T22:51:36.771503+00:00",
-      "comparison_no_results": 1,
+      "checkpoint_at": "2026-10-18T05:03:14.841484+00:00",
+      "comparison_no_results": 0,
       "comparison_refresh": {
         "existing_queue_policy": "retained_with_original_age_and_attempts",
         "historical_offer_policy": "retained_not_current_without_new_observation",
-        "known_comparison_offers": 452,
+        "known_comparison_offers": 453,
         "not_newly_refreshed": 58,
         "policy": "requested_or_known_sale_candidate_identity_or_unresolved",
         "reasons": {
           "not_requested_identity": 58,
-          "requested_identity": 318,
-          "sale_candidate_identity": 76
+          "requested_identity": 317,
+          "sale_candidate_identity": 78
         },
         "request_plan_verified": true,
-        "requested_identity_count": 957,
-        "sale_candidate_identity_count": 2304,
-        "selected_for_refresh": 394
+        "requested_identity_count": 954,
+        "sale_candidate_identity_count": 2326,
+        "selected_for_refresh": 395
       },
       "comparison_routing": {
         "receipt_count": 0,
         "receipt_results": {},
-        "request_count": 957,
+        "request_count": 954,
         "request_reasons": {
-          "compatible_known_url_missing": 957
+          "compatible_known_url_missing": 954
         },
-        "run_id": "39074389382-1",
+        "run_id": "39097204516-1",
         "status": "current"
       },
-      "comparison_search_pages": 4,
-      "current_offers": 23,
+      "comparison_search_pages": 3,
+      "current_offers": 22,
       "cycle_complete": false,
       "diagnostic_request_count": null,
       "discovery_gaps": [],
       "eligible_offers": 0,
       "errors": [
         {
-          "affected_tasks": 13,
-          "distinct_urls": 13,
+          "affected_tasks": 14,
+          "distinct_urls": 14,
           "example_urls": [
             "https://www.sofmap.com/product_detail.aspx?sku=415281576",
             "https://www.sofmap.com/error/exec/_/isprdt=true",
@@ -988,8 +993,8 @@
           "url": null
         },
         {
-          "affected_tasks": 12,
-          "distinct_urls": 12,
+          "affected_tasks": 11,
+          "distinct_urls": 11,
           "example_urls": [
             "https://www.sofmap.com/search_result.aspx?keyword=ASUS+B850M+MAX+GAMING+WIFI+%28B850+AM5+MicroATX%29+%E3%83%89%E3%82%B9%E3%83%91%E3%83%A9%E9%99%90%E5%AE%9A%E3%83%A2%E3%83%87%E3%83%AB",
             "https://www.sofmap.com/search_result.aspx?keyword=ZALMAN+Z3+Iceberg+Black+%28E-ATX+%E3%82%AC%E3%83%A9%E3%82%B9%29+%E3%83%89%E3%82%B9%E3%83%91%E3%83%A9%E9%99%90%E5%AE%9A%E3%83%A2%E3%83%87%E3%83%AB",
@@ -1008,12 +1013,12 @@
           "url": "https://www.sofmap.com/contents_sys/server_too_busy.html?aspxerrorpath=%2Fproduct_detail.aspx"
         },
         {
-          "affected_tasks": 27,
-          "distinct_urls": 27,
+          "affected_tasks": 22,
+          "distinct_urls": 22,
           "example_urls": [
             "https://www.sofmap.com/product_detail.aspx?sku=415176218",
             "https://www.sofmap.com/product_detail.aspx?sku=415036770",
-            "https://www.sofmap.com/product_detail.aspx?sku=415352065"
+            "https://www.sofmap.com/search_result.aspx?keyword=%E3%83%89%E3%82%B9%E3%83%91%E3%83%A9%E3%82%BB%E3%83%AC%E3%82%AF%E3%83%88+L240M2-BK+%28240mm+%E3%83%96%E3%83%A9%E3%83%83%E3%82%AF%29"
           ],
           "reason": "http_403",
           "url": null
@@ -1025,86 +1030,86 @@
           "browser": {},
           "http": {}
         },
-        "failure_observations": 27,
+        "failure_observations": 22,
         "response_status_counts": {
           "browser": {},
           "http": {
-            "200": 65,
-            "403": 27
+            "200": 62,
+            "403": 22
           }
         },
-        "run_id": "39074389382-1",
+        "run_id": "39097204516-1",
         "scope": "current_client_instance; redirects_and_browser_subresources_excluded",
-        "started_at": "2026-10-17T22:18:21.604240+00:00",
+        "started_at": "2026-10-18T04:30:19.911626+00:00",
         "status": "current"
       },
-      "known_offers": 689,
-      "list_pages": 16,
+      "known_offers": 711,
+      "list_pages": 14,
       "listed_candidates": 185,
       "mandatory_field_coverage": {
         "condition": {
-          "known": 23,
-          "total": 23
+          "known": 22,
+          "total": 22
         },
         "evidence": {
-          "known": 23,
-          "total": 23
+          "known": 21,
+          "total": 22
         },
         "identity": {
-          "known": 23,
-          "total": 23
+          "known": 22,
+          "total": 22
         },
         "price": {
-          "known": 23,
-          "total": 23
+          "known": 22,
+          "total": 22
         },
         "seller": {
-          "known": 23,
-          "total": 23
+          "known": 22,
+          "total": 22
         },
         "shipping": {
           "known": 0,
-          "total": 23
+          "total": 22
         },
         "stock": {
-          "known": 23,
-          "total": 23
+          "known": 22,
+          "total": 22
         }
       },
       "oldest_pending_at": "2026-09-21T15:06:12.461215+00:00",
       "pending_by_type": {
-        "list:comparison": 1000,
-        "product:comparison": 448,
-        "product:sale": 250,
-        "search:comparison": 1117
+        "list:comparison": 999,
+        "product:comparison": 449,
+        "product:sale": 253,
+        "search:comparison": 1120
       },
-      "pending_count": 2815,
-      "pending_over_24h": 2601,
-      "request_count": 92,
+      "pending_count": 2821,
+      "pending_over_24h": 2606,
+      "request_count": 84,
       "request_count_scope": "collection_http_attempts_plus_browser_navigations; diagnostic_requests_and_browser_subresources_excluded",
       "retry_activity": {
-        "recovered_tasks": 12,
+        "recovered_tasks": 11,
         "retries_started": 0,
-        "wait_seconds": 1793.8534445762634
+        "wait_seconds": 1795.1571304798126
       },
       "retry_after_epoch_seconds": {},
-      "run_id": "39074389382-1",
+      "run_id": "39097204516-1",
       "scheduler": {
-        "comparison_cursor": 1,
+        "comparison_cursor": 2,
         "cursor": 0,
         "retry_cursor_by_group": {
-          "comparison:other": 1,
-          "comparison:requested": 1,
+          "comparison:other": 3,
+          "comparison:requested": 0,
           "discovery": 3,
-          "sale": 0
+          "sale": 2
         },
         "selected_by_attempt_kind": {
-          "first_attempt_this_run": 93
+          "first_attempt_this_run": 83
         },
         "selected_by_lane": {
-          "comparison": 28,
+          "comparison": 25,
           "discovery": 8,
-          "sale": 57
+          "sale": 50
         }
       },
       "source_metadata": null,
@@ -1112,161 +1117,182 @@
       "transport_retry_after": {},
       "waiting_dependencies": [
         {
-          "affected_tasks": 2762,
+          "affected_tasks": 2773,
           "host": "www.sofmap.com",
           "reason": "access_retry_later:http_403",
-          "until_epoch_seconds": 1792277796.5938635
+          "until_epoch_seconds": 1792300094.6639276
         }
       ]
     },
     "tsukumo": {
       "access_block": null,
       "access_retry_after": {},
-      "checkpoint_at": "2026-10-17T22:53:21.914454+00:00",
-      "comparison_no_results": 129,
+      "checkpoint_at": "2026-10-18T05:03:46.375381+00:00",
+      "comparison_no_results": 0,
       "comparison_refresh": {
         "existing_queue_policy": "retained_with_original_age_and_attempts",
         "historical_offer_policy": "retained_not_current_without_new_observation",
-        "known_comparison_offers": 1795,
+        "known_comparison_offers": 1804,
         "not_newly_refreshed": 1451,
         "policy": "requested_or_known_sale_candidate_identity_or_unresolved",
         "reasons": {
           "identity_unresolved": 1,
           "not_requested_identity": 1451,
-          "requested_identity": 163,
-          "sale_candidate_identity": 180
+          "requested_identity": 171,
+          "sale_candidate_identity": 181
         },
         "request_plan_verified": true,
-        "requested_identity_count": 453,
-        "sale_candidate_identity_count": 2304,
-        "selected_for_refresh": 344
+        "requested_identity_count": 452,
+        "sale_candidate_identity_count": 2326,
+        "selected_for_refresh": 353
       },
       "comparison_routing": {
-        "receipt_count": 102,
+        "receipt_count": 1,
         "receipt_results": {
-          "verified_current_product": 102
+          "search_requested": 1
         },
-        "request_count": 453,
+        "request_count": 452,
         "request_reasons": {
-          "compatible_known_url_missing": 330,
-          "known_urls_first": 123
+          "compatible_known_url_missing": 323,
+          "known_urls_first": 129
         },
-        "run_id": "39074389382-1",
+        "run_id": "39097204516-1",
         "status": "current"
       },
-      "comparison_search_pages": 129,
-      "current_offers": 1095,
+      "comparison_search_pages": 0,
+      "current_offers": 0,
       "cycle_complete": false,
-      "diagnostic_request_count": 0,
+      "diagnostic_request_count": 1,
       "discovery_gaps": [],
-      "eligible_offers": 749,
+      "eligible_offers": 0,
       "errors": [
         {
-          "affected_tasks": 1,
-          "distinct_urls": 1,
+          "affected_tasks": 17,
+          "distinct_urls": 13,
           "example_urls": [
-            "https://shop.tsukumo.co.jp/goods/4580417927726/"
+            "https://shop.tsukumo.co.jp/goods/4549576252476/",
+            "https://shop.tsukumo.co.jp/goods/4711289500964/",
+            "https://shop.tsukumo.co.jp/goods/4570105182346/"
           ],
-          "reason": "http_404",
-          "url": "https://shop.tsukumo.co.jp/goods/4580417927726/"
+          "reason": "RemoteDisconnected",
+          "url": null
         }
       ],
       "flyer": null,
       "http_evidence": {
         "exception_counts": {
           "browser": {},
-          "http": {}
-        },
-        "failure_observations": 130,
-        "response_status_counts": {
-          "browser": {},
           "http": {
-            "200": 1167,
-            "404": 130
+            "RemoteDisconnected": 63
           }
         },
-        "run_id": "39074389382-1",
+        "failure_observations": 63,
+        "response_status_counts": {
+          "browser": {},
+          "http": {}
+        },
+        "run_id": "39097204516-1",
         "scope": "current_client_instance; redirects_and_browser_subresources_excluded",
-        "started_at": "2026-10-17T22:18:21.298177+00:00",
+        "started_at": "2026-10-18T04:30:17.764466+00:00",
         "status": "current"
       },
       "known_offers": 2535,
-      "list_pages": 193,
-      "listed_candidates": 612,
+      "list_pages": 0,
+      "listed_candidates": 0,
       "mandatory_field_coverage": {
         "condition": {
-          "known": 1095,
-          "total": 1095
+          "known": 0,
+          "total": 0
         },
         "evidence": {
-          "known": 1018,
-          "total": 1095
+          "known": 0,
+          "total": 0
         },
         "identity": {
-          "known": 1094,
-          "total": 1095
+          "known": 0,
+          "total": 0
         },
         "price": {
-          "known": 1094,
-          "total": 1095
+          "known": 0,
+          "total": 0
         },
         "seller": {
-          "known": 1095,
-          "total": 1095
+          "known": 0,
+          "total": 0
         },
         "shipping": {
-          "known": 1090,
-          "total": 1095
+          "known": 0,
+          "total": 0
         },
         "stock": {
-          "known": 1090,
-          "total": 1095
+          "known": 0,
+          "total": 0
         }
       },
       "oldest_pending_at": "2026-10-16T09:19:36.446609+00:00",
       "pending_by_type": {
-        "product:comparison": 98,
-        "product:sale": 1,
-        "search:comparison": 148
+        "list:sale": 1,
+        "product:comparison": 353,
+        "product:sale": 732,
+        "search:comparison": 324
       },
-      "pending_count": 247,
+      "pending_count": 1410,
       "pending_over_24h": 1,
-      "request_count": 1297,
+      "request_count": 63,
       "request_count_scope": "collection_http_attempts_plus_browser_navigations; diagnostic_requests_and_browser_subresources_excluded",
       "retry_activity": {
         "recovered_tasks": 0,
-        "retries_started": 0,
-        "wait_seconds": 0
+        "retries_started": 4,
+        "wait_seconds": 1795.6442286968231
       },
       "retry_after_epoch_seconds": {},
-      "run_id": "39074389382-1",
+      "run_id": "39097204516-1",
       "scheduler": {
-        "comparison_cursor": 0,
+        "comparison_cursor": 2,
         "cursor": 3,
         "retry_cursor_by_group": {
-          "comparison:other": 0,
-          "comparison:requested": 3,
-          "discovery": 0,
+          "comparison:other": 1,
+          "comparison:requested": 0,
+          "discovery": 3,
           "sale": 3
         },
         "selected_by_attempt_kind": {
-          "first_attempt_this_run": 1489
+          "first_attempt_this_run": 17,
+          "retry_same_run": 4
         },
         "selected_by_lane": {
-          "comparison": 739,
-          "discovery": 11,
-          "sale": 739
+          "comparison": 6,
+          "discovery": 3,
+          "sale": 12
         }
       },
       "source_metadata": null,
       "status": "partial",
-      "transport_retry_after": {},
-      "waiting_dependencies": []
+      "transport_retry_after": {
+        "shop.tsukumo.co.jp": {
+          "reason": "RemoteDisconnected",
+          "until": 1792300124.8930304
+        }
+      },
+      "waiting_dependencies": [
+        {
+          "affected_tasks": 1409,
+          "host": "shop.tsukumo.co.jp",
+          "reason": "transport_retry_later:RemoteDisconnected",
+          "until_epoch_seconds": 1792300124.8930304
+        },
+        {
+          "affected_tasks": 1,
+          "host": "shop.tsukumo.co.jp",
+          "reason": "RemoteDisconnected",
+          "until_epoch_seconds": 1792300124.893065
+        }
+      ]
     },
     "yahoo": {
       "access_block": null,
       "access_retry_after": {},
-      "checkpoint_at": "2026-10-17T22:18:26.260559+00:00",
+      "checkpoint_at": "2026-10-18T04:30:18.673475+00:00",
       "comparison_no_results": 0,
       "comparison_refresh": {
         "existing_queue_policy": "retained_with_original_age_and_attempts",
@@ -1276,8 +1302,8 @@
         "policy": "requested_or_known_sale_candidate_identity_or_unresolved",
         "reasons": {},
         "request_plan_verified": true,
-        "requested_identity_count": 957,
-        "sale_candidate_identity_count": 2304,
+        "requested_identity_count": 954,
+        "sale_candidate_identity_count": 2326,
         "selected_for_refresh": 0
       },
       "comparison_routing": {
@@ -1314,9 +1340,9 @@
           "browser": {},
           "http": {}
         },
-        "run_id": "39074389382-1",
+        "run_id": "39097204516-1",
         "scope": "current_client_instance; redirects_and_browser_subresources_excluded",
-        "started_at": "2026-10-17T22:18:26.212797+00:00",
+        "started_at": "2026-10-18T04:30:18.638578+00:00",
         "status": "current"
       },
       "known_offers": 0,
@@ -1367,7 +1393,7 @@
         "wait_seconds": 0
       },
       "retry_after_epoch_seconds": {},
-      "run_id": "39074389382-1",
+      "run_id": "39097204516-1",
       "scheduler": {
         "cursor": 0,
         "selected_by_attempt_kind": {},
@@ -1381,7 +1407,7 @@
     "yodobashi": {
       "access_block": null,
       "access_retry_after": {},
-      "checkpoint_at": "2026-10-17T22:20:28.443797+00:00",
+      "checkpoint_at": "2026-10-18T04:32:38.665697+00:00",
       "comparison_no_results": 0,
       "comparison_refresh": {
         "existing_queue_policy": "retained_with_original_age_and_attempts",
@@ -1391,18 +1417,18 @@
         "policy": "requested_or_known_sale_candidate_identity_or_unresolved",
         "reasons": {},
         "request_plan_verified": true,
-        "requested_identity_count": 957,
-        "sale_candidate_identity_count": 2304,
+        "requested_identity_count": 954,
+        "sale_candidate_identity_count": 2326,
         "selected_for_refresh": 0
       },
       "comparison_routing": {
         "receipt_count": 0,
         "receipt_results": {},
-        "request_count": 957,
+        "request_count": 954,
         "request_reasons": {
-          "compatible_known_url_missing": 957
+          "compatible_known_url_missing": 954
         },
-        "run_id": "39074389382-1",
+        "run_id": "39097204516-1",
         "status": "current"
       },
       "comparison_search_pages": 0,
@@ -1437,9 +1463,9 @@
           "browser": {},
           "http": {}
         },
-        "run_id": "39074389382-1",
+        "run_id": "39097204516-1",
         "scope": "current_client_instance; redirects_and_browser_subresources_excluded",
-        "started_at": "2026-10-17T22:18:48.478650+00:00",
+        "started_at": "2026-10-18T04:30:44.518944+00:00",
         "status": "current"
       },
       "known_offers": 0,
@@ -1490,14 +1516,14 @@
         "wait_seconds": 0
       },
       "retry_after_epoch_seconds": {},
-      "run_id": "39074389382-1",
+      "run_id": "39097204516-1",
       "scheduler": {
         "comparison_cursor": 2,
         "cursor": 3,
         "retry_cursor_by_group": {
-          "comparison:other": 2,
-          "comparison:requested": 0,
-          "discovery": 1
+          "comparison:other": 0,
+          "comparison:requested": 2,
+          "discovery": 2
         },
         "selected_by_attempt_kind": {
           "first_attempt_this_run": 2013
