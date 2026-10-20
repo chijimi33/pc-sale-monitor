@@ -4,32 +4,32 @@
     "decision": "measure_free_gaps_before_paid_comparison",
     "free_current_conditions_coverage": {
       "condition": 0.0,
-      "evidence": 0.03333333333333333,
-      "identity": 0.8666666666666667,
-      "price": 0.03333333333333333,
-      "seller": 0.15555555555555556,
+      "evidence": 0.02912621359223301,
+      "identity": 0.8737864077669902,
+      "price": 0.02912621359223301,
+      "seller": 0.20388349514563106,
       "shipping": 0.0,
-      "stock": 0.1111111111111111
+      "stock": 0.13592233009708737
     }
   },
   "coverage": {
     "amazon": {
       "condition": 0.0,
-      "evidence": 0.03333333333333333,
-      "identity": 0.8666666666666667,
-      "price": 0.03333333333333333,
-      "seller": 0.15555555555555556,
+      "evidence": 0.02912621359223301,
+      "identity": 0.8737864077669902,
+      "price": 0.02912621359223301,
+      "seller": 0.20388349514563106,
       "shipping": 0.0,
-      "stock": 0.1111111111111111
+      "stock": 0.13592233009708737
     },
     "ark": {
       "condition": 1.0,
-      "evidence": 0.8083756845132569,
-      "identity": 0.9663554347397865,
-      "price": 0.9596974352913368,
+      "evidence": 0.8060390346931592,
+      "identity": 0.9637032111706497,
+      "price": 0.959752806351938,
       "seller": 1.0,
-      "shipping": 0.7384863885277548,
-      "stock": 0.9736437773312847
+      "shipping": 0.738725701099073,
+      "stock": 0.9753588610317988
     },
     "bic": {
       "condition": null,
@@ -59,31 +59,31 @@
       "stock": null
     },
     "koubou": {
-      "condition": 0.9960159362549801,
-      "evidence": 0.7290836653386454,
-      "identity": 0.7808764940239044,
-      "price": 0.7808764940239044,
+      "condition": 0.9960474308300395,
+      "evidence": 0.7312252964426877,
+      "identity": 0.782608695652174,
+      "price": 0.782608695652174,
       "seller": 1.0,
-      "shipping": 0.6693227091633466,
+      "shipping": 0.6679841897233202,
       "stock": 1.0
     },
     "sofmap": {
-      "condition": 0.9020537124802528,
-      "evidence": 0.976303317535545,
+      "condition": 0.9047619047619048,
+      "evidence": 0.9777777777777777,
       "identity": 1.0,
-      "price": 0.9873617693522907,
+      "price": 0.9888888888888889,
       "seller": 1.0,
       "shipping": 0.0,
-      "stock": 0.9921011058451816
+      "stock": 0.9936507936507937
     },
     "tsukumo": {
       "condition": 1.0,
-      "evidence": 0.9267577306628677,
-      "identity": 0.9991619877650214,
-      "price": 0.9991619877650214,
+      "evidence": 0.9264422706616344,
+      "identity": 0.9991527381961026,
+      "price": 0.9991527381961026,
       "seller": 1.0,
-      "shipping": 0.9942177155786475,
-      "stock": 0.9955585351546132
+      "shipping": 0.9943002387737812,
+      "stock": 0.9954555957790957
     },
     "yahoo": {
       "condition": null,
@@ -793,6 +793,30 @@
             "store": "ark",
             "url": "https://www.ark-pc.co.jp/i/50287312/",
             "verification": "Codex checked the primary Product JSON-LD (name, JAN/SKU, price, condition and availability) and visible product purchase price, free-shipping label and stock text. Later primary-page observation; not a claim that the page bytes or price matched the earlier collection time."
+          },
+          {
+            "body_sha256": "f0f9f307b4ed89856176ed7e40d6f8b9b07a17c78f428bf83e72b8ae9f4463cf",
+            "condition": "new",
+            "jan": "4573626730416",
+            "observed_at": "2026-10-20T10:03:40.840557+00:00",
+            "price_yen": 17480,
+            "shipping_yen": 0,
+            "stock": "in_stock",
+            "store": "tsukumo",
+            "url": "https://shop.tsukumo.co.jp/goods/4573626730416/",
+            "verification": "Codex checked primary Product JSON-LD and visible purchase block; later page evidence is distinguished from collection-time bytes."
+          },
+          {
+            "body_sha256": "e6c1fda557edd81a771fc61ec7f044277f7b2edff34f48ce3513e09bdfa81c3f",
+            "condition": "new",
+            "jan": "4573626730416",
+            "observed_at": "2026-10-20T10:03:41.190767+00:00",
+            "price_yen": 17480,
+            "shipping_yen": 0,
+            "stock": "in_stock",
+            "store": "ark",
+            "url": "https://www.ark-pc.co.jp/i/50287312/",
+            "verification": "Codex checked primary Product JSON-LD and visible purchase block; later page evidence is distinguished from collection-time bytes."
           }
         ],
         "findings": [
@@ -800,10 +824,32 @@
             "action": "Do not quote the old current_evidence price as a live sale. Await a subsequent collection and verify event withdrawal or fresh qualification before resolving. This is not evidence that the original collection price was false.",
             "later_primary_payment_yen": 17480,
             "reason": "current_conditions_changed_since_snapshot",
+            "resolution": {
+              "delivery_status": "unconfirmed",
+              "gap_yen": 0,
+              "independent_history_days": 33,
+              "independent_history_samples": 169,
+              "later_change_is_not_evidence_of_original_false_positive": true,
+              "median_yen": 17480,
+              "new_decision": "insufficient",
+              "new_decision_reasons": [
+                "A_independent_sellers_insufficient",
+                "B_history_gap_below_threshold"
+              ],
+              "new_payment_yen": 17480,
+              "observed_at": "2026-10-20T04:58:00.736108+00:00",
+              "old_qualified_event_absent_from_current_feed": true,
+              "primary_page_matches": true,
+              "source_data_sha": "0713996cc9a2dd2988f79d2dafb34d78455ec1b3",
+              "source_run_id": "39371321325-1",
+              "stock": "in_stock"
+            },
+            "resolved_at": "2026-10-20T10:06:30.074688+00:00",
             "source_payment_yen": 13981,
-            "status": "open"
+            "status": "resolved"
           }
         ],
+        "followup_resolution_evidence_sha256": "19238415d241502d19f233ee78f76b62a6372473897f5928856bc24caee2db0c",
         "later_primary_check": {
           "checked_at": "2026-10-19T10:05:42.231988+00:00",
           "payment_yen": 17480,
@@ -880,12 +926,143 @@
           "status": "supported"
         },
         "product": "Viper V3 Pro SE 超軽量左右対称型ワイヤレス e スポーツゲーミングマウス RZ01-04550100-R3A1",
-        "review_scope": "Published current_evidence revalidation with independently recomputed history and later primary-page checks; no delivery confirmation.",
-        "reviewed_at": "2026-10-19T10:09:59.391869+00:00",
+        "review_scope": "Historical snapshot A/B calculation audit plus resolved current-condition follow-up. Original source run, source values, calculation and prior held record retained. This is not a claim that the product currently qualifies or that any notification was delivered.",
+        "reviewed_at": "2026-10-20T10:06:30.074688+00:00",
         "reviewer": "Codex",
+        "revision_history": [
+          {
+            "reason": "Subsequent real collection verified price change and removed the outdated qualified event; retain the complete prior held record.",
+            "record": {
+              "delivery_status": "unconfirmed",
+              "event_id": "54b3307f1b410cad1e7d1d5aa422c40a",
+              "evidence": [
+                {
+                  "body_sha256": "877114fac532aff729621474e63657a7a1c5df3d3eaee97a1b5769cd5a727491",
+                  "condition": "new",
+                  "content_hash": "eca61f30904f75adc745c30a677d39687ebbef3286429e7c04c80401ddea6dff",
+                  "jan": "4573626730416",
+                  "model": null,
+                  "observed_at": "2026-10-19T10:05:41.804207+00:00",
+                  "price_yen": 17480,
+                  "shipping_yen": 0,
+                  "stock": "in_stock",
+                  "store": "tsukumo",
+                  "url": "https://shop.tsukumo.co.jp/goods/4573626730416/",
+                  "verification": "Codex checked the primary Product JSON-LD (name, JAN/SKU, price, condition and availability) and visible product purchase price, free-shipping label and stock text. Later primary-page observation; not a claim that the page bytes or price matched the earlier collection time."
+                },
+                {
+                  "body_sha256": "1bbcf9ee17aa2232404a7ef1a1bb52f9620aa01e70e1c5ee317e4dddfecf518a",
+                  "condition": "new",
+                  "content_hash": "456fa46d0493400b69b5504452099d17ccc20024f7bcdeadbf2bcc182a1571a3",
+                  "jan": "4573626730416",
+                  "model": null,
+                  "observed_at": "2026-10-19T10:05:42.231988+00:00",
+                  "price_yen": 17480,
+                  "shipping_yen": 0,
+                  "stock": "in_stock",
+                  "store": "ark",
+                  "url": "https://www.ark-pc.co.jp/i/50287312/",
+                  "verification": "Codex checked the primary Product JSON-LD (name, JAN/SKU, price, condition and availability) and visible product purchase price, free-shipping label and stock text. Later primary-page observation; not a claim that the page bytes or price matched the earlier collection time."
+                }
+              ],
+              "findings": [
+                {
+                  "action": "Do not quote the old current_evidence price as a live sale. Await a subsequent collection and verify event withdrawal or fresh qualification before resolving. This is not evidence that the original collection price was false.",
+                  "later_primary_payment_yen": 17480,
+                  "reason": "current_conditions_changed_since_snapshot",
+                  "source_payment_yen": 13981,
+                  "status": "open"
+                }
+              ],
+              "later_primary_check": {
+                "checked_at": "2026-10-19T10:05:42.231988+00:00",
+                "payment_yen": 17480,
+                "price_changed_since_collection": true,
+                "qualified": false,
+                "reason": [
+                  "A_independent_sellers_insufficient",
+                  "B_history_gap_below_threshold"
+                ],
+                "rule": null,
+                "scope": "This later check does not prove an error at the earlier collection time."
+              },
+              "offer_key": "47eaa30638038cabd2384600",
+              "price_check": {
+                "candidate_payment_yen": 13981,
+                "checks": {
+                  "at_least_30_elapsed_days": true,
+                  "difference_at_least_10_percent": true,
+                  "difference_at_least_500": true,
+                  "minimum_3_days": true,
+                  "no_current_comparator_cheaper": true,
+                  "one_or_more_current_independent_comparators": true,
+                  "price_not_above_observed_minimum": true
+                },
+                "daily_market_minimum_jst": {
+                  "2026-09-14": 13990,
+                  "2026-09-15": 13990,
+                  "2026-09-20": 17480,
+                  "2026-09-21": 17480,
+                  "2026-09-22": 17480,
+                  "2026-09-23": 17480,
+                  "2026-09-24": 17480,
+                  "2026-09-25": 17480,
+                  "2026-09-26": 17480,
+                  "2026-09-27": 17480,
+                  "2026-09-28": 13990,
+                  "2026-09-29": 17480,
+                  "2026-09-30": 17480,
+                  "2026-10-01": 13990,
+                  "2026-10-02": 17480,
+                  "2026-10-03": 17480,
+                  "2026-10-04": 17480,
+                  "2026-10-05": 17480,
+                  "2026-10-06": 17480,
+                  "2026-10-07": 17480,
+                  "2026-10-08": 17480,
+                  "2026-10-09": 17480,
+                  "2026-10-10": 17480,
+                  "2026-10-11": 17480,
+                  "2026-10-12": 13981,
+                  "2026-10-13": 13981,
+                  "2026-10-14": 13981,
+                  "2026-10-15": 13981,
+                  "2026-10-16": 13981,
+                  "2026-10-17": 13981,
+                  "2026-10-18": 13981,
+                  "2026-10-19": 13981
+                },
+                "difference_percent": 20.01716247139588,
+                "difference_yen": 3499,
+                "history_days": 32,
+                "history_files_verified": 72,
+                "history_median_yen": 17480.0,
+                "history_minimum_yen": 13981,
+                "history_samples": 165,
+                "history_selection_sha256": "5fb29805f04a0cde0d74a5b0501612057ace90fb08e75a130abe33cdfcefaf21",
+                "history_source_data_sha": "c0b77fdd3eecd3a073d671c7a8c5ec84ddb5f4db",
+                "independent_other_sellers": 1,
+                "lowest_other_payment_yen": 17480,
+                "points_basis": "not_verified_not_applied",
+                "rule": "B",
+                "scope": "Recorded collection conditions only. Old prices were used solely as B history; current comparison came from the same source run.",
+                "snapshot_rule": "B_recent_median",
+                "status": "supported"
+              },
+              "product": "Viper V3 Pro SE 超軽量左右対称型ワイヤレス e スポーツゲーミングマウス RZ01-04550100-R3A1",
+              "review_scope": "Published current_evidence revalidation with independently recomputed history and later primary-page checks; no delivery confirmation.",
+              "reviewed_at": "2026-10-19T10:09:59.391869+00:00",
+              "reviewer": "Codex",
+              "source_data_sha": "c0b77fdd3eecd3a073d671c7a8c5ec84ddb5f4db",
+              "source_run_id": "39200324440-1",
+              "status": "needs_review"
+            },
+            "superseded_at": "2026-10-20T10:06:30.074688+00:00"
+          }
+        ],
         "source_data_sha": "c0b77fdd3eecd3a073d671c7a8c5ec84ddb5f4db",
         "source_run_id": "39200324440-1",
-        "status": "needs_review"
+        "status": "passed"
       },
       {
         "delivery_status": "unconfirmed",
@@ -1008,9 +1185,9 @@
     ],
     "counting_policy": "Distinct events with unresolved findings are not counted as completed reviews. This record does not confirm delivery.",
     "false_positive_count": 0,
-    "needs_review_count": 3,
-    "reviewed_at": "2026-10-19T10:09:59.391869+00:00",
-    "reviewed_count": 6,
+    "needs_review_count": 2,
+    "reviewed_at": "2026-10-20T10:06:30.074688+00:00",
+    "reviewed_count": 7,
     "reviewer": "ChatGPT/Codex",
     "schema_version": 1
   },
@@ -1019,20 +1196,21 @@
     "duplicate_event_ids": [],
     "false_positive_count": 0,
     "invalid_records": [],
-    "needs_review_count": 3,
+    "needs_review_count": 2,
     "passed_event_ids": [
       "056bed797208c8f9a1e7602f9ef7a5d1",
       "3372a8fc6ddc40e0257ce24e1d54e0d3",
       "4c834e735bdd7f06bdc090b9267e3f74",
+      "54b3307f1b410cad1e7d1d5aa422c40a",
       "76993c9313bbc85a63a5df9071497a3a",
       "d2d76764ad56bfe39f2488f53e76bd4e",
       "f9237c3d654ce1ecbab7896366f8d125"
     ],
     "policy": "distinct_final_records_with_source_evidence",
-    "reviewed_count": 6
+    "reviewed_count": 7
   },
   "measured_four_hour_windows": 26,
-  "measured_runs": 186,
+  "measured_runs": 187,
   "reasons": [
     "insufficient_scheduled_runs",
     "ten_store_coverage_incomplete",
@@ -1057,7 +1235,6 @@
     },
     "policy": "github_api_schedule_original_created_at_four_hour_windows",
     "sampled_run_ids": [
-      "38392311175-1",
       "38453304015-1",
       "38485924046-1",
       "38513410373-1",
@@ -1082,7 +1259,8 @@
       "39200324440-1",
       "39279039597-1",
       "39324193058-1",
-      "39371321325-1"
+      "39371321325-1",
+      "39431275820-1"
     ],
     "unique_scheduled_runs": 28,
     "unknown_run_ids": []
