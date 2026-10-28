@@ -1,20 +1,15 @@
 {
-  "generated_at": "2026-10-27T21:20:06.607597+00:00",
-  "run_id": "40580214586-1",
+  "generated_at": "2026-10-28T06:16:49.732947+00:00",
+  "run_id": "40639117005-1",
   "stores": {
     "amazon": {
-      "checkpoint_at": "2026-10-27T20:49:30.060328+00:00",
+      "checkpoint_at": "2026-10-28T05:40:25.079076+00:00",
       "discovery_gaps": [],
       "errors": [
         {
           "affected_tasks": 1,
-          "reason": "http_404",
-          "url": "https://www.amazon.co.jp/dp/B0DZ619GJ8"
-        },
-        {
-          "affected_tasks": 1,
           "reason": "amazon_access_challenge",
-          "url": "https://www.amazon.co.jp/dp/B0DL59ZSBB"
+          "url": "https://www.amazon.co.jp/dp/B0DZ619GJ8"
         }
       ],
       "http_evidence": {
@@ -22,90 +17,78 @@
           "browser": {},
           "http": {}
         },
-        "failure_observations": 1,
-        "failure_samples": [
-          {
-            "host": "www.amazon.co.jp",
-            "method": "http",
-            "observed_at": "2026-10-27T20:43:34.790225+00:00",
-            "retry_after": {
-              "kind": "absent"
-            },
-            "status": 404,
-            "url_sha256": "68d5c1f609370303a98b4a9e555af09d1ed52c3b180c4321418e28e2b966e964"
-          }
-        ],
+        "failure_observations": 0,
+        "failure_samples": [],
         "omitted_failure_samples": 0,
         "response_status_counts": {
           "browser": {},
           "http": {
-            "200": 216,
-            "404": 1
+            "200": 1
           }
         },
-        "run_id": "40580214586-1",
+        "run_id": "40639117005-1",
         "scope": "current_client_instance; redirects_and_browser_subresources_excluded",
-        "started_at": "2026-10-27T20:43:34.409572+00:00"
+        "started_at": "2026-10-28T05:40:24.898310+00:00"
       },
-      "run_id": "40580214586-1",
+      "run_id": "40639117005-1",
       "status": "access_required",
       "transport_diagnostic": null
     },
     "ark": {
-      "checkpoint_at": "2026-10-27T21:06:36.273836+00:00",
-      "discovery_gaps": [
-        {
-          "reason": "no_sale_candidates_parser_review",
-          "url": "https://www.ark-pc.co.jp/special/ark_onlinestore_night_coupon_sale/"
-        }
-      ],
+      "checkpoint_at": "2026-10-28T06:05:34.184912+00:00",
+      "discovery_gaps": [],
       "errors": [],
       "http_evidence": {
         "exception_counts": {
           "browser": {},
           "http": {
-            "IncompleteRead": 1,
-            "RemoteDisconnected": 1
+            "TimeoutError": 1
           }
         },
         "failure_observations": 2,
         "failure_samples": [
           {
-            "exception_type": "IncompleteRead",
+            "exception_type": "TimeoutError",
             "host": "www.ark-pc.co.jp",
             "method": "http",
-            "observed_at": "2026-10-27T20:49:18.347483+00:00",
-            "url_sha256": "8324e26b7bedd39b839f7317db0deff41ddbb1560531146f3eca495e9be676ea"
+            "observed_at": "2026-10-28T05:47:18.796431+00:00",
+            "url_sha256": "f35fb752f43740cb05c3369e7b0d91a4811e20ba02b7e378705f9e58664ba2df"
           },
           {
-            "exception_type": "RemoteDisconnected",
             "host": "www.ark-pc.co.jp",
+            "host_retry_at_epoch_seconds": 1793167020.5532558,
             "method": "http",
-            "observed_at": "2026-10-27T21:01:18.570503+00:00",
-            "url_sha256": "ca3d80698d74de7769d5fdd07556b524d7aab8b5d34cd7dd3af4725597f5bac0"
+            "observed_at": "2026-10-28T05:55:00.553273+00:00",
+            "retry_after": {
+              "kind": "seconds",
+              "seconds": 120.0
+            },
+            "status": 429,
+            "url_sha256": "1721b6112a91f58e0a8827a34b1a634898be1702a457fc11076a0911fd5b80d9"
           }
         ],
         "omitted_failure_samples": 0,
         "response_status_counts": {
           "browser": {},
           "http": {
-            "200": 1374
+            "200": 1370,
+            "429": 1
           }
         },
-        "run_id": "40580214586-1",
+        "run_id": "40639117005-1",
         "scope": "current_client_instance; redirects_and_browser_subresources_excluded",
-        "started_at": "2026-10-27T20:43:34.683664+00:00"
+        "started_at": "2026-10-28T05:40:02.919983+00:00"
       },
-      "run_id": "40580214586-1",
-      "status": "partial",
+      "run_id": "40639117005-1",
+      "status": "complete",
       "transport_diagnostic": null
     },
     "bic": {
-      "checkpoint_at": "2026-10-27T21:16:39.762887+00:00",
+      "checkpoint_at": "2026-10-28T06:13:20.754872+00:00",
       "discovery_gaps": [],
       "errors": [
         {
-          "affected_tasks": 3,
+          "affected_tasks": 2,
           "reason": "TimeoutError",
           "url": null
         },
@@ -128,84 +111,84 @@
             "exception_type": "TimeoutError",
             "host": "www.biccamera.com",
             "method": "http",
-            "observed_at": "2026-10-27T20:56:36.925254+00:00",
+            "observed_at": "2026-10-28T05:53:17.778599+00:00",
             "url_sha256": "129907ff123ea5c4685c8d81ffe2fa5cce0c7cdb98e026b6dd1bd9501dc38862"
           },
           {
             "exception_type": "TimeoutError",
             "host": "www.biccamera.com",
             "method": "http",
-            "observed_at": "2026-10-27T20:57:04.268669+00:00",
+            "observed_at": "2026-10-28T05:53:45.144999+00:00",
             "url_sha256": "129907ff123ea5c4685c8d81ffe2fa5cce0c7cdb98e026b6dd1bd9501dc38862"
           },
           {
             "exception_type": "TimeoutError",
             "host": "www.biccamera.com",
             "method": "http",
-            "observed_at": "2026-10-27T20:57:33.372196+00:00",
+            "observed_at": "2026-10-28T05:54:14.226563+00:00",
             "url_sha256": "129907ff123ea5c4685c8d81ffe2fa5cce0c7cdb98e026b6dd1bd9501dc38862"
           },
           {
             "exception_type": "TimeoutError",
             "host": "www.biccamera.com",
             "method": "http",
-            "observed_at": "2026-10-27T21:02:58.704019+00:00",
+            "observed_at": "2026-10-28T05:59:40.006188+00:00",
             "url_sha256": "129907ff123ea5c4685c8d81ffe2fa5cce0c7cdb98e026b6dd1bd9501dc38862"
           },
           {
             "exception_type": "TimeoutError",
             "host": "www.biccamera.com",
             "method": "http",
-            "observed_at": "2026-10-27T21:03:25.782793+00:00",
+            "observed_at": "2026-10-28T06:00:07.635286+00:00",
             "url_sha256": "129907ff123ea5c4685c8d81ffe2fa5cce0c7cdb98e026b6dd1bd9501dc38862"
           },
           {
             "exception_type": "TimeoutError",
             "host": "www.biccamera.com",
             "method": "http",
-            "observed_at": "2026-10-27T21:03:54.851339+00:00",
+            "observed_at": "2026-10-28T06:00:36.717323+00:00",
             "url_sha256": "129907ff123ea5c4685c8d81ffe2fa5cce0c7cdb98e026b6dd1bd9501dc38862"
           },
           {
             "exception_type": "TimeoutError",
             "host": "www.biccamera.com",
             "method": "http",
-            "observed_at": "2026-10-27T21:09:20.199713+00:00",
+            "observed_at": "2026-10-28T06:06:02.352458+00:00",
             "url_sha256": "129907ff123ea5c4685c8d81ffe2fa5cce0c7cdb98e026b6dd1bd9501dc38862"
           },
           {
             "exception_type": "TimeoutError",
             "host": "www.biccamera.com",
             "method": "http",
-            "observed_at": "2026-10-27T21:09:47.584678+00:00",
+            "observed_at": "2026-10-28T06:06:29.438046+00:00",
             "url_sha256": "129907ff123ea5c4685c8d81ffe2fa5cce0c7cdb98e026b6dd1bd9501dc38862"
           },
           {
             "exception_type": "TimeoutError",
             "host": "www.biccamera.com",
             "method": "http",
-            "observed_at": "2026-10-27T21:10:16.956387+00:00",
+            "observed_at": "2026-10-28T06:06:58.514621+00:00",
             "url_sha256": "129907ff123ea5c4685c8d81ffe2fa5cce0c7cdb98e026b6dd1bd9501dc38862"
           },
           {
             "exception_type": "TimeoutError",
             "host": "www.biccamera.com",
             "method": "http",
-            "observed_at": "2026-10-27T21:15:42.818001+00:00",
+            "observed_at": "2026-10-28T06:12:23.922663+00:00",
             "url_sha256": "129907ff123ea5c4685c8d81ffe2fa5cce0c7cdb98e026b6dd1bd9501dc38862"
           },
           {
             "exception_type": "TimeoutError",
             "host": "www.biccamera.com",
             "method": "http",
-            "observed_at": "2026-10-27T21:16:10.313374+00:00",
+            "observed_at": "2026-10-28T06:12:51.327629+00:00",
             "url_sha256": "129907ff123ea5c4685c8d81ffe2fa5cce0c7cdb98e026b6dd1bd9501dc38862"
           },
           {
             "exception_type": "TimeoutError",
             "host": "www.biccamera.com",
             "method": "http",
-            "observed_at": "2026-10-27T21:16:39.736986+00:00",
+            "observed_at": "2026-10-28T06:13:20.722568+00:00",
             "url_sha256": "129907ff123ea5c4685c8d81ffe2fa5cce0c7cdb98e026b6dd1bd9501dc38862"
           }
         ],
@@ -214,16 +197,16 @@
           "browser": {},
           "http": {}
         },
-        "run_id": "40580214586-1",
+        "run_id": "40639117005-1",
         "scope": "current_client_instance; redirects_and_browser_subresources_excluded",
-        "started_at": "2026-10-27T20:43:27.815083+00:00"
+        "started_at": "2026-10-28T05:40:08.223838+00:00"
       },
-      "run_id": "40580214586-1",
+      "run_id": "40639117005-1",
       "status": "partial",
       "transport_diagnostic": null
     },
     "dospara": {
-      "checkpoint_at": "2026-10-27T20:46:07.943960+00:00",
+      "checkpoint_at": "2026-10-28T05:43:04.712805+00:00",
       "discovery_gaps": [],
       "errors": [],
       "http_evidence": {
@@ -240,16 +223,16 @@
             "200": 130
           }
         },
-        "run_id": "40580214586-1",
+        "run_id": "40639117005-1",
         "scope": "current_client_instance; redirects_and_browser_subresources_excluded",
-        "started_at": "2026-10-27T20:43:27.750353+00:00"
+        "started_at": "2026-10-28T05:40:24.768010+00:00"
       },
-      "run_id": "40580214586-1",
+      "run_id": "40639117005-1",
       "status": "complete",
       "transport_diagnostic": null
     },
     "joshin": {
-      "checkpoint_at": "2026-10-27T20:44:06.761463+00:00",
+      "checkpoint_at": "2026-10-28T05:40:20.225004+00:00",
       "discovery_gaps": [],
       "errors": [
         {
@@ -258,7 +241,7 @@
           "url": "https://joshinweb.jp/"
         },
         {
-          "affected_tasks": 2141,
+          "affected_tasks": 2142,
           "reason": "http_403",
           "url": null
         }
@@ -273,7 +256,7 @@
           {
             "host": "joshinweb.jp",
             "method": "http",
-            "observed_at": "2026-10-27T20:43:35.069162+00:00",
+            "observed_at": "2026-10-28T05:40:02.663609+00:00",
             "retry_after": {
               "kind": "absent"
             },
@@ -288,23 +271,18 @@
             "403": 1
           }
         },
-        "run_id": "40580214586-1",
+        "run_id": "40639117005-1",
         "scope": "current_client_instance; redirects_and_browser_subresources_excluded",
-        "started_at": "2026-10-27T20:43:34.846884+00:00"
+        "started_at": "2026-10-28T05:40:02.461709+00:00"
       },
-      "run_id": "40580214586-1",
+      "run_id": "40639117005-1",
       "status": "partial",
       "transport_diagnostic": null
     },
     "koubou": {
-      "checkpoint_at": "2026-10-27T21:15:30.744158+00:00",
+      "checkpoint_at": "2026-10-28T06:14:08.864511+00:00",
       "discovery_gaps": [],
       "errors": [
-        {
-          "affected_tasks": 1,
-          "reason": "http_404",
-          "url": "https://www.pc-koubou.jp/products/detail.php?product_id=1120011"
-        },
         {
           "affected_tasks": 1,
           "reason": "http_404",
@@ -338,7 +316,7 @@
         {
           "affected_tasks": 1,
           "reason": "http_404",
-          "url": "https://www.pc-koubou.jp/products/detail.php?product_id=1217242"
+          "url": "https://www.pc-koubou.jp/products/detail.php?product_id=1120011"
         },
         {
           "affected_tasks": 1,
@@ -348,7 +326,12 @@
         {
           "affected_tasks": 1,
           "reason": "http_404",
-          "url": "https://www.pc-koubou.jp/products/detail.php?product_id=1268134"
+          "url": "https://www.pc-koubou.jp/products/detail.php?product_id=1153444"
+        },
+        {
+          "affected_tasks": 1,
+          "reason": "http_404",
+          "url": "https://www.pc-koubou.jp/products/detail.php?product_id=1268148"
         },
         {
           "affected_tasks": 1,
@@ -358,7 +341,17 @@
         {
           "affected_tasks": 1,
           "reason": "http_404",
+          "url": "https://www.pc-koubou.jp/products/detail.php?product_id=1268157"
+        },
+        {
+          "affected_tasks": 1,
+          "reason": "http_404",
           "url": "https://www.pc-koubou.jp/products/detail.php?product_id=1268136"
+        },
+        {
+          "affected_tasks": 1,
+          "reason": "http_404",
+          "url": "https://www.pc-koubou.jp/products/detail.php?product_id=1268142"
         },
         {
           "affected_tasks": 1,
@@ -368,7 +361,7 @@
         {
           "affected_tasks": 1,
           "reason": "http_404",
-          "url": "https://www.pc-koubou.jp/products/detail.php?product_id=1264742"
+          "url": "https://www.pc-koubou.jp/products/detail.php?product_id=1268154"
         },
         {
           "affected_tasks": 1,
@@ -378,11 +371,16 @@
         {
           "affected_tasks": 1,
           "reason": "http_404",
-          "url": "https://www.pc-koubou.jp/products/detail.php?product_id=1268152"
+          "url": "https://www.pc-koubou.jp/products/detail.php?product_id=1264742"
         },
         {
           "affected_tasks": 1,
           "reason": "http_404",
+          "url": "https://www.pc-koubou.jp/products/detail.php?product_id=1268151"
+        },
+        {
+          "affected_tasks": 1,
+          "reason": "rate_limited_retry_later",
           "url": "https://www.pc-koubou.jp/products/detail.php?product_id=1268147"
         },
         {
@@ -397,12 +395,22 @@
         },
         {
           "affected_tasks": 1,
+          "reason": "rate_limited_retry_later",
+          "url": "https://www.pc-koubou.jp/products/detail.php?product_id=1217242"
+        },
+        {
+          "affected_tasks": 1,
+          "reason": "http_404",
+          "url": "https://www.pc-koubou.jp/products/detail.php?product_id=1268134"
+        },
+        {
+          "affected_tasks": 1,
           "reason": "http_404",
           "url": "https://www.pc-koubou.jp/products/detail.php?product_id=1268156"
         },
         {
           "affected_tasks": 1,
-          "reason": "http_404",
+          "reason": "TimeoutError",
           "url": "https://www.pc-koubou.jp/products/detail.php?product_id=1268139"
         },
         {
@@ -413,321 +421,165 @@
         {
           "affected_tasks": 1,
           "reason": "http_404",
-          "url": "https://www.pc-koubou.jp/products/detail.php?product_id=1268131"
-        },
-        {
-          "affected_tasks": 1,
-          "reason": "http_404",
-          "url": "https://www.pc-koubou.jp/products/detail.php?product_id=1268132"
-        },
-        {
-          "affected_tasks": 1,
-          "reason": "http_404",
-          "url": "https://www.pc-koubou.jp/products/detail.php?product_id=1153444"
-        },
-        {
-          "affected_tasks": 1,
-          "reason": "http_404",
-          "url": "https://www.pc-koubou.jp/products/detail.php?product_id=1268168"
-        },
-        {
-          "affected_tasks": 1,
-          "reason": "TimeoutError",
-          "url": "https://www.pc-koubou.jp/products/detail.php?product_id=1268141"
-        },
-        {
-          "affected_tasks": 1,
-          "reason": "http_404",
-          "url": "https://www.pc-koubou.jp/products/detail.php?product_id=1268140"
-        },
-        {
-          "affected_tasks": 1,
-          "reason": "http_404",
-          "url": "https://www.pc-koubou.jp/products/detail.php?product_id=1268157"
-        },
-        {
-          "affected_tasks": 1,
-          "reason": "TimeoutError",
-          "url": "https://www.pc-koubou.jp/products/detail.php?product_id=1269294"
-        },
-        {
-          "affected_tasks": 1,
-          "reason": "http_404",
-          "url": "https://www.pc-koubou.jp/products/detail.php?product_id=1268133"
-        },
-        {
-          "affected_tasks": 1,
-          "reason": "http_404",
-          "url": "https://www.pc-koubou.jp/products/detail.php?product_id=1268169"
-        },
-        {
-          "affected_tasks": 1,
-          "reason": "http_404",
-          "url": "https://www.pc-koubou.jp/products/detail.php?product_id=1268148"
-        },
-        {
-          "affected_tasks": 1,
-          "reason": "http_404",
-          "url": "https://www.pc-koubou.jp/products/detail.php?product_id=1268161"
-        },
-        {
-          "affected_tasks": 1,
-          "reason": "rate_limited_retry_later",
-          "url": "https://www.pc-koubou.jp/products/detail.php?product_id=1268160"
-        },
-        {
-          "affected_tasks": 1,
-          "reason": "http_404",
-          "url": "https://www.pc-koubou.jp/products/detail.php?product_id=1268159"
-        },
-        {
-          "affected_tasks": 1,
-          "reason": "http_404",
-          "url": "https://www.pc-koubou.jp/products/detail.php?product_id=1268142"
-        },
-        {
-          "affected_tasks": 1,
-          "reason": "TimeoutError",
-          "url": "https://www.pc-koubou.jp/products/detail.php?product_id=1268143"
-        },
-        {
-          "affected_tasks": 1,
-          "reason": "http_404",
-          "url": "https://www.pc-koubou.jp/products/detail.php?product_id=1268158"
-        },
-        {
-          "affected_tasks": 1,
-          "reason": "http_404",
-          "url": "https://www.pc-koubou.jp/products/detail.php?product_id=1268171"
-        },
-        {
-          "affected_tasks": 1,
-          "reason": "http_404",
-          "url": "https://www.pc-koubou.jp/products/detail.php?product_id=1268170"
-        },
-        {
-          "affected_tasks": 1,
-          "reason": "http_404",
           "url": "https://www.pc-koubou.jp/products/detail.php?product_id=1153453"
         },
         {
           "affected_tasks": 1,
-          "reason": "TimeoutError",
-          "url": "https://www.pc-koubou.jp/products/detail.php?product_id=1268167"
-        },
-        {
-          "affected_tasks": 1,
-          "reason": "http_404",
-          "url": "https://www.pc-koubou.jp/products/detail.php?product_id=1268166"
-        },
-        {
-          "affected_tasks": 1,
-          "reason": "http_404",
-          "url": "https://www.pc-koubou.jp/products/detail.php?product_id=1268154"
-        },
-        {
-          "affected_tasks": 1,
           "reason": "rate_limited_retry_later",
-          "url": "https://www.pc-koubou.jp/products/detail.php?product_id=1268164"
-        },
-        {
-          "affected_tasks": 1,
-          "reason": "http_404",
-          "url": "https://www.pc-koubou.jp/products/detail.php?product_id=1268162"
-        },
-        {
-          "affected_tasks": 1,
-          "reason": "http_404",
-          "url": "https://www.pc-koubou.jp/products/detail.php?product_id=1268165"
-        },
-        {
-          "affected_tasks": 1,
-          "reason": "TimeoutError",
-          "url": "https://www.pc-koubou.jp/products/detail.php?product_id=1268151"
-        },
-        {
-          "affected_tasks": 1,
-          "reason": "http_404",
-          "url": "https://www.pc-koubou.jp/products/detail.php?product_id=1268163"
-        },
-        {
-          "affected_tasks": 1,
-          "reason": "TimeoutError",
-          "url": "https://www.pc-koubou.jp/products/detail.php?product_id=1268144"
-        },
-        {
-          "affected_tasks": 1,
-          "reason": "http_404",
-          "url": "https://www.pc-koubou.jp/products/detail.php?product_id=1169934"
-        },
-        {
-          "affected_tasks": 1,
-          "reason": "http_404",
-          "url": "https://www.pc-koubou.jp/products/detail.php?product_id=1268137"
-        },
-        {
-          "affected_tasks": 1,
-          "reason": "TimeoutError",
-          "url": "https://www.pc-koubou.jp/products/detail.php?product_id=1148289"
-        },
-        {
-          "affected_tasks": 1,
-          "reason": "http_404",
-          "url": "https://www.pc-koubou.jp/products/detail.php?product_id=1268145"
-        },
-        {
-          "affected_tasks": 1,
-          "reason": "rate_limited_retry_later",
-          "url": "https://www.pc-koubou.jp/products/detail.php?product_id=1250078"
+          "url": "https://www.pc-koubou.jp/products/detail.php?product_id=1268152"
         }
       ],
       "http_evidence": {
         "exception_counts": {
           "browser": {
-            "TimeoutError": 17
+            "TimeoutError": 4
           },
           "http": {}
         },
-        "failure_observations": 128,
+        "failure_observations": 63,
         "failure_samples": [
           {
             "host": "www.pc-koubou.jp",
+            "host_retry_at_epoch_seconds": 1793168009.7356837,
             "method": "http",
-            "observed_at": "2026-10-27T21:13:46.816000+00:00",
-            "retry_after": {
-              "kind": "absent"
-            },
-            "status": 404,
-            "url_sha256": "d880589ca6bfb2317dbff0f5853366753aa1903bdcaaa0712b9d544a2e07dbe8"
-          },
-          {
-            "host": "www.pc-koubou.jp",
-            "method": "browser",
-            "observed_at": "2026-10-27T21:13:49.151122+00:00",
-            "retry_after": {
-              "kind": "absent"
-            },
-            "status": 404,
-            "url_sha256": "d880589ca6bfb2317dbff0f5853366753aa1903bdcaaa0712b9d544a2e07dbe8"
-          },
-          {
-            "host": "www.pc-koubou.jp",
-            "method": "http",
-            "observed_at": "2026-10-27T21:13:51.502258+00:00",
-            "retry_after": {
-              "kind": "absent"
-            },
-            "status": 404,
-            "url_sha256": "c3fdf82bbe8e67030eb845208e9601d541c69de25bfb9d55ab554e8eda348a18"
-          },
-          {
-            "exception_type": "TimeoutError",
-            "host": "www.pc-koubou.jp",
-            "method": "browser",
-            "observed_at": "2026-10-27T21:14:16.955221+00:00",
-            "url_sha256": "c3fdf82bbe8e67030eb845208e9601d541c69de25bfb9d55ab554e8eda348a18"
-          },
-          {
-            "host": "www.pc-koubou.jp",
-            "method": "http",
-            "observed_at": "2026-10-27T21:14:31.716225+00:00",
-            "retry_after": {
-              "kind": "absent"
-            },
-            "status": 404,
-            "url_sha256": "78ec793528f4ed29497eba8154378cc4902415b5d4e9b7a5f5e61b69e45ce805"
-          },
-          {
-            "host": "www.pc-koubou.jp",
-            "method": "browser",
-            "observed_at": "2026-10-27T21:14:34.204775+00:00",
-            "retry_after": {
-              "kind": "absent"
-            },
-            "status": 404,
-            "url_sha256": "78ec793528f4ed29497eba8154378cc4902415b5d4e9b7a5f5e61b69e45ce805"
-          },
-          {
-            "host": "www.pc-koubou.jp",
-            "method": "http",
-            "observed_at": "2026-10-27T21:14:35.119965+00:00",
-            "retry_after": {
-              "kind": "absent"
-            },
-            "status": 404,
-            "url_sha256": "32cd31f7390ceb9cd0aaa59a9be1814d4f2d383e0dee11812b52cdeb4a9773e2"
-          },
-          {
-            "host": "www.pc-koubou.jp",
-            "method": "browser",
-            "observed_at": "2026-10-27T21:14:37.593058+00:00",
-            "retry_after": {
-              "kind": "absent"
-            },
-            "status": 404,
-            "url_sha256": "32cd31f7390ceb9cd0aaa59a9be1814d4f2d383e0dee11812b52cdeb4a9773e2"
-          },
-          {
-            "exception_type": "TimeoutError",
-            "host": "www.pc-koubou.jp",
-            "method": "browser",
-            "observed_at": "2026-10-27T21:15:05.106239+00:00",
-            "url_sha256": "71cf69175e992b795778b8ea74c1ab184d7156c90e36adeb72e8974fd86074a7"
-          },
-          {
-            "host": "www.pc-koubou.jp",
-            "method": "http",
-            "observed_at": "2026-10-27T21:15:23.405145+00:00",
-            "retry_after": {
-              "kind": "absent"
-            },
-            "status": 404,
-            "url_sha256": "4f8c58e861825e8966489535b06f62e4aa2a1d3d6f081af66a93f1576c475c71"
-          },
-          {
-            "host": "www.pc-koubou.jp",
-            "method": "browser",
-            "observed_at": "2026-10-27T21:15:26.051905+00:00",
-            "retry_after": {
-              "kind": "absent"
-            },
-            "status": 404,
-            "url_sha256": "4f8c58e861825e8966489535b06f62e4aa2a1d3d6f081af66a93f1576c475c71"
-          },
-          {
-            "host": "www.pc-koubou.jp",
-            "host_retry_at_epoch_seconds": 1793136030.6229122,
-            "method": "http",
-            "observed_at": "2026-10-27T21:15:30.622923+00:00",
+            "observed_at": "2026-10-28T06:08:29.735691+00:00",
             "retry_after": {
               "kind": "absent"
             },
             "status": 429,
-            "url_sha256": "3590b17617183ee55e831b3113093ee3ad891858eafb1af7992ec024bb21f5a5"
+            "url_sha256": "93727867ed89b60618a2e20052b26bba2f1d2bbef5f8faf0abecb95a4039f1cf"
+          },
+          {
+            "host": "www.pc-koubou.jp",
+            "method": "http",
+            "observed_at": "2026-10-28T06:13:30.534585+00:00",
+            "retry_after": {
+              "kind": "absent"
+            },
+            "status": 404,
+            "url_sha256": "144c5efe10a6de368f5560a4fa9cc27844e3e0263414ba82132c1e12e1d5f7fe"
+          },
+          {
+            "host": "www.pc-koubou.jp",
+            "method": "browser",
+            "observed_at": "2026-10-28T06:13:32.577625+00:00",
+            "retry_after": {
+              "kind": "absent"
+            },
+            "status": 404,
+            "url_sha256": "144c5efe10a6de368f5560a4fa9cc27844e3e0263414ba82132c1e12e1d5f7fe"
+          },
+          {
+            "host": "www.pc-koubou.jp",
+            "method": "http",
+            "observed_at": "2026-10-28T06:13:33.423979+00:00",
+            "retry_after": {
+              "kind": "absent"
+            },
+            "status": 404,
+            "url_sha256": "e85917cdc6333ed16956f43cabe5bd98cf5b81faecb187f0c63a41b619af1e41"
+          },
+          {
+            "host": "www.pc-koubou.jp",
+            "method": "browser",
+            "observed_at": "2026-10-28T06:13:35.442940+00:00",
+            "retry_after": {
+              "kind": "absent"
+            },
+            "status": 404,
+            "url_sha256": "e85917cdc6333ed16956f43cabe5bd98cf5b81faecb187f0c63a41b619af1e41"
+          },
+          {
+            "host": "www.pc-koubou.jp",
+            "method": "http",
+            "observed_at": "2026-10-28T06:13:37.263779+00:00",
+            "retry_after": {
+              "kind": "absent"
+            },
+            "status": 404,
+            "url_sha256": "b54bfe9337cd16d4b8a9623133fa3697bb4a87be0387fbba804201931c7e94e9"
+          },
+          {
+            "exception_type": "TimeoutError",
+            "host": "www.pc-koubou.jp",
+            "method": "browser",
+            "observed_at": "2026-10-28T06:14:02.542235+00:00",
+            "url_sha256": "b54bfe9337cd16d4b8a9623133fa3697bb4a87be0387fbba804201931c7e94e9"
+          },
+          {
+            "host": "www.pc-koubou.jp",
+            "method": "http",
+            "observed_at": "2026-10-28T06:14:03.379871+00:00",
+            "retry_after": {
+              "kind": "absent"
+            },
+            "status": 404,
+            "url_sha256": "d8ee02ddee155d7b9754f41086fd43736ef41a924c446732d942805f2fccd70f"
+          },
+          {
+            "host": "www.pc-koubou.jp",
+            "method": "browser",
+            "observed_at": "2026-10-28T06:14:05.334270+00:00",
+            "retry_after": {
+              "kind": "absent"
+            },
+            "status": 404,
+            "url_sha256": "d8ee02ddee155d7b9754f41086fd43736ef41a924c446732d942805f2fccd70f"
+          },
+          {
+            "host": "www.pc-koubou.jp",
+            "method": "http",
+            "observed_at": "2026-10-28T06:14:06.189254+00:00",
+            "retry_after": {
+              "kind": "absent"
+            },
+            "status": 404,
+            "url_sha256": "4ea09d9aaf299ed0fdfb3da6510ad9412699202dc045702bf2f46ca542097146"
+          },
+          {
+            "host": "www.pc-koubou.jp",
+            "method": "browser",
+            "observed_at": "2026-10-28T06:14:08.133937+00:00",
+            "retry_after": {
+              "kind": "absent"
+            },
+            "status": 404,
+            "url_sha256": "4ea09d9aaf299ed0fdfb3da6510ad9412699202dc045702bf2f46ca542097146"
+          },
+          {
+            "host": "www.pc-koubou.jp",
+            "host_retry_at_epoch_seconds": 1793168348.7776673,
+            "method": "http",
+            "observed_at": "2026-10-28T06:14:08.777674+00:00",
+            "retry_after": {
+              "kind": "absent"
+            },
+            "status": 429,
+            "url_sha256": "7675144d987ead9025e84ef18d1db8ce6b7e9d320124e8521780fe3d4ed6acf5"
           }
         ],
-        "omitted_failure_samples": 116,
+        "omitted_failure_samples": 51,
         "response_status_counts": {
           "browser": {
-            "200": 5,
-            "404": 45
+            "200": 3,
+            "404": 24
           },
           "http": {
-            "200": 33,
-            "404": 61,
-            "429": 5
+            "200": 12,
+            "404": 28,
+            "429": 7
           }
         },
-        "run_id": "40580214586-1",
+        "run_id": "40639117005-1",
         "scope": "current_client_instance; redirects_and_browser_subresources_excluded",
-        "started_at": "2026-10-27T20:43:43.644967+00:00"
+        "started_at": "2026-10-28T05:40:23.688741+00:00"
       },
-      "run_id": "40580214586-1",
+      "run_id": "40639117005-1",
       "status": "partial",
       "transport_diagnostic": null
     },
     "sofmap": {
-      "checkpoint_at": "2026-10-27T21:17:23.274531+00:00",
+      "checkpoint_at": "2026-10-28T06:14:36.821926+00:00",
       "discovery_gaps": [
         {
           "reason": "no_sale_candidates_parser_review",
@@ -735,6 +587,11 @@
         }
       ],
       "errors": [
+        {
+          "affected_tasks": 1,
+          "reason": "comparison_search_response_unverified",
+          "url": "https://www.sofmap.com/search_result.aspx?keyword=ASRock+B860+Challenger+WiFi+%28B860+1851+ATX%29+%E3%83%89%E3%82%B9%E3%83%91%E3%83%A9%E9%99%90%E5%AE%9A%E3%83%A2%E3%83%87%E3%83%AB"
+        },
         {
           "affected_tasks": 1,
           "reason": "product_error_page",
@@ -778,7 +635,7 @@
         {
           "affected_tasks": 1,
           "reason": "comparison_search_response_unverified",
-          "url": "https://www.sofmap.com/search_result.aspx?keyword=ASRock+B860+Challenger+WiFi+%28B860+1851+ATX%29+%E3%83%89%E3%82%B9%E3%83%91%E3%83%A9%E9%99%90%E5%AE%9A%E3%83%A2%E3%83%87%E3%83%AB"
+          "url": "https://www.sofmap.com/search_result.aspx?keyword=ASRock%EF%BC%88%E3%82%A2%E3%82%B9%E3%83%AD%E3%83%83%E3%82%AF%EF%BC%89+A520M-HDV+%28A520+AM4+MicroATX%29"
         },
         {
           "affected_tasks": 1,
@@ -792,8 +649,8 @@
         },
         {
           "affected_tasks": 1,
-          "reason": "comparison_search_response_unverified",
-          "url": "https://www.sofmap.com/search_result.aspx?keyword=ASRock%EF%BC%88%E3%82%A2%E3%82%B9%E3%83%AD%E3%83%83%E3%82%AF%EF%BC%89+A520M-HDV+%28A520+AM4+MicroATX%29"
+          "reason": "http_403",
+          "url": "https://www.sofmap.com/search_result.aspx?keyword=ASRock+Steel+Legend+Dark+360+LCD+%28360mm+%E3%83%96%E3%83%A9%E3%83%83%E3%82%AF%29"
         },
         {
           "affected_tasks": 1,
@@ -802,12 +659,12 @@
         },
         {
           "affected_tasks": 1,
-          "reason": "http_403",
+          "reason": "product_error_page",
           "url": "https://www.sofmap.com/product_detail.aspx?sku=415352065"
         },
         {
           "affected_tasks": 1,
-          "reason": "http_403",
+          "reason": "comparison_search_response_unverified",
           "url": "https://www.sofmap.com/search_result.aspx?keyword=ASRock%EF%BC%88%E3%82%A2%E3%82%B9%E3%83%AD%E3%83%83%E3%82%AF%EF%BC%89+Z890+Pro+RS+WiFi+%28Z890+1851+ATX%29"
         },
         {
@@ -838,11 +695,11 @@
         {
           "affected_tasks": 1,
           "reason": "comparison_search_response_unverified",
-          "url": "https://www.sofmap.com/search_result.aspx?keyword=ASRock+Steel+Legend+Dark+360+LCD+%28360mm+%E3%83%96%E3%83%A9%E3%83%83%E3%82%AF%29"
+          "url": "https://www.sofmap.com/search_result.aspx?keyword=Corsair+FRAME+4000D+LCD+RS+ARGB+Premium+White+CC-9011327-WW+%28E-ATX+%E3%82%AC%E3%83%A9%E3%82%B9+%E3%83%9B%E3%83%AF%E3%82%A4%E3%83%88%29"
         },
         {
           "affected_tasks": 1,
-          "reason": "product_error_page",
+          "reason": "http_403",
           "url": "https://www.sofmap.com/product_detail.aspx?gid=PS03010000&sku=415352940"
         },
         {
@@ -853,7 +710,7 @@
         {
           "affected_tasks": 1,
           "reason": "comparison_search_response_unverified",
-          "url": "https://www.sofmap.com/search_result.aspx?keyword=Corsair+FRAME+4000D+LCD+RS+ARGB+Premium+White+CC-9011327-WW+%28E-ATX+%E3%82%AC%E3%83%A9%E3%82%B9+%E3%83%9B%E3%83%AF%E3%82%A4%E3%83%88%29"
+          "url": "https://www.sofmap.com/search_result.aspx?keyword=ASUS+B850M+MAX+GAMING+WIFI+%28B850+AM5+MicroATX%29+%E3%83%89%E3%82%B9%E3%83%91%E3%83%A9%E9%99%90%E5%AE%9A%E3%83%A2%E3%83%87%E3%83%AB"
         },
         {
           "affected_tasks": 1,
@@ -882,23 +739,23 @@
         },
         {
           "affected_tasks": 1,
-          "reason": "comparison_search_response_unverified",
+          "reason": "http_403",
           "url": "https://www.sofmap.com/search_result.aspx?keyword=NEC+Aterm+PA-7200D8BE+%2811be+%E7%84%A1%E7%B7%9ALAN%E3%83%AB%E3%83%BC%E3%82%BF%E3%83%BC%29"
         },
         {
           "affected_tasks": 1,
-          "reason": "http_403",
+          "reason": "product_error_page",
           "url": "https://www.sofmap.com/product_detail.aspx?sku=415358134"
         },
         {
           "affected_tasks": 1,
-          "reason": "http_403",
+          "reason": "product_error_page",
           "url": "https://www.sofmap.com/product_detail.aspx?sku=415360775"
         },
         {
           "affected_tasks": 1,
-          "reason": "http_403",
-          "url": "https://www.sofmap.com/search_result.aspx?keyword=ASUS+B850M+MAX+GAMING+WIFI+%28B850+AM5+MicroATX%29+%E3%83%89%E3%82%B9%E3%83%91%E3%83%A9%E9%99%90%E5%AE%9A%E3%83%A2%E3%83%87%E3%83%AB"
+          "reason": "comparison_search_response_unverified",
+          "url": "https://www.sofmap.com/search_result.aspx?keyword=NZXT+F140+RGB+V2+RF-R214S-WF+%28140mm+ARGB+%E3%83%9B%E3%83%AF%E3%82%A4%E3%83%88%29"
         },
         {
           "affected_tasks": 1,
@@ -908,27 +765,7 @@
         {
           "affected_tasks": 1,
           "reason": "comparison_search_response_unverified",
-          "url": "https://www.sofmap.com/search_result.aspx?keyword=NZXT+F140+RGB+V2+RF-R214S-WF+%28140mm+ARGB+%E3%83%9B%E3%83%AF%E3%82%A4%E3%83%88%29"
-        },
-        {
-          "affected_tasks": 1,
-          "reason": "comparison_search_response_unverified",
-          "url": "https://www.sofmap.com/search_result.aspx?keyword=NZXT+H6+Flow+RGB+MINT+CC-H61RG-SA+%28ATX+%E3%82%AC%E3%83%A9%E3%82%B9%29+%E3%83%89%E3%82%B9%E3%83%91%E3%83%A9%E9%99%90%E5%AE%9A%E3%83%A2%E3%83%87%E3%83%AB"
-        },
-        {
-          "affected_tasks": 1,
-          "reason": "http_403",
-          "url": "https://www.sofmap.com/product_detail.aspx?sku=101760934"
-        },
-        {
-          "affected_tasks": 1,
-          "reason": "comparison_search_response_unverified",
-          "url": "https://www.sofmap.com/search_result.aspx?keyword=Razer%EF%BC%88%E3%83%AC%E3%82%A4%E3%82%B6%E3%83%BC%EF%BC%89+Viper+V3+Pro+%28RZ01-05120100-R3A1%29"
-        },
-        {
-          "affected_tasks": 1,
-          "reason": "http_403",
-          "url": "https://www.sofmap.com/product_detail.aspx?sku=101249766"
+          "url": "https://www.sofmap.com/search_result.aspx?keyword=ASUS+RT-BE18000+%28%E3%83%88%E3%83%A9%E3%82%A4%E3%83%90%E3%83%B3%E3%83%89+Wi-Fi7+%E3%83%AB%E3%83%BC%E3%82%BF%E3%83%BC%29"
         },
         {
           "affected_tasks": 1,
@@ -938,7 +775,7 @@
         {
           "affected_tasks": 1,
           "reason": "comparison_search_response_unverified",
-          "url": "https://www.sofmap.com/search_result.aspx?keyword=ASUS+RT-BE18000+%28%E3%83%88%E3%83%A9%E3%82%A4%E3%83%90%E3%83%B3%E3%83%89+Wi-Fi7+%E3%83%AB%E3%83%BC%E3%82%BF%E3%83%BC%29"
+          "url": "https://www.sofmap.com/search_result.aspx?keyword=NZXT+H6+Flow+RGB+MINT+CC-H61RG-SA+%28ATX+%E3%82%AC%E3%83%A9%E3%82%B9%29+%E3%83%89%E3%82%B9%E3%83%91%E3%83%A9%E9%99%90%E5%AE%9A%E3%83%A2%E3%83%87%E3%83%AB"
         },
         {
           "affected_tasks": 1,
@@ -952,28 +789,13 @@
         },
         {
           "affected_tasks": 1,
-          "reason": "http_403",
-          "url": "https://www.sofmap.com/product_detail.aspx?sku=102070388"
-        },
-        {
-          "affected_tasks": 1,
           "reason": "comparison_search_response_unverified",
-          "url": "https://www.sofmap.com/search_result.aspx?keyword=UniQ+PROMETHEUS+CAST+UQ-PM215CST-Q+%2821.5%E3%82%A4%E3%83%B3%E3%83%81%E3%83%AF%E3%82%A4%E3%83%89+%E6%B6%B2%E6%99%B6%E3%83%A2%E3%83%8B%E3%82%BF%E3%83%BC%29"
-        },
-        {
-          "affected_tasks": 1,
-          "reason": "comparison_search_response_unverified",
-          "url": "https://www.sofmap.com/search_result.aspx?keyword=%E3%83%89%E3%82%B9%E3%83%91%E3%83%A9%E3%82%BB%E3%83%AC%E3%82%AF%E3%83%88+850W-GOLD-ATX31-BK+%28850W+%E3%83%96%E3%83%A9%E3%83%83%E3%82%AF%29"
+          "url": "https://www.sofmap.com/search_result.aspx?keyword=Razer%EF%BC%88%E3%83%AC%E3%82%A4%E3%82%B6%E3%83%BC%EF%BC%89+Viper+V3+Pro+%28RZ01-05120100-R3A1%29"
         },
         {
           "affected_tasks": 1,
           "reason": "http_403",
           "url": "https://www.sofmap.com/product_detail.aspx?sku=101450118"
-        },
-        {
-          "affected_tasks": 1,
-          "reason": "comparison_search_response_unverified",
-          "url": "https://www.sofmap.com/search_result.aspx?keyword=Razer%EF%BC%88%E3%83%AC%E3%82%A4%E3%82%B6%E3%83%BC%EF%BC%89+Basilisk+V3+35K+%28RZ01-05230100-R3M1%29"
         },
         {
           "affected_tasks": 1,
@@ -983,57 +805,27 @@
         {
           "affected_tasks": 1,
           "reason": "http_403",
-          "url": "https://www.sofmap.com/product_detail.aspx?sku=102086929"
+          "url": "https://www.sofmap.com/product_detail.aspx?sku=102070388"
         },
         {
           "affected_tasks": 1,
           "reason": "comparison_search_response_unverified",
-          "url": "https://www.sofmap.com/search_result.aspx?keyword=%E3%83%89%E3%82%B9%E3%83%91%E3%83%A9%E3%82%BB%E3%83%AC%E3%82%AF%E3%83%88+A400F-BK+%28%E3%83%96%E3%83%A9%E3%83%83%E3%82%AF%29"
-        },
-        {
-          "affected_tasks": 1,
-          "reason": "http_403",
-          "url": "https://www.sofmap.com/product_detail.aspx?sku=102367358"
-        },
-        {
-          "affected_tasks": 1,
-          "reason": "http_403",
-          "url": "https://www.sofmap.com/product_detail.aspx?sku=101292710"
+          "url": "https://www.sofmap.com/search_result.aspx?keyword=Razer%EF%BC%88%E3%83%AC%E3%82%A4%E3%82%B6%E3%83%BC%EF%BC%89+Basilisk+V3+35K+%28RZ01-05230100-R3M1%29"
         },
         {
           "affected_tasks": 1,
           "reason": "comparison_search_response_unverified",
-          "url": "https://www.sofmap.com/search_result.aspx?keyword=ADATA+SLEG-860-2000GCS-DP+%28M.2+2280+2TB%29+%E3%83%89%E3%82%B9%E3%83%91%E3%83%A9%E9%99%90%E5%AE%9A%E3%83%A2%E3%83%87%E3%83%AB"
-        },
-        {
-          "affected_tasks": 1,
-          "reason": "http_403",
-          "url": "https://www.sofmap.com/product_detail.aspx?sku=101442352"
-        },
-        {
-          "affected_tasks": 1,
-          "reason": "http_403",
-          "url": "https://www.sofmap.com/product_detail.aspx?sku=101598842"
-        },
-        {
-          "affected_tasks": 1,
-          "reason": "http_403",
-          "url": "https://www.sofmap.com/product_detail.aspx?sku=101787024"
-        },
-        {
-          "affected_tasks": 1,
-          "reason": "comparison_search_response_unverified",
-          "url": "https://www.sofmap.com/search_result.aspx?keyword=Western+Digital%EF%BC%88%E3%82%A6%E3%82%A7%E3%82%B9%E3%82%BF%E3%83%B3%E3%83%87%E3%82%B8%E3%82%BF%E3%83%AB%EF%BC%89+WD+Red+Plus+WD20EFPX+%282TB%29"
-        },
-        {
-          "affected_tasks": 1,
-          "reason": "product_error_page",
-          "url": "https://www.sofmap.com/product_detail.aspx?sku=415318888"
+          "url": "https://www.sofmap.com/search_result.aspx?keyword=UniQ+PROMETHEUS+CAST+UQ-PM215CST-Q+%2821.5%E3%82%A4%E3%83%B3%E3%83%81%E3%83%AF%E3%82%A4%E3%83%89+%E6%B6%B2%E6%99%B6%E3%83%A2%E3%83%8B%E3%82%BF%E3%83%BC%29"
         },
         {
           "affected_tasks": 1,
           "reason": "http_403",
           "url": "https://www.sofmap.com/product_detail.aspx?sku=101097444"
+        },
+        {
+          "affected_tasks": 1,
+          "reason": "comparison_search_response_unverified",
+          "url": "https://www.sofmap.com/search_result.aspx?keyword=%E3%83%89%E3%82%B9%E3%83%91%E3%83%A9%E3%82%BB%E3%83%AC%E3%82%AF%E3%83%88+850W-GOLD-ATX31-BK+%28850W+%E3%83%96%E3%83%A9%E3%83%83%E3%82%AF%29"
         },
         {
           "affected_tasks": 1,
@@ -1043,17 +835,12 @@
         {
           "affected_tasks": 1,
           "reason": "http_403",
-          "url": "https://www.sofmap.com/product_detail.aspx?sku=415316167"
+          "url": "https://www.sofmap.com/product_detail.aspx?sku=101530920"
         },
         {
           "affected_tasks": 1,
           "reason": "comparison_search_response_unverified",
-          "url": "https://www.sofmap.com/search_result.aspx?keyword=ZALMAN+Z3+Iceberg+Black+%28E-ATX+%E3%82%AC%E3%83%A9%E3%82%B9%29+%E3%83%89%E3%82%B9%E3%83%91%E3%83%A9%E9%99%90%E5%AE%9A%E3%83%A2%E3%83%87%E3%83%AB"
-        },
-        {
-          "affected_tasks": 1,
-          "reason": "http_403",
-          "url": "https://www.sofmap.com/product_detail.aspx?sku=101530920"
+          "url": "https://www.sofmap.com/search_result.aspx?keyword=%E3%83%89%E3%82%B9%E3%83%91%E3%83%A9%E3%82%BB%E3%83%AC%E3%82%AF%E3%83%88+A400F-BK+%28%E3%83%96%E3%83%A9%E3%83%83%E3%82%AF%29"
         },
         {
           "affected_tasks": 1,
@@ -1063,7 +850,97 @@
         {
           "affected_tasks": 1,
           "reason": "http_403",
-          "url": "https://www.sofmap.com/product_detail.aspx?sku=101521292"
+          "url": "https://www.sofmap.com/product_detail.aspx?sku=100862744"
+        },
+        {
+          "affected_tasks": 1,
+          "reason": "comparison_search_response_unverified",
+          "url": "https://www.sofmap.com/search_result.aspx?keyword=Western+Digital%EF%BC%88%E3%82%A6%E3%82%A7%E3%82%B9%E3%82%BF%E3%83%B3%E3%83%87%E3%82%B8%E3%82%BF%E3%83%AB%EF%BC%89+WD+Red+Plus+WD20EFPX+%282TB%29"
+        },
+        {
+          "affected_tasks": 1,
+          "reason": "http_403",
+          "url": "https://www.sofmap.com/product_detail.aspx?sku=101992466"
+        },
+        {
+          "affected_tasks": 1,
+          "reason": "http_403",
+          "url": "https://www.sofmap.com/product_detail.aspx?sku=21578877"
+        },
+        {
+          "affected_tasks": 1,
+          "reason": "http_403",
+          "url": "https://www.sofmap.com/product_detail.aspx?sku=100941659"
+        },
+        {
+          "affected_tasks": 1,
+          "reason": "http_403",
+          "url": "https://www.sofmap.com/product_detail.aspx?sku=101235602"
+        },
+        {
+          "affected_tasks": 1,
+          "reason": "comparison_search_response_unverified",
+          "url": "https://www.sofmap.com/search_result.aspx?keyword=ZALMAN+Z3+Iceberg+Black+%28E-ATX+%E3%82%AC%E3%83%A9%E3%82%B9%29+%E3%83%89%E3%82%B9%E3%83%91%E3%83%A9%E9%99%90%E5%AE%9A%E3%83%A2%E3%83%87%E3%83%AB"
+        },
+        {
+          "affected_tasks": 1,
+          "reason": "http_403",
+          "url": "https://www.sofmap.com/product_detail.aspx?sku=101752237"
+        },
+        {
+          "affected_tasks": 1,
+          "reason": "http_403",
+          "url": "https://www.sofmap.com/product_detail.aspx?sku=101530917"
+        },
+        {
+          "affected_tasks": 1,
+          "reason": "comparison_search_response_unverified",
+          "url": "https://www.sofmap.com/search_result.aspx?keyword=ADATA+SLEG-860-2000GCS-DP+%28M.2+2280+2TB%29+%E3%83%89%E3%82%B9%E3%83%91%E3%83%A9%E9%99%90%E5%AE%9A%E3%83%A2%E3%83%87%E3%83%AB"
+        },
+        {
+          "affected_tasks": 1,
+          "reason": "http_403",
+          "url": "https://www.sofmap.com/product_detail.aspx?sku=102045564"
+        },
+        {
+          "affected_tasks": 1,
+          "reason": "http_403",
+          "url": "https://www.sofmap.com/product_detail.aspx?sku=415238099"
+        },
+        {
+          "affected_tasks": 1,
+          "reason": "http_403",
+          "url": "https://www.sofmap.com/product_detail.aspx?sku=101787024"
+        },
+        {
+          "affected_tasks": 1,
+          "reason": "product_error_page",
+          "url": "https://www.sofmap.com/product_detail.aspx?sku=415318888"
+        },
+        {
+          "affected_tasks": 1,
+          "reason": "product_error_page",
+          "url": "https://www.sofmap.com/product_detail.aspx?sku=414758658"
+        },
+        {
+          "affected_tasks": 1,
+          "reason": "comparison_search_response_unverified",
+          "url": "https://www.sofmap.com/search_result.aspx?keyword=%E3%82%A2%E3%82%A4%E3%82%AA%E3%83%BC%E3%83%87%E3%83%BC%E3%82%BF+GigaCrysta+KH-GD243UDB-F+%2823.8%E3%82%A4%E3%83%B3%E3%83%81%E3%83%AF%E3%82%A4%E3%83%89+%E3%83%95%E3%83%ABHD+240Hz+IPS+%E6%B6%B2%E6%99%B6%E3%83%A2%E3%83%8B%E3%82%BF%E3%83%BC+%E3%83%96%E3%83%A9%E3%83%83%E3%82%AF+%E3%82%B2%E3%83%BC%E3%83%9F%E3%83%B3%E3%82%B0%E3%82%B9%E3%82%BF%E3%83%B3%E3%83%89%E4%BB%98%29"
+        },
+        {
+          "affected_tasks": 1,
+          "reason": "http_403",
+          "url": "https://www.sofmap.com/product_detail.aspx?sku=101675181"
+        },
+        {
+          "affected_tasks": 1,
+          "reason": "http_403",
+          "url": "https://www.sofmap.com/product_detail.aspx?sku=101450119"
+        },
+        {
+          "affected_tasks": 1,
+          "reason": "http_403",
+          "url": "https://www.sofmap.com/product_detail.aspx?sku=415316167"
         },
         {
           "affected_tasks": 1,
@@ -1073,46 +950,65 @@
         {
           "affected_tasks": 1,
           "reason": "http_403",
-          "url": "https://www.sofmap.com/product_detail.aspx?sku=100862744"
+          "url": "https://www.sofmap.com/product_detail.aspx?sku=102045582"
         },
         {
           "affected_tasks": 1,
           "reason": "http_403",
-          "url": "https://www.sofmap.com/product_detail.aspx?sku=101992466"
+          "url": "https://www.sofmap.com/product_detail.aspx?sku=102011066"
         }
       ],
       "http_evidence": {
         "exception_counts": {
           "browser": {},
-          "http": {}
+          "http": {
+            "URLError": 3
+          }
         },
-        "failure_observations": 35,
+        "failure_observations": 39,
         "failure_samples": [
           {
             "host": "www.sofmap.com",
             "method": "http",
-            "observed_at": "2026-10-27T21:01:04.647772+00:00",
+            "observed_at": "2026-10-28T06:02:40.423181+00:00",
             "retry_after": {
               "kind": "absent"
             },
             "status": 403,
-            "url_sha256": "3e696931f9666b02f4e74c0f1600449d7b02fbb7039fa785379633b7e6d0a06a"
+            "url_sha256": "5c6f1875847e7f42390233ea196ce3739251e4e813e31091134f295ed94f3661"
           },
           {
             "host": "www.sofmap.com",
             "method": "http",
-            "observed_at": "2026-10-27T21:01:05.265070+00:00",
+            "observed_at": "2026-10-28T06:02:43.380843+00:00",
             "retry_after": {
               "kind": "absent"
             },
             "status": 403,
-            "url_sha256": "49d9e4a73685149adb27e7f725e88633200084c39118707bae1520ec8d2ac99f"
+            "url_sha256": "aab14c89150948f20162c3c830d7df37d44cf4cefa0b9c4cc901048522a6cdd1"
           },
           {
             "host": "www.sofmap.com",
-            "host_retry_at_epoch_seconds": 1793135166.4710705,
             "method": "http",
-            "observed_at": "2026-10-27T21:01:06.471090+00:00",
+            "observed_at": "2026-10-28T06:02:44.393340+00:00",
+            "retry_after": {
+              "kind": "absent"
+            },
+            "status": 403,
+            "url_sha256": "2083518aa825e8d7b727fea5d442e8f619c20cf1e35040b000759fae2f70d412"
+          },
+          {
+            "exception_type": "URLError",
+            "host": "www.sofmap.com",
+            "method": "http",
+            "observed_at": "2026-10-28T06:03:09.940461+00:00",
+            "url_sha256": "105f9ff66b22042191a3b120b88d59427e2e34db8db162c36373cb506c444ba4"
+          },
+          {
+            "host": "www.sofmap.com",
+            "host_retry_at_epoch_seconds": 1793167692.6982055,
+            "method": "http",
+            "observed_at": "2026-10-28T06:03:12.698220+00:00",
             "retry_after": {
               "kind": "absent"
             },
@@ -1122,28 +1018,35 @@
           {
             "host": "www.sofmap.com",
             "method": "http",
-            "observed_at": "2026-10-27T21:06:36.970774+00:00",
+            "observed_at": "2026-10-28T06:08:28.042521+00:00",
             "retry_after": {
               "kind": "absent"
             },
             "status": 403,
-            "url_sha256": "7069fa88dc87e99546380863110d63277a82ff0c43f0a01da4e4f156de77c302"
+            "url_sha256": "3c33db9754e34d7ef10d8a22108863126cba3a9c338d5cd85ff5fd1a76d707db"
+          },
+          {
+            "exception_type": "URLError",
+            "host": "www.sofmap.com",
+            "method": "http",
+            "observed_at": "2026-10-28T06:08:53.564561+00:00",
+            "url_sha256": "c1a824a5cadded853621defd197a94e0d7f4af7be324f9185bac61096b668d53"
           },
           {
             "host": "www.sofmap.com",
             "method": "http",
-            "observed_at": "2026-10-27T21:06:37.764188+00:00",
+            "observed_at": "2026-10-28T06:08:56.136097+00:00",
             "retry_after": {
               "kind": "absent"
             },
             "status": 403,
-            "url_sha256": "adb096dc75e9c0ef671d77766aa720b46e1ec00ecc029fc0f3b4872b76c54109"
+            "url_sha256": "c1a824a5cadded853621defd197a94e0d7f4af7be324f9185bac61096b668d53"
           },
           {
             "host": "www.sofmap.com",
-            "host_retry_at_epoch_seconds": 1793135498.726865,
+            "host_retry_at_epoch_seconds": 1793168037.0104296,
             "method": "http",
-            "observed_at": "2026-10-27T21:06:38.726885+00:00",
+            "observed_at": "2026-10-28T06:08:57.010445+00:00",
             "retry_after": {
               "kind": "absent"
             },
@@ -1153,38 +1056,7 @@
           {
             "host": "www.sofmap.com",
             "method": "http",
-            "observed_at": "2026-10-27T21:11:58.641162+00:00",
-            "retry_after": {
-              "kind": "absent"
-            },
-            "status": 403,
-            "url_sha256": "c423e4d49251714c84c10503d62052ff57cfd55c49eccad726c970ae3ffc1581"
-          },
-          {
-            "host": "www.sofmap.com",
-            "method": "http",
-            "observed_at": "2026-10-27T21:11:59.867132+00:00",
-            "retry_after": {
-              "kind": "absent"
-            },
-            "status": 403,
-            "url_sha256": "ba33413d2c742a8bfc1b02f991fa6447771f709e7be1cabd037ad02f57d48274"
-          },
-          {
-            "host": "www.sofmap.com",
-            "host_retry_at_epoch_seconds": 1793135820.9079592,
-            "method": "http",
-            "observed_at": "2026-10-27T21:12:00.907977+00:00",
-            "retry_after": {
-              "kind": "absent"
-            },
-            "status": 403,
-            "url_sha256": "78d41040f0ed2d3699af6a2407ff921d2554d61fc3318f1256575bf01c3191a5"
-          },
-          {
-            "host": "www.sofmap.com",
-            "method": "http",
-            "observed_at": "2026-10-27T21:17:21.320409+00:00",
+            "observed_at": "2026-10-28T06:14:34.862632+00:00",
             "retry_after": {
               "kind": "absent"
             },
@@ -1194,54 +1066,49 @@
           {
             "host": "www.sofmap.com",
             "method": "http",
-            "observed_at": "2026-10-27T21:17:22.225078+00:00",
+            "observed_at": "2026-10-28T06:14:35.615241+00:00",
             "retry_after": {
               "kind": "absent"
             },
             "status": 403,
-            "url_sha256": "87e97e95290eb28858401eff0ec4a3a65cf00bbdfc0cd5db1a32801e0d8ae084"
+            "url_sha256": "6353f2ff31ec6afa130c744f1a0f9d854996179cc100f906879ed9759204b3f8"
           },
           {
             "host": "www.sofmap.com",
-            "host_retry_at_epoch_seconds": 1793136143.040794,
+            "host_retry_at_epoch_seconds": 1793168376.6318674,
             "method": "http",
-            "observed_at": "2026-10-27T21:17:23.040813+00:00",
+            "observed_at": "2026-10-28T06:14:36.631912+00:00",
             "retry_after": {
               "kind": "absent"
             },
             "status": 403,
-            "url_sha256": "fdd2fe75acedf1a25e45343867b81079246fa65842d45dd52759ce5e508ef4d0"
+            "url_sha256": "e1aee78709c598c7c2e6af1bbdf4fdd9923f8568cfa5b0a16e76ad1ff74896dc"
           }
         ],
-        "omitted_failure_samples": 23,
+        "omitted_failure_samples": 27,
         "response_status_counts": {
           "browser": {},
           "http": {
-            "200": 59,
-            "403": 35
+            "200": 62,
+            "403": 36
           }
         },
-        "run_id": "40580214586-1",
+        "run_id": "40639117005-1",
         "scope": "current_client_instance; redirects_and_browser_subresources_excluded",
-        "started_at": "2026-10-27T20:43:44.019517+00:00"
+        "started_at": "2026-10-28T05:39:59.501160+00:00"
       },
-      "run_id": "40580214586-1",
+      "run_id": "40639117005-1",
       "status": "partial",
       "transport_diagnostic": null
     },
     "tsukumo": {
-      "checkpoint_at": "2026-10-27T21:17:13.305038+00:00",
+      "checkpoint_at": "2026-10-28T06:13:27.861816+00:00",
       "discovery_gaps": [],
       "errors": [
         {
           "affected_tasks": 1,
           "reason": "RemoteDisconnected",
           "url": "https://shop.tsukumo.co.jp/goods/0199291178519/"
-        },
-        {
-          "affected_tasks": 3,
-          "reason": "RemoteDisconnected",
-          "url": null
         },
         {
           "affected_tasks": 1,
@@ -1251,12 +1118,17 @@
         {
           "affected_tasks": 1,
           "reason": "RemoteDisconnected",
-          "url": "https://shop.tsukumo.co.jp/goods/4711581491090/"
+          "url": "https://shop.tsukumo.co.jp/goods/8809213762598/"
         },
         {
           "affected_tasks": 1,
           "reason": "RemoteDisconnected",
           "url": "https://shop.tsukumo.co.jp/goods/4573626730416/"
+        },
+        {
+          "affected_tasks": 3,
+          "reason": "RemoteDisconnected",
+          "url": null
         },
         {
           "affected_tasks": 1,
@@ -1271,17 +1143,12 @@
         {
           "affected_tasks": 1,
           "reason": "RemoteDisconnected",
-          "url": "https://shop.tsukumo.co.jp/goods/4711289500964/"
-        },
-        {
-          "affected_tasks": 1,
-          "reason": "RemoteDisconnected",
           "url": "https://shop.tsukumo.co.jp/goods/8809773559935/"
         },
         {
           "affected_tasks": 1,
           "reason": "RemoteDisconnected",
-          "url": "https://shop.tsukumo.co.jp/goods/4988755067034/"
+          "url": "https://shop.tsukumo.co.jp/goods/4711289500964/"
         },
         {
           "affected_tasks": 1,
@@ -1291,12 +1158,22 @@
         {
           "affected_tasks": 1,
           "reason": "RemoteDisconnected",
-          "url": "https://shop.tsukumo.co.jp/goods/4711377308229/"
+          "url": "https://shop.tsukumo.co.jp/goods/4988755067034/"
         },
         {
           "affected_tasks": 1,
           "reason": "RemoteDisconnected",
           "url": "https://shop.tsukumo.co.jp/"
+        },
+        {
+          "affected_tasks": 1,
+          "reason": "RemoteDisconnected",
+          "url": "https://shop.tsukumo.co.jp/goods/4711377308229/"
+        },
+        {
+          "affected_tasks": 1,
+          "reason": "RemoteDisconnected",
+          "url": "https://shop.tsukumo.co.jp/goods/0840006678762/"
         }
       ],
       "http_evidence": {
@@ -1312,85 +1189,85 @@
             "exception_type": "RemoteDisconnected",
             "host": "shop.tsukumo.co.jp",
             "method": "http",
-            "observed_at": "2026-10-27T21:11:31.898500+00:00",
-            "url_sha256": "3f5f3e1a72c8745fbc650d1732d894b19fa5febe7e33bc00f17d777cad481d5a"
-          },
-          {
-            "exception_type": "RemoteDisconnected",
-            "host": "shop.tsukumo.co.jp",
-            "method": "http",
-            "observed_at": "2026-10-27T21:11:35.311577+00:00",
-            "url_sha256": "3f5f3e1a72c8745fbc650d1732d894b19fa5febe7e33bc00f17d777cad481d5a"
-          },
-          {
-            "exception_type": "RemoteDisconnected",
-            "host": "shop.tsukumo.co.jp",
-            "method": "http",
-            "observed_at": "2026-10-27T21:11:40.585010+00:00",
-            "url_sha256": "3f5f3e1a72c8745fbc650d1732d894b19fa5febe7e33bc00f17d777cad481d5a"
-          },
-          {
-            "exception_type": "RemoteDisconnected",
-            "host": "shop.tsukumo.co.jp",
-            "method": "http",
-            "observed_at": "2026-10-27T21:16:42.716799+00:00",
-            "url_sha256": "b1266a2a63570ff3857f258244716abd32f4125e6c2ff462657139ce3ea08186"
-          },
-          {
-            "exception_type": "RemoteDisconnected",
-            "host": "shop.tsukumo.co.jp",
-            "method": "http",
-            "observed_at": "2026-10-27T21:16:46.188215+00:00",
-            "url_sha256": "b1266a2a63570ff3857f258244716abd32f4125e6c2ff462657139ce3ea08186"
-          },
-          {
-            "exception_type": "RemoteDisconnected",
-            "host": "shop.tsukumo.co.jp",
-            "method": "http",
-            "observed_at": "2026-10-27T21:16:51.547374+00:00",
-            "url_sha256": "b1266a2a63570ff3857f258244716abd32f4125e6c2ff462657139ce3ea08186"
-          },
-          {
-            "exception_type": "RemoteDisconnected",
-            "host": "shop.tsukumo.co.jp",
-            "method": "http",
-            "observed_at": "2026-10-27T21:16:52.950904+00:00",
-            "url_sha256": "35e53c041e4006882ea7b5c4518cc8961702ee3557165f02ef74ae701f0c1ae7"
-          },
-          {
-            "exception_type": "RemoteDisconnected",
-            "host": "shop.tsukumo.co.jp",
-            "method": "http",
-            "observed_at": "2026-10-27T21:16:56.310292+00:00",
-            "url_sha256": "35e53c041e4006882ea7b5c4518cc8961702ee3557165f02ef74ae701f0c1ae7"
-          },
-          {
-            "exception_type": "RemoteDisconnected",
-            "host": "shop.tsukumo.co.jp",
-            "method": "http",
-            "observed_at": "2026-10-27T21:17:01.608571+00:00",
-            "url_sha256": "35e53c041e4006882ea7b5c4518cc8961702ee3557165f02ef74ae701f0c1ae7"
-          },
-          {
-            "exception_type": "RemoteDisconnected",
-            "host": "shop.tsukumo.co.jp",
-            "method": "http",
-            "observed_at": "2026-10-27T21:17:03.035041+00:00",
+            "observed_at": "2026-10-28T06:07:47.329147+00:00",
             "url_sha256": "8829d7506a67cbb45539435b2f6652df40eca735743fef73e35063da8fee9b57"
           },
           {
             "exception_type": "RemoteDisconnected",
             "host": "shop.tsukumo.co.jp",
             "method": "http",
-            "observed_at": "2026-10-27T21:17:06.403092+00:00",
+            "observed_at": "2026-10-28T06:07:50.588850+00:00",
             "url_sha256": "8829d7506a67cbb45539435b2f6652df40eca735743fef73e35063da8fee9b57"
           },
           {
             "exception_type": "RemoteDisconnected",
             "host": "shop.tsukumo.co.jp",
             "method": "http",
-            "observed_at": "2026-10-27T21:17:11.855313+00:00",
+            "observed_at": "2026-10-28T06:07:55.878455+00:00",
             "url_sha256": "8829d7506a67cbb45539435b2f6652df40eca735743fef73e35063da8fee9b57"
+          },
+          {
+            "exception_type": "RemoteDisconnected",
+            "host": "shop.tsukumo.co.jp",
+            "method": "http",
+            "observed_at": "2026-10-28T06:12:57.744128+00:00",
+            "url_sha256": "35e53c041e4006882ea7b5c4518cc8961702ee3557165f02ef74ae701f0c1ae7"
+          },
+          {
+            "exception_type": "RemoteDisconnected",
+            "host": "shop.tsukumo.co.jp",
+            "method": "http",
+            "observed_at": "2026-10-28T06:13:01.126983+00:00",
+            "url_sha256": "35e53c041e4006882ea7b5c4518cc8961702ee3557165f02ef74ae701f0c1ae7"
+          },
+          {
+            "exception_type": "RemoteDisconnected",
+            "host": "shop.tsukumo.co.jp",
+            "method": "http",
+            "observed_at": "2026-10-28T06:13:06.470464+00:00",
+            "url_sha256": "35e53c041e4006882ea7b5c4518cc8961702ee3557165f02ef74ae701f0c1ae7"
+          },
+          {
+            "exception_type": "RemoteDisconnected",
+            "host": "shop.tsukumo.co.jp",
+            "method": "http",
+            "observed_at": "2026-10-28T06:13:07.820391+00:00",
+            "url_sha256": "8829d7506a67cbb45539435b2f6652df40eca735743fef73e35063da8fee9b57"
+          },
+          {
+            "exception_type": "RemoteDisconnected",
+            "host": "shop.tsukumo.co.jp",
+            "method": "http",
+            "observed_at": "2026-10-28T06:13:11.148893+00:00",
+            "url_sha256": "8829d7506a67cbb45539435b2f6652df40eca735743fef73e35063da8fee9b57"
+          },
+          {
+            "exception_type": "RemoteDisconnected",
+            "host": "shop.tsukumo.co.jp",
+            "method": "http",
+            "observed_at": "2026-10-28T06:13:16.455177+00:00",
+            "url_sha256": "8829d7506a67cbb45539435b2f6652df40eca735743fef73e35063da8fee9b57"
+          },
+          {
+            "exception_type": "RemoteDisconnected",
+            "host": "shop.tsukumo.co.jp",
+            "method": "http",
+            "observed_at": "2026-10-28T06:13:17.718882+00:00",
+            "url_sha256": "5125637021bf77dc313ccce3a5ceed18b1adc3f4f59d0fad95e2fea697e28728"
+          },
+          {
+            "exception_type": "RemoteDisconnected",
+            "host": "shop.tsukumo.co.jp",
+            "method": "http",
+            "observed_at": "2026-10-28T06:13:21.033360+00:00",
+            "url_sha256": "5125637021bf77dc313ccce3a5ceed18b1adc3f4f59d0fad95e2fea697e28728"
+          },
+          {
+            "exception_type": "RemoteDisconnected",
+            "host": "shop.tsukumo.co.jp",
+            "method": "http",
+            "observed_at": "2026-10-28T06:13:26.329749+00:00",
+            "url_sha256": "5125637021bf77dc313ccce3a5ceed18b1adc3f4f59d0fad95e2fea697e28728"
           }
         ],
         "omitted_failure_samples": 51,
@@ -1398,42 +1275,42 @@
           "browser": {},
           "http": {}
         },
-        "run_id": "40580214586-1",
+        "run_id": "40639117005-1",
         "scope": "current_client_instance; redirects_and_browser_subresources_excluded",
-        "started_at": "2026-10-27T20:43:35.145177+00:00"
+        "started_at": "2026-10-28T05:39:54.732879+00:00"
       },
-      "run_id": "40580214586-1",
+      "run_id": "40639117005-1",
       "status": "partial",
       "transport_diagnostic": {
         "baseline": {
           "exception_type": "RemoteDisconnected",
           "host": "shop.tsukumo.co.jp",
           "method": "http",
-          "observed_at": "2026-10-27T21:17:11.855313+00:00",
-          "url_sha256": "8829d7506a67cbb45539435b2f6652df40eca735743fef73e35063da8fee9b57"
+          "observed_at": "2026-10-28T06:13:26.329749+00:00",
+          "url_sha256": "5125637021bf77dc313ccce3a5ceed18b1adc3f4f59d0fad95e2fea697e28728"
         },
         "body_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
         "bytes": 0,
-        "checked_at": "2026-10-27T21:17:11.980371+00:00",
+        "checked_at": "2026-10-28T06:13:26.538868+00:00",
         "diagnostic_request_count": 1,
-        "elapsed_seconds": 1.285,
+        "elapsed_seconds": 1.27,
         "exit_code": 52,
         "http_status": null,
         "http_version": "0",
         "method": "system_curl_default",
-        "request_started_at": "2026-10-27T21:17:11.980997+00:00",
+        "request_started_at": "2026-10-28T06:13:26.539648+00:00",
         "retry_after": {
           "kind": "absent"
         },
-        "run_id": "40580214586-1",
+        "run_id": "40639117005-1",
         "scope": "same_runner_after_collection; not_price_observation; redirects_not_followed",
         "status": "completed",
-        "task_id": "bdfb826a09bbcf9faa3cca89",
-        "url": "https://shop.tsukumo.co.jp/"
+        "task_id": "d55c826d076fbd971dae59f0",
+        "url": "https://shop.tsukumo.co.jp/goods/0840006678762/"
       }
     },
     "yahoo": {
-      "checkpoint_at": "2026-10-27T20:43:29.128420+00:00",
+      "checkpoint_at": "2026-10-28T05:40:24.785449+00:00",
       "discovery_gaps": [],
       "errors": [
         {
@@ -1454,16 +1331,16 @@
           "browser": {},
           "http": {}
         },
-        "run_id": "40580214586-1",
+        "run_id": "40639117005-1",
         "scope": "current_client_instance; redirects_and_browser_subresources_excluded",
-        "started_at": "2026-10-27T20:43:29.088013+00:00"
+        "started_at": "2026-10-28T05:40:24.743309+00:00"
       },
-      "run_id": "40580214586-1",
+      "run_id": "40639117005-1",
       "status": "configuration_needed",
       "transport_diagnostic": null
     },
     "yodobashi": {
-      "checkpoint_at": "2026-10-27T20:45:07.939194+00:00",
+      "checkpoint_at": "2026-10-28T05:42:08.047537+00:00",
       "discovery_gaps": [],
       "errors": [
         {
@@ -1472,7 +1349,7 @@
           "url": "https://www.yodobashi.com/"
         },
         {
-          "affected_tasks": 2141,
+          "affected_tasks": 2142,
           "reason": "Error",
           "url": null
         }
@@ -1492,28 +1369,28 @@
             "exception_type": "TimeoutError",
             "host": "www.yodobashi.com",
             "method": "http",
-            "observed_at": "2026-10-27T20:43:52.314190+00:00",
+            "observed_at": "2026-10-28T05:40:49.526906+00:00",
             "url_sha256": "3e576ede4e5a504b5917ba7760216152b6b623c1bf3dd2c0a58cb6adb9707b29"
           },
           {
             "exception_type": "TimeoutError",
             "host": "www.yodobashi.com",
             "method": "http",
-            "observed_at": "2026-10-27T20:44:19.550782+00:00",
+            "observed_at": "2026-10-28T05:41:16.958726+00:00",
             "url_sha256": "3e576ede4e5a504b5917ba7760216152b6b623c1bf3dd2c0a58cb6adb9707b29"
           },
           {
             "exception_type": "TimeoutError",
             "host": "www.yodobashi.com",
             "method": "http",
-            "observed_at": "2026-10-27T20:44:48.923961+00:00",
+            "observed_at": "2026-10-28T05:41:46.294440+00:00",
             "url_sha256": "3e576ede4e5a504b5917ba7760216152b6b623c1bf3dd2c0a58cb6adb9707b29"
           },
           {
             "exception_type": "Error",
             "host": "www.yodobashi.com",
             "method": "browser",
-            "observed_at": "2026-10-27T20:44:49.610714+00:00",
+            "observed_at": "2026-10-28T05:41:47.769613+00:00",
             "url_sha256": "3e576ede4e5a504b5917ba7760216152b6b623c1bf3dd2c0a58cb6adb9707b29"
           }
         ],
@@ -1522,11 +1399,11 @@
           "browser": {},
           "http": {}
         },
-        "run_id": "40580214586-1",
+        "run_id": "40639117005-1",
         "scope": "current_client_instance; redirects_and_browser_subresources_excluded",
-        "started_at": "2026-10-27T20:43:26.894354+00:00"
+        "started_at": "2026-10-28T05:40:24.126732+00:00"
       },
-      "run_id": "40580214586-1",
+      "run_id": "40639117005-1",
       "status": "partial",
       "transport_diagnostic": null
     }
