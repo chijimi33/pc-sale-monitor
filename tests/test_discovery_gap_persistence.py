@@ -32,6 +32,78 @@ class Fake:
 
 
 class DiscoveryGapPersistence(unittest.TestCase):
+    def test_new_pagination_does_not_inherit_parent_failure_attempts(self):
+        with tempfile.TemporaryDirectory() as d:
+            c = self.collector(Path(d), body=b'<a rel="next" href="?page=2">Next</a>')
+            parent_id = self.add_task(c)
+            c.seed()
+            parent = c.state["queue"][parent_id]
+            parent.update(last_error="http_503", last_attempt_at=AGE,
+                          last_attempt_run_id="old", retry_at_epoch_seconds=1)
+            original = deepcopy(parent)
+            with self.assertRaisesRegex(FetchError, REASON):
+                c.process(parent)
+            child = next(t for key, t in c.state["queue"].items() if key != parent_id)
+            self.assertEqual(child["attempts"], 0)
+            self.assertEqual(child["created_at"], AGE)
+            for key in ("last_error", "last_attempt_at", "last_attempt_run_id", "retry_at_epoch_seconds"):
+                self.assertNotIn(key, child)
+            self.assertEqual(c.state["queue"][parent_id], original)
+            self.assertEqual(c.state["offers"], {})
+
+    def test_cyclic_pagination_preserves_existing_child_and_restart_state(self):
+        with tempfile.TemporaryDirectory() as d:
+            root = Path(d)
+            c = self.collector(root)
+            parent_id = self.add_task(c)
+            child_url = URL + "?page=2"
+            earlier = "2026-10-19T00:00:00+00:00"
+            child_id = c.enqueue({"type": "list", "url": child_url, "sale_page": True,
+                                  "created_at": earlier, "attempts": 9})
+            def get(url):
+                c.client.count += 1
+                target = child_url if url == URL else URL
+                return Page(url, ('<a rel="next" href="' + target + '">Next</a>').encode(), NOW)
+            c.client.get = get
+            state = c.collect(seconds=1)
+            self.assertEqual(set(state["queue"]), {parent_id, child_id})
+            self.assertEqual(state["queue"][parent_id]["attempts"], 5)
+            self.assertEqual(state["queue"][child_id]["attempts"], 10)
+            self.assertEqual(state["queue"][child_id]["created_at"], earlier)
+            self.assertLessEqual(state["queue"][parent_id]["created_at"], AGE)
+            self.assertEqual(c.client.count, 2)
+            self.assertEqual(len(state["discovery_gaps"]), 2)
+            before = deepcopy(state["queue"])
+            restarted = self.collector(root, "second").collect(seconds=0)
+            self.assertEqual(restarted["queue"], before)
+            self.assertEqual(restarted["status"], "partial")
+            self.assertEqual(restarted["offers"], {})
+            self.assertFalse(restarted.get("discovery_gap_resolutions"))
+
+    def test_empty_first_page_keeps_parent_and_discovers_later_products(self):
+        with tempfile.TemporaryDirectory() as d:
+            root = Path(d)
+            c = self.collector(root)
+            task_id = self.add_task(c)
+            next_url = URL + "?page=2"
+            def get(url):
+                if url == URL:
+                    return Page(url, b'<a rel="next" href="?page=2">Next</a>', NOW)
+                if url == next_url:
+                    return Page(url, PRODUCT, NOW)
+                raise FetchError("http_503")
+            c.client.get = get
+            state = c.collect(seconds=1)
+            self.assertIn(task_id, state["queue"])
+            self.assertNotIn(task_id, state["done"])
+            self.assertEqual(state["queue"][task_id]["created_at"], AGE)
+            self.assertEqual(state["queue"][task_id]["attempts"], 5)
+            self.assertTrue(any(t["type"] == "product" for t in state["queue"].values()))
+            self.assertTrue(all(t["created_at"] == AGE for t in state["queue"].values()))
+            self.assertEqual(state["discovery_gaps"][0]["url"], URL)
+            self.assertEqual(state["offers"], {})
+            self.assertEqual(state["status"], "partial")
+
     def test_redirected_products_do_not_resolve_original_gap(self):
         with tempfile.TemporaryDirectory() as d:
             root = Path(d)

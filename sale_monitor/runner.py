@@ -411,6 +411,21 @@ class Collector:
                 gap["response_evidence"] = {"http_status": page.status, "method": page.method,
                     "content_hash": digest(page.text), "observed_at": page.observed_at,
                     "observed_run_id": self.run_id}
+                # This page can lack qualifying PC products while a later
+                # page contains them. Retain the parent without losing those
+                # dependencies or their original waiting time.
+                origin = task.get("discovery_origin") or {
+                    "url": task["url"], "created_at": task["created_at"]}
+                origin = {**origin, "created_at": min(origin["created_at"], task["created_at"])}
+                # A newly discovered URL has not made its parent's failed
+                # requests. Existing dependencies keep their own retry history
+                # through enqueue's merge behavior.
+                dependency = {key: value for key, value in task.items() if key not in
+                    ("attempts", "last_error", "last_attempt_at", "last_attempt_run_id",
+                     "retry_at_epoch_seconds")}
+                for url in pagination:
+                    self.enqueue({**dependency, "url": url, "created_at": origin["created_at"],
+                                  "discovery_origin": origin})
                 # Keep the actual task and its age for retry even when the
                 # campaign is no longer linked. Empty is not verified complete.
                 raise FetchError(reason)
