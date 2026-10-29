@@ -155,7 +155,11 @@ class Collector:
         if self.new_run or self.state.get("cycle_complete"):
             # Keep unfinished work (and its original age), while allowing fresh
             # list discovery even when one old URL repeatedly fails.
-            self.state.update(done=[], changes={}, cycle_started_at=iso(), cycle_complete=False, list_pages=0, listed_candidates=0, discovery_gaps=[])
+            # A campaign can disappear from the next seed page without its
+            # unresolved parse having been verified. Preserve that finding.
+            unresolved = [gap for gap in self.state.get("discovery_gaps", [])
+                          if gap.get("reason") == "no_sale_candidates_parser_review"]
+            self.state.update(done=[], changes={}, cycle_started_at=iso(), cycle_complete=False, list_pages=0, listed_candidates=0, discovery_gaps=unresolved)
             comparison_priority.refresh(self.state["queue"], requests, self.store)
             adapter = self.cfg["adapter"]
             if adapter == "html":
@@ -397,7 +401,34 @@ class Collector:
             if replacement and not products:
                 raise FetchError("discovery_replacement_unverified")
             if not products and not campaigns and task.get("kind") != "comparison":
-                self.state["discovery_gaps"].append({"url": task["url"], "reason": "no_sale_candidates_parser_review"})
+                reason = "no_sale_candidates_parser_review"
+                gaps = self.state.setdefault("discovery_gaps", [])
+                gap = next((g for g in gaps if g.get("url") == task["url"] and g.get("reason") == reason), None)
+                if gap is None:
+                    gap = {"url": task["url"], "reason": reason,
+                           "first_seen_at": page.observed_at, "original_task": deepcopy(task)}
+                    gaps.append(gap)
+                gap["response_evidence"] = {"http_status": page.status, "method": page.method,
+                    "content_hash": digest(page.text), "observed_at": page.observed_at,
+                    "observed_run_id": self.run_id}
+                # Keep the actual task and its age for retry even when the
+                # campaign is no longer linked. Empty is not verified complete.
+                raise FetchError(reason)
+            if task.get("kind") != "comparison" and (products or campaigns):
+                gaps = self.state.get("discovery_gaps", [])
+                resolved = [g for g in gaps if g.get("url") == task["url"]
+                            and g.get("reason") == "no_sale_candidates_parser_review"]
+                if resolved and canonical(page.url) != canonical(fetch_url):
+                    # A redirect to a generic homepage can contain products
+                    # while leaving the requested campaign unexplained.
+                    raise FetchError("discovery_gap_scope_unverified", page)
+                for gap in resolved:
+                    self.state.setdefault("discovery_gap_resolutions", []).append({
+                        "finding": deepcopy(gap), "observed_run_id": self.run_id,
+                        "observed_at": page.observed_at, "response_url": page.url,
+                        "requested_url": fetch_url, "content_hash": digest(page.text),
+                        "product_count": len(products), "campaign_count": len(campaigns)})
+                self.state["discovery_gaps"] = [g for g in gaps if g not in resolved]
             if self.store == "koubou" and task.get("kind") == "comparison" and not products:
                 # A filtered/unsupported search URL must not silently complete
                 # from an empty JavaScript shell, nor lose its filter conditions.
