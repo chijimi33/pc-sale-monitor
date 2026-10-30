@@ -124,6 +124,17 @@ class Client:
         self.retry_after[host] = max(self.retry_after.get(host, 0), time.time() + wait)
         return wait
 
+    def check_maintenance(self, requested_url: str, page: Page):
+        # Ark redirects every product/list/search entry to this dedicated host
+        # during maintenance, with HTTP 200. It is not a product observation.
+        if urlsplit(page.url).hostname == "maintenance.ark-pc.co.jp":
+            host = urlsplit(requested_url).hostname
+            self.access_retry_after[host] = {
+                "until": max(time.time() + 300, self.access_retry_after.get(host, {}).get("until", 0)),
+                "reason": "store_maintenance",
+            }
+            raise FetchError("store_maintenance", page=page)
+
     def defer_response(self, host: str, status: int, retry: str | None, attempt: int = 0) -> float:
         wait = self.defer_host(host, retry, attempt)
         # A 429 without a usable future deadline still asks us to slow down.
@@ -153,6 +164,7 @@ class Client:
                 self.evidence.record(url, "http", status=response_status)
                 self.access_response(url, response_status)
                 self.transport_failed_urls.pop(host, None)
+                self.check_maintenance(url, page)
                 return page
             except HTTPError as exc:
                 self.transport_failed_urls.pop(host, None)
@@ -251,6 +263,8 @@ class Client:
                     pass
                 if not allowed_url(page.url):
                     raise FetchError("excluded_redirect_host")
-                return Page(page.url, page.content().encode(), iso(), "browser", "text/html;charset=utf-8")
+                result = Page(page.url, page.content().encode(), iso(), "browser", "text/html;charset=utf-8")
+                self.check_maintenance(url, result)
+                return result
             finally:
                 browser.close()
