@@ -14,7 +14,7 @@ from . import adapters
 from .flyers import collect_flyer
 from .http import Client, FetchError, Page
 from .models import STORES, Offer, allowed_url, digest, fresh, iso, timestamp, utcnow
-from .parsing import canonical, confirmed_empty_search, discover, parse_product, search_form
+from .parsing import canonical, confirmed_empty_search, confirmed_missing_product, discover, parse_product, search_form
 from .storage import Store
 from .scheduling import plan_comparison_refresh, select_task
 from .retrying import runnable, transient
@@ -290,6 +290,10 @@ class Collector:
                 try:
                     self.pages[url] = self.client.get(url)
                 except FetchError as exc:
+                    if confirmed_missing_product(self.store, url, exc.page):
+                        # Keep the task and this response as a failed fetch;
+                        # a known server 404 does not need another navigation.
+                        raise
                     if not allow_browser or str(exc) in ("rate_limited_retry_later", "store_maintenance") or str(exc).startswith(("transport_retry_later:", "access_retry_later:")) or (exc.page is not None and confirmed_empty_search(self.store, exc.page)) or not self.cfg.get("browser_fallback"):
                         raise
                     self.pages[url] = self.client.rendered(url)
@@ -590,7 +594,8 @@ class Collector:
                 self.state["errors"] = [e for e in self.state["errors"] if e.get("task_id") != task_id]
                 error = {"task_id": task_id, "reason": reason, "url": task.get("url")}
                 page = getattr(exc, "page", None)
-                if (isinstance(exc, ParserError) or reason == "store_maintenance") and isinstance(page, Page):
+                if (isinstance(exc, ParserError) or reason == "store_maintenance"
+                        or (reason == "http_404" and confirmed_missing_product(self.store, task.get("url", ""), page))) and isinstance(page, Page):
                     error["response_evidence"] = {
                         "status": page.status, "method": page.method,
                         "body_bytes": len(page.body),

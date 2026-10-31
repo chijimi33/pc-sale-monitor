@@ -430,6 +430,38 @@ def discover(page: Page, cfg: dict, *, sale_page: bool, comparison: bool = False
     return list(products.values()), sorted(pages - {canonical(page.url)}), sorted(campaigns - {canonical(page.url)})
 
 
+def confirmed_missing_product(store: str, requested_url: str, page: Page | None) -> bool:
+    """Recognize Koubou's exact missing-page response, not stock or product EOL.
+
+    This only decides whether a browser retry of the same 404 is useful.
+    The original task must remain pending and be fetched again next run.
+    """
+    if store != "koubou" or page is None or page.status != 404 or page.url != requested_url:
+        return False
+    parts = urlsplit(requested_url)
+    query = parse_qsl(parts.query, keep_blank_values=True)
+    if (parts.scheme != "https" or parts.netloc != "www.pc-koubou.jp"
+            or parts.path != "/products/detail.php" or len(query) != 1
+            or query[0][0] != "product_id" or not re.fullmatch(r"[0-9]+", query[0][1])):
+        return False
+    try:
+        tree = document(page)
+    except etree.ParserError:
+        return False
+    titles = tree.xpath("//title")
+    panels = tree.xpath('//main[@id="contents"]//*[@id="p-error"]')
+    if (len(titles) != 1 or clean(titles[0]) != "ページが見つかりません"
+            or len(panels) != 1 or tree.xpath('//script[@type="application/ld+json"]')):
+        return False
+    messages = panels[0].xpath('./div[contains(concat(" ", normalize-space(@class), " "), " p-error-message ")]')
+    if len(messages) != 1 or clean(messages[0]) != "ご指定のページはございません。":
+        return False
+    for node in [messages[0], *messages[0].iterancestors()]:
+        if node.get("hidden") is not None or re.search(r"display\s*:\s*none|visibility\s*:\s*hidden", node.get("style", ""), re.I):
+            return False
+    return True
+
+
 def confirmed_empty_search(store: str, page: Page) -> str | None:
     parts = urlsplit(page.url)
     query = dict(parse_qsl(parts.query)).get("keyword", "").strip()
