@@ -63,6 +63,7 @@ class Collector:
         if self.new_run:
             scheduler["selected_by_lane"] = {}
             scheduler["selected_by_attempt_kind"] = {}
+            scheduler["selected_by_coverage_policy"] = {}
             self.state["retry_activity"] = {"retries_started": 0, "recovered_tasks": 0, "wait_seconds": 0}
             self.state["recovered_errors"] = []
         self.state.setdefault("retry_activity", {"retries_started": 0, "recovered_tasks": 0, "wait_seconds": 0})

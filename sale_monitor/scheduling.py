@@ -90,13 +90,31 @@ def select_task(pending: list[tuple[str, dict]], scheduler: dict, order, now, at
         candidates = (untried if retry_cursor < 3 else retries) or untried or retries
         retry_cursors[group] = (retry_cursor + 1) % 4
 
+        # Age/priority alone picks the same failing prefix again after every
+        # new run. Reserve one of four first-attempt opportunities in each
+        # existing group for work least recently attempted across runs.
+        # Keep the cursor in the checkpoint, and never rewrite task age.
+        policy = "oldest_pending"
+        if candidates[0][0] not in attempted:
+            coverage_cursors = scheduler.setdefault("coverage_cursor_by_group", {})
+            coverage_cursor = coverage_cursors.get(group, 0) % 4
+            if coverage_cursor == 3:
+                policy = "least_recent_attempt"
+            coverage_cursors[group] = (coverage_cursor + 1) % 4
+
         def ranked(pair):
             created = timestamp(pair[1].get("created_at"))
             overdue = created is not None and now - created >= timedelta(hours=24)
-            # Overdue work cannot be displaced forever by newly promoted tasks.
+            # Preserve the overdue tier and the existing retry/lane shares.
+            if policy == "least_recent_attempt":
+                last_attempt = timestamp(pair[1].get("last_attempt_at"))
+                return (not overdue, last_attempt is not None,
+                        last_attempt or now, order(pair[1]))
             return (not overdue, order(pair[1]))
 
         selected = min(candidates, key=ranked)
+        counts = scheduler.setdefault("selected_by_coverage_policy", {})
+        counts[policy] = counts.get(policy, 0) + 1
         scheduler["cursor"] = (index + 1) % len(LANES)
         counts = scheduler.setdefault("selected_by_lane", {})
         counts[LANES[index]] = counts.get(LANES[index], 0) + 1
