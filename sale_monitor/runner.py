@@ -35,6 +35,17 @@ def task_order(task: dict) -> tuple:
     return stage, task.get("priority", 3), task["created_at"], step
 
 
+def new_dependency(task: dict, **updates) -> dict:
+    """Copy traversal context without another page's attempt/retry history.
+
+    Existing queue entries retain their own history through enqueue merging.
+    Host-wide waits are enforced separately by the client and runnable filter.
+    """
+    return {key: value for key, value in {**task, **updates}.items() if key not in
+            ("attempts", "last_error", "last_attempt_at", "last_attempt_run_id",
+             "retry_at_epoch_seconds")}
+
+
 class Collector:
     def __init__(self, root: Path, store: str, config: dict, run_id: str, client: Client | None = None):
         if store not in STORES:
@@ -369,7 +380,7 @@ class Collector:
             if details.get("provider_window_truncated"):
                 self.state["discovery_gaps"].append({"reason": "yahoo_provider_window", "query": task["query"], **details})
             if next_page:
-                self.enqueue({**task, "start": next_page})
+                self.enqueue(new_dependency(task, start=next_page))
         elif kind == "search":
             home = self.page(self.cfg["seed_urls"][0])
             url = search_form(home, task["query"])
@@ -425,9 +436,7 @@ class Collector:
                 # A newly discovered URL has not made its parent's failed
                 # requests. Existing dependencies keep their own retry history
                 # through enqueue's merge behavior.
-                dependency = {key: value for key, value in task.items() if key not in
-                    ("attempts", "last_error", "last_attempt_at", "last_attempt_run_id",
-                     "retry_at_epoch_seconds")}
+                dependency = new_dependency(task)
                 for url in pagination:
                     self.enqueue({**dependency, "url": url, "created_at": origin["created_at"],
                                   "discovery_origin": origin})
@@ -465,7 +474,7 @@ class Collector:
             for product in products:
                 self.enqueue({"type": "product", **product, "priority": task.get("priority", 3), **origin})
             for url in pagination:
-                self.enqueue({**task, "url": url, **origin})
+                self.enqueue(new_dependency(task, url=url, **origin))
             # Follow explicitly linked sale pages, including nested sale portals.
             # The queue deduplicates cycles; ordinary category links stay excluded.
             for url in campaigns:
