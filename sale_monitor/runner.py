@@ -70,6 +70,14 @@ class Collector:
                 if failure["until"] > self.client.transport_retry_after.get(host, {}).get("until", 0):
                     self.client.transport_retry_after[host] = failure.copy()
         self.new_run = self.state.get("run_id") != run_id
+        # Resume the same collection's learned spacing after interruption.
+        # A new collection probes the configured base rate again; mandatory
+        # Retry-After deadlines above remain shared across collection runs.
+        if not self.new_run and isinstance(getattr(self.client, "rate_limit_spacing", None), dict):
+            for host, spacing in self.state.get("rate_limit_spacing_seconds", {}).items():
+                if type(spacing) in (int, float) and 0 < spacing <= 30:
+                    self.client.rate_limit_spacing[host] = max(
+                        self.client.rate_limit_spacing.get(host, 0), spacing)
         scheduler = self.state.setdefault("scheduler", {"cursor": 0})
         if self.new_run:
             scheduler["selected_by_lane"] = {}
@@ -97,6 +105,8 @@ class Collector:
         self.state["checkpoint_at"] = iso()
         self.state["pending_count"] = len(self.state["queue"])
         self.state["request_count"] = self.client.count
+        if isinstance(getattr(self.client, "rate_limit_spacing", None), dict):
+            self.state["rate_limit_spacing_seconds"] = self.client.rate_limit_spacing.copy()
         if getattr(self.client, "evidence", None) is not None:
             self.state["http_evidence"] = {"run_id": self.run_id, **self.client.evidence.snapshot()}
         if isinstance(getattr(self.client, "retry_after", None), dict):

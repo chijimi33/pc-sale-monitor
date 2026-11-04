@@ -58,6 +58,7 @@ class Client:
         self.delay = delay
         self.timeout = timeout
         self.last_request = {}
+        self.rate_limit_spacing = {}
         self.retry_after = {}
         self.transport_retry_after = {}
         self.transport_failed_urls = {}
@@ -67,6 +68,16 @@ class Client:
         self.errors = []
         self.evidence = ResponseEvidence()
         self.opener = build_opener(SafeRedirect())
+
+    def space_request(self, host: str):
+        # A cooldown alone can repeat the same burst immediately afterwards.
+        # Keep the lower rate for this collection after a 429, independently
+        # of the server's mandatory Retry-After deadline.
+        spacing = max(self.delay, self.rate_limit_spacing.get(host, 0))
+        elapsed = time.monotonic() - self.last_request.get(host, 0)
+        if elapsed < spacing:
+            time.sleep(spacing - elapsed)
+        self.last_request[host] = time.monotonic()
 
     def wait_for_host(self, host: str):
         access = self.access_retry_after.get(host)
@@ -137,6 +148,9 @@ class Client:
 
     def defer_response(self, host: str, status: int, retry: str | None, attempt: int = 0) -> float:
         wait = self.defer_host(host, retry, attempt)
+        if status == 429:
+            previous = max(self.delay, self.rate_limit_spacing.get(host, 0), 1.0)
+            self.rate_limit_spacing[host] = min(30.0, previous * 2)
         # A 429 without a usable future deadline still asks us to slow down.
         # Share the collector's five-minute retry interval with every URL on
         # this host, including browser fallback and checkpoint restarts.
@@ -151,12 +165,9 @@ class Client:
         host = urlsplit(url).hostname
         for attempt in range(3):
             self.wait_for_host(host)
-            elapsed = time.monotonic() - self.last_request.get(host, 0)
-            if elapsed < self.delay:
-                time.sleep(self.delay - elapsed)
+            self.space_request(host)
             try:
                 self.count += 1
-                self.last_request[host] = time.monotonic()
                 request = Request(url, data=data, method=method, headers={"User-Agent": "PCSaleMonitor/0.1 (+https://github.com/chijimi33/pc-sale-monitor)", "Accept-Language": "ja,en;q=0.5", "Cache-Control": "no-cache", **(headers or {})})
                 with self.opener.open(request, timeout=self.timeout) as result:
                     page = Page(result.url, result.read(), iso(), content_type=result.headers.get("Content-Type", ""))
@@ -236,6 +247,7 @@ class Client:
             try:
                 page = browser.new_page(locale="ja-JP")
                 page.route("**/*", lambda route: route.continue_() if allowed_url(route.request.url) else route.abort())
+                self.space_request(urlsplit(url).hostname)
                 self.count += 1
                 try:
                     response = page.goto(url, wait_until="domcontentloaded", timeout=self.timeout * 1000)
