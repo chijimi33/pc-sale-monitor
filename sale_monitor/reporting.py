@@ -54,6 +54,7 @@ def health(state: dict, now) -> dict:
             "known_offers": len(offers), "current_offers": len(current), "eligible_offers": sum(not o.errors(now) for o in current),
             "mandatory_field_coverage": coverage, "pending_count": len(queue), "pending_by_type": dict(queue_types), "oldest_pending_at": iso(min(created)) if created else None,
             "retry_after_epoch_seconds": state.get("retry_after", {}),
+            "rate_limit_spacing_seconds": state.get("rate_limit_spacing_seconds", {}),
             "transport_retry_after": state.get("transport_retry_after", {}),
             "access_retry_after": state.get("access_retry_after", {}),
             "scheduler": state.get("scheduler", {}),
