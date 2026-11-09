@@ -163,6 +163,30 @@ def comparison_inputs_by_identity(current: list[Offer], history: list[dict]) -> 
     return current_by_identity, history_by_identity
 
 
+def flyer_dismissals(records) -> tuple[dict, list]:
+    """Only explicit candidate IDs with reasons may remove OCR review rows.
+
+    Keep malformed or asset-wide notes visible as review issues; they must
+    neither dismiss all candidates from an image nor stop public aggregation.
+    The original review record remains in the public flyer and on disk.
+    """
+    if not isinstance(records, list):
+        return {}, [{"reason": "dismissed_candidates_not_list"}]
+    dismissed, issues = {}, []
+    for index, row in enumerate(records):
+        if not isinstance(row, dict):
+            reason = "dismissal_not_object"
+        elif not isinstance(row.get("candidate_id"), str) or not row["candidate_id"].strip():
+            reason = "candidate_id_missing_or_invalid"
+        elif not isinstance(row.get("reason"), str) or not row["reason"].strip():
+            reason = "dismissal_reason_missing_or_invalid"
+        else:
+            dismissed[row["candidate_id"]] = row["reason"]
+            continue
+        issues.append({"index": index, "reason": reason})
+    return dismissed, issues
+
+
 def aggregate(root: Path, public: Path, run_id: str, now=None) -> dict:
     now = now or utcnow()
     disk = Store(root)
@@ -285,10 +309,14 @@ def aggregate(root: Path, public: Path, run_id: str, now=None) -> dict:
     atomic_json(public / "comparison_plan.json", comparison_plan)
     atomic_json(public / "collection_errors.json", {"generated_at": iso(now), "run_id": run_id, "stores": collection_errors})
     atomic_json(public / "comparison_routing.json", {"generated_at": iso(now), "run_id": run_id, "stores": comparison_routing})
-    atomic_json(public / "review_queue.json", {"generated_at": iso(now), "candidates": reviews, "flyer": disk.load("flyers/latest.json", None)})
     flyer = disk.load("flyers/latest.json", None)
+    dismissed, dismissal_issues = flyer_dismissals((flyer or {}).get("dismissed_candidates", []))
+    if flyer is not None and dismissal_issues:
+        flyer = {**flyer,
+                 "review_issues": list(flyer.get("review_issues", [])) + ["invalid_candidate_dismissals"],
+                 "dismissal_review_issues": dismissal_issues}
+    atomic_json(public / "review_queue.json", {"generated_at": iso(now), "candidates": reviews, "flyer": flyer})
     assets = []
-    dismissed = {c["candidate_id"]: c["reason"] for c in (flyer or {}).get("dismissed_candidates", [])}
     for asset in (flyer or {}).get("assets", []):
         parsed = disk.load(asset["extraction_path"], {})
         candidates = [c for c in parsed.get("candidates", []) if c.get("candidate_id") not in dismissed]
