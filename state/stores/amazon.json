@@ -1,14 +1,14 @@
 {
   "access_block": {
-    "body_sha256": "976b30a389e26eaff7f23c5eceaa9855e537eaf64ecda1c56c53319a004fa543",
-    "checked_at": "2026-11-08T20:29:44.769897+00:00",
+    "body_sha256": "834cd7730d9ab7bd53be98954d108de3d26ce20dbda092fb3b0168ae0970d0c1",
+    "checked_at": "2026-11-09T06:22:58.054306+00:00",
     "reason": "amazon_access_challenge",
-    "run_id": "42520195738-1",
+    "run_id": "42572432102-1",
     "url": "https://www.amazon.co.jp/dp/B00Y1U6JAU"
   },
   "access_retry_after": {},
   "changes": {},
-  "checkpoint_at": "2026-11-08T20:29:44.785566+00:00",
+  "checkpoint_at": "2026-11-09T06:22:58.071596+00:00",
   "comparison_refresh": {
     "existing_queue_policy": "retained_with_original_age_and_attempts",
     "historical_offer_policy": "retained_not_current_without_new_observation",
@@ -21,11 +21,13 @@
     "sale_candidate_identity_count": 2732,
     "selected_for_refresh": 0
   },
-  "completed_at": "2026-11-08T20:29:44.785554+00:00",
+  "completed_at": "2026-11-09T06:22:58.071583+00:00",
   "cycle_complete": false,
-  "cycle_started_at": "2026-11-08T20:29:44.630034+00:00",
+  "cycle_started_at": "2026-11-09T06:22:57.600138+00:00",
   "discovery_gaps": [],
-  "done": [],
+  "done": [
+    "eda2a30f5ae890ecef41fbe6"
+  ],
   "errors": [
     {
       "reason": "amazon_access_challenge",
@@ -44,16 +46,16 @@
     "response_status_counts": {
       "browser": {},
       "http": {
-        "200": 1
+        "200": 2
       }
     },
-    "run_id": "42520195738-1",
+    "run_id": "42572432102-1",
     "scope": "current_client_instance; redirects_and_browser_subresources_excluded",
-    "started_at": "2026-11-08T20:29:44.599788+00:00"
+    "started_at": "2026-11-09T06:22:57.562452+00:00"
   },
   "journal": [],
-  "list_pages": 0,
-  "listed_candidates": 0,
+  "list_pages": 1,
+  "listed_candidates": 295,
   "offers": {
     "007157daa6b4b3996fc5aaa0": {
       "branch_overrides": {},
@@ -34317,7 +34319,7 @@
       "warranty": null
     }
   },
-  "pending_count": 298,
+  "pending_count": 297,
   "queue": {
     "02154e96900752587248649d": {
       "attempts": 0,
@@ -36542,11 +36544,11 @@
       "url": "https://www.amazon.co.jp/dp/B09BDCCPQM"
     },
     "c990682228c21b1b5e7ccae9": {
-      "attempts": 15,
+      "attempts": 16,
       "created_at": "2026-10-28T05:40:24.922659+00:00",
       "kind": "sale",
-      "last_attempt_at": "2026-11-08T20:29:44.770413+00:00",
-      "last_attempt_run_id": "42520195738-1",
+      "last_attempt_at": "2026-11-09T06:22:58.054933+00:00",
+      "last_attempt_run_id": "42572432102-1",
       "last_error": "amazon_access_challenge",
       "source": "https://raw.githubusercontent.com/chijimi33/Chimolog-price-tool/main/public/chimolog_products.json",
       "title": "パナソニック(Panasonic) 情報ラック用連結電源コンセント 接地15A・抜け止め形 8コ口 3mコード付 WCH6438",
@@ -36835,11 +36837,6 @@
       "type": "product",
       "url": "https://www.amazon.co.jp/dp/B0FFMTYJ24"
     },
-    "eda2a30f5ae890ecef41fbe6": {
-      "attempts": 0,
-      "created_at": "2026-11-08T20:29:44.630214+00:00",
-      "type": "amazon_discovery"
-    },
     "edba59650e5c633146f1e25c": {
       "attempts": 0,
       "created_at": "2026-10-29T05:46:14.267150+00:00",
@@ -37050,44 +37047,45 @@
   },
   "rate_limit_spacing_seconds": {},
   "recovered_errors": [],
-  "request_count": 1,
+  "request_count": 2,
   "retry_activity": {
     "recovered_tasks": 0,
     "retries_started": 0,
     "wait_seconds": 0
   },
   "retry_after": {},
-  "run_id": "42520195738-1",
+  "run_id": "42572432102-1",
   "scheduler": {
     "coverage_cursor_by_group": {
-      "discovery": 0,
-      "sale": 1
+      "discovery": 1,
+      "sale": 2
     },
-    "cursor": 0,
+    "cursor": 2,
     "retry_cursor_by_group": {
-      "discovery": 0,
-      "sale": 1
+      "discovery": 1,
+      "sale": 2
     },
     "selected_by_attempt_kind": {
-      "first_attempt_this_run": 1
+      "first_attempt_this_run": 2
     },
     "selected_by_coverage_policy": {
-      "oldest_pending": 1
+      "oldest_pending": 2
     },
     "selected_by_lane": {
+      "discovery": 1,
       "sale": 1
     }
   },
   "schema_version": 1,
   "source_metadata": {
-    "read_at": "2026-11-08T15:11:43.156644+00:00",
-    "source_unchanged": true,
-    "source_updated_at": "2026/11/08 12:06",
+    "read_at": "2026-11-09T06:22:57.878208+00:00",
+    "source_unchanged": false,
+    "source_updated_at": "2026/11/09 12:06",
     "source_url": "https://raw.githubusercontent.com/chijimi33/Chimolog-price-tool/main/public/chimolog_products.json",
     "stale_source": false,
-    "transcribed_at": "2026-11-08T13:19:27.803400+00:00"
+    "transcribed_at": "2026-11-09T06:20:28.726009+00:00"
   },
-  "started_at": "2026-11-08T20:29:44.628160+00:00",
+  "started_at": "2026-11-09T06:22:57.597896+00:00",
   "status": "access_required",
   "store": "amazon",
   "transport_retry_after": {},
