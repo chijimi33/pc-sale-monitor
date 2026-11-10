@@ -40,6 +40,8 @@ def summarize_errors(errors: list[dict]) -> list[dict]:
 
 
 def health(state: dict, now) -> dict:
+    deadline = state.get("collection_deadline")
+    deadline = deadline if isinstance(deadline, dict) and deadline.get("run_id") == state.get("run_id") and state.get("status") == "interrupted" else None
     offers = [Offer.from_dict(row) for row in state.get("offers", {}).values()]
     current = [o for o in offers if o.observed_run_id == state.get("run_id") and state.get("status") != "job_missing" and fresh(o.observed_at, now) and "latest_fetch_failed" not in o.issues]
     fields = {"identity": lambda o: bool(o.identity), "seller": lambda o: bool(o.seller_id), "condition": lambda o: o.condition is not None,
@@ -66,7 +68,8 @@ def health(state: dict, now) -> dict:
             "comparison_search_pages": sum(r.get("observed_run_id") == state.get("run_id")
                                             for r in state.get("comparison_searches", {}).values()),
             "request_count": state.get("request_count") if state.get("status") != "job_missing" else None,
-            "request_count_scope": "collection_http_attempts_plus_browser_navigations; diagnostic_requests_and_browser_subresources_excluded",
+            "request_count_scope": "last_durable_checkpoint; final_request_total_unknown" if deadline else "collection_http_attempts_plus_browser_navigations; diagnostic_requests_and_browser_subresources_excluded",
+            "collection_deadline": deadline,
             "diagnostic_request_count": (state.get("transport_diagnostic") or {}).get("diagnostic_request_count")
                 if (state.get("transport_diagnostic") or {}).get("run_id") == state.get("run_id") and state.get("status") != "job_missing" else None,
             "http_evidence": http_summary(state),
