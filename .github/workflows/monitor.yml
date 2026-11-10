@@ -50,10 +50,11 @@ jobs:
         run: sudo apt-get update && sudo apt-get install -y tesseract-ocr tesseract-ocr-jpn poppler-utils
       - run: python scripts/state_branch.py prepare
       - name: Collect with durable checkpoints
+        timeout-minutes: 39
         run: |
           extra=()
           if [ "${{ matrix.store }}" = "tsukumo" ]; then extra+=(--transport-diagnostic); fi
-          python -m sale_monitor.cli collect --store ${{ matrix.store }} --state state-repo/state --run-id "$RUN_ID" --seconds 2100 "${extra[@]}"
+          python -m sale_monitor.collection_deadline --store ${{ matrix.store }} --state state-repo/state --run-id "$RUN_ID" --seconds 2100 --deadline-seconds 2220 "${extra[@]}"
       - name: Export only this store's state
         if: always()
         run: python scripts/export_store.py --store ${{ matrix.store }}
