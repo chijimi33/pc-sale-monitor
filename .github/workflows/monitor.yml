@@ -47,16 +47,17 @@ jobs:
         with:
           python-version: '3.12'
       - run: pip install -e .
-      - name: Install the browser and OCR tools (retry transient package failures)
-        run: |
-          for attempt in 1 2 3; do
-            if python -m playwright install --with-deps chromium               && sudo apt-get update               && sudo apt-get install -y tesseract-ocr tesseract-ocr-jpn poppler-utils; then
-              exit 0
-            fi
-            echo "setup attempt $attempt failed"
-            sleep 20
-          done
-          exit 1
+      # Optional tools. A package mirror outage must not stop collection:
+      # without the browser, pages that need rendering fail as ordinary
+      # errors, and without OCR the flyer is reported as not collected.
+      - name: Install the browser (optional, time-limited)
+        continue-on-error: true
+        timeout-minutes: 8
+        run: python -m playwright install chromium && (timeout 240 sudo "$(which python)" -m playwright install-deps chromium || echo "browser system packages not installed")
+      - name: Install OCR tools (optional, time-limited)
+        continue-on-error: true
+        timeout-minutes: 6
+        run: timeout 120 sudo apt-get update; timeout 200 sudo apt-get install -y tesseract-ocr tesseract-ocr-jpn poppler-utils
       - run: python scripts/state_branch.py prepare
       - name: Archive legacy queues (idempotent, keeps history and events unchanged)
         run: python -m sale_monitor.cli migrate --state state-repo/state --input-sha "$(git -C state-repo rev-parse HEAD)"
