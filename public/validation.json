@@ -12,6 +12,15 @@
       "stock": null
     }
   },
+  "baseline": {
+    "current_observations_median": 1439,
+    "current_observations_total": 1439,
+    "latest_success_at": "2026-11-11T20:27:55.507316+00:00",
+    "max_success_interval_hours": 0,
+    "runs": 1,
+    "successful_runs": 1
+  },
+  "comparison_scope_version": 1,
   "coverage": {
     "amazon": {
       "condition": null,
@@ -24,12 +33,12 @@
     },
     "ark": {
       "condition": 1.0,
-      "evidence": 0.7735019734481521,
-      "identity": 0.8900251166128453,
-      "price": 0.9434876210979548,
+      "evidence": 0.7699930631255574,
+      "identity": 0.8894064017441284,
+      "price": 0.9436131206025171,
       "seller": 1.0,
-      "shipping": 0.7152852529601722,
-      "stock": 0.9994617868675996
+      "shipping": 0.7148944604102666,
+      "stock": 0.9994054107620652
     },
     "bic": {
       "condition": null,
@@ -41,7 +50,7 @@
       "stock": null
     },
     "dospara": {
-      "condition": 0.976890756302521,
+      "condition": 0.9738095238095238,
       "evidence": 1.0,
       "identity": 1.0,
       "price": 1.0,
@@ -59,22 +68,22 @@
       "stock": null
     },
     "koubou": {
-      "condition": 0.7315716272600834,
-      "evidence": 0.7649513212795549,
-      "identity": 0.7941585535465925,
-      "price": 0.8150208623087621,
+      "condition": 0.7202898550724638,
+      "evidence": 0.7710144927536232,
+      "identity": 0.7971014492753623,
+      "price": 0.8188405797101449,
       "seller": 1.0,
-      "shipping": 0.7399165507649513,
-      "stock": 0.7371349095966621
+      "shipping": 0.7507246376811594,
+      "stock": 0.7275362318840579
     },
     "sofmap": {
-      "condition": 0.9272237196765498,
-      "evidence": 0.9514824797843666,
-      "identity": 0.9757412398921833,
-      "price": 0.9892183288409704,
+      "condition": 0.9263803680981595,
+      "evidence": 0.9539877300613497,
+      "identity": 0.9723926380368099,
+      "price": 0.99079754601227,
       "seller": 1.0,
       "shipping": 0.0,
-      "stock": 0.967654986522911
+      "stock": 0.9631901840490797
     },
     "tsukumo": {
       "condition": null,
@@ -104,8 +113,14 @@
       "stock": null
     }
   },
+  "cutover_blockers": [
+    "service_level_undetermined",
+    "manual_false_positive_audit_pending",
+    "manual_audit_unresolved_findings"
+  ],
   "cutover_ready": false,
   "earliest_cutover_at": "2026-09-20T19:28:10.260709+00:00",
+  "gate_model": "scope_v1",
   "manual_review": {
     "audited_event_count": 9,
     "audits": [
@@ -1209,8 +1224,8 @@
     "policy": "distinct_final_records_with_source_evidence",
     "reviewed_count": 7
   },
-  "measured_four_hour_windows": 17,
-  "measured_runs": 263,
+  "measured_four_hour_windows": 15,
+  "measured_runs": 264,
   "reasons": [
     "insufficient_scheduled_runs",
     "ten_store_coverage_incomplete",
@@ -1227,16 +1242,14 @@
     "manual_false_positive_audit_pending",
     "manual_audit_unresolved_findings"
   ],
-  "recent_runs": 21,
+  "recent_runs": 20,
   "run_provenance": {
     "event_counts": {
-      "push": 3,
-      "schedule": 18
+      "push": 4,
+      "schedule": 16
     },
     "policy": "github_api_schedule_original_created_at_four_hour_windows",
     "sampled_run_ids": [
-      "41826121770-1",
-      "41899590774-1",
       "41944610011-1",
       "42025818675-1",
       "42117341066-1",
@@ -1253,7 +1266,7 @@
       "42908375227-1",
       "42970513882-1"
     ],
-    "unique_scheduled_runs": 18,
+    "unique_scheduled_runs": 16,
     "unknown_run_ids": []
   },
   "started_at": "2026-09-13T19:28:10.260709+00:00"
