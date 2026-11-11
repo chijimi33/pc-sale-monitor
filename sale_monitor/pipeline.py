@@ -22,6 +22,7 @@ from .storage import Store, read_json
 
 
 DEADLINE_GRACE = 120
+TERM_GRACE = 5
 USER_AGENT = "PCSaleMonitor/0.1 (+https://github.com/chijimi33/pc-sale-monitor)"
 
 
@@ -124,11 +125,28 @@ def _kill_remaining_process_group(process):
     _signal_owned_process_group(process, getattr(signal, "SIGKILL", 9))
 
 
+def _await_leader_exit(process, seconds):
+    """Give TERM time to close browsers, without reaping the leader's PID."""
+    waitid = getattr(os, "waitid", None)
+    deadline = time.monotonic() + seconds
+    while time.monotonic() < deadline:
+        if waitid is None:
+            time.sleep(min(0.2, max(0, deadline - time.monotonic())))
+            continue
+        try:
+            if waitid(os.P_PID, process.pid, os.WEXITED | os.WNOWAIT | os.WNOHANG) is not None:
+                return
+        except (ChildProcessError, OSError):
+            return
+        time.sleep(0.1)
+
+
 def _stop_posix_process_tree(process):
     """Stop an owned group before reaping its leader, or just the supplied child."""
     if not getattr(process, "_pipeline_group_cleaned", False) and _signal_owned_process_group(process, signal.SIGTERM):
         # Do not reap the leader before the final signal: its PID could be reused.
         process._pipeline_group_cleaned = True
+        _await_leader_exit(process, TERM_GRACE)
         _signal_owned_process_group(process, getattr(signal, "SIGKILL", 9))
     else:
         terminate = getattr(process, "terminate", None)
