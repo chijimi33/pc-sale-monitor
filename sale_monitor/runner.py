@@ -47,6 +47,23 @@ def new_dependency(task: dict, **updates) -> dict:
              "retry_at_epoch_seconds")}
 
 
+def record_unverified_discoveries(state: dict) -> None:
+    """Retain unresolved exploration products before discarding the stage queue."""
+    verification = state["verification"]
+    pending = {(row["identity"], row["url"]): row for row in verification.get("unverified_discoveries", [])}
+    verified = set(verification.get("verified_discoveries", []))
+    for task_id, task in state.get("verification_queue", {}).items():
+        if task.get("type") != "product" or not task.get("plan_identity") or "plan_offer_key" in task:
+            continue
+        result = verification.get("results", {}).get(task_id, {})
+        if result.get("result") != "ok":
+            row = {"identity": task["plan_identity"], "url": task["url"],
+                   "reason": result.get("reason") or "not_reached"}
+            pending[row["identity"], row["url"]] = row
+    verification["unverified_discoveries"] = [row for key, row in sorted(pending.items()) if row["url"] not in verified]
+    verification["verified_discoveries"] = sorted(verified)
+
+
 class Collector:
     def __init__(self, root: Path, store: str, config: dict, run_id: str, client: Client | None = None,
                  phase: str | None = None, plan: dict | None = None):
@@ -75,7 +92,8 @@ class Collector:
                 self.state["verification_queue"] = {}
                 self.state["verification_done"] = []
                 self.state["verification"] = {"run_id": run_id, "results": {}, "failed_urls": [],
-                                              "searched_identities": [], "not_reached": 0}
+                                              "searched_identities": [], "not_reached": 0,
+                                              "unverified_discoveries": [], "verified_discoveries": []}
                 for request in (plan or {}).get("confirm", {}).get(store, []):
                     row = self.state["offers"].get(request["offer_key"], {})
                     self.enqueue({"type": "product", "url": request["url"],
@@ -803,6 +821,14 @@ class Collector:
         url = task.get("url") or dependency_url(task, self.cfg)
         verification["results"][task_id] = {"url": url, "plan_identity": task.get("plan_identity"),
                                             "type": task["type"], "result": result, "reason": reason}
+        if task["type"] == "product" and task.get("plan_identity"):
+            if result == "ok":
+                verification["verified_discoveries"] = sorted(set(verification.get("verified_discoveries", [])) | {url})
+            elif "plan_offer_key" not in task:
+                pending = verification.setdefault("unverified_discoveries", [])
+                pending[:] = [row for row in pending if (row["identity"], row["url"]) != (task["plan_identity"], url)]
+                pending.append({"identity": task["plan_identity"], "url": url, "reason": reason})
+            record_unverified_discoveries(self.state)
         verification["failed_urls"] = sorted({row["url"] for row in verification["results"].values()
                                               if row["result"] == "failed" and row["url"]})
         verification["searched_identities"] = sorted({row["plan_identity"] for row in verification["results"].values()
@@ -812,5 +838,6 @@ class Collector:
     def _finish_verification(self):
         if self.phase == "verification":
             verification = self.state["verification"]
+            record_unverified_discoveries(self.state)
             verification["not_reached"] += sum(key not in verification["results"] for key in self.state[self.queue_key])
             self.state[self.queue_key] = {}

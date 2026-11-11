@@ -34,6 +34,57 @@ def build(candidates=None, peers=None, **kwargs):
 
 
 class PlannerTests(unittest.TestCase):
+    def test_unverifiable_peer_blocks_whole_bundle_without_reserving(self):
+        result = build(peers=[offer("bic"), offer("sofmap")], verifiable_stores=["ark", "bic"])
+        row = result["candidates"][0]
+        self.assertEqual(row["status"], "comparator_unverifiable")
+        self.assertEqual(row["reasons"], ["comparator_unverifiable"])
+        self.assertEqual(next(i["state"] for i in row["bundle"] if i["store"] == "sofmap"), "unverifiable")
+        self.assertEqual(result["confirm"]["bic"], [])
+        self.assertNotIn("sofmap", result["summary"]["confirm_budget"])
+        self.assertNotIn("sofmap", result["explore"])
+
+    def test_already_observed_unverifiable_peer_does_not_block(self):
+        peer = offer("sofmap")
+        result = build(peers=[offer("bic"), peer], current=[offer(), peer], verifiable_stores=["ark", "bic"])
+        self.assertEqual(result["candidates"][0]["status"], "planned")
+        self.assertEqual(len(result["confirm"]["bic"]), 1)
+
+    def test_unverified_urls_are_confirmed_as_complete_bundle(self):
+        candidate = offer()
+        tracking = {candidate.identity: {"bic": {"unverified_urls": ["https://bic.example/new"]}}}
+        before = deepcopy(tracking)
+        for budget, status in ((0, "skipped_budget"), (2, "planned")):
+            with self.subTest(budget=budget):
+                result = build(peers=[], tracking=tracking, budgets={"bic": budget})
+                self.assertEqual(result["candidates"][0]["status"], status)
+                self.assertEqual(result["candidates"][0]["bundle"], [{"store": "bic", "offer_key": None,
+                    "url": "https://bic.example/new", "state": "to_verify"}])
+                if budget:
+                    self.assertIsNone(result["confirm"]["bic"][0]["offer_key"])
+        self.assertEqual(tracking, before)
+
+    def test_unverified_url_backoff_scope_and_unverifiable(self):
+        candidate = offer()
+        for values, verifiable, status in (({}, ["ark"], "comparator_unverifiable"),
+                ({"consecutive_failures": 1, "last_attempt_at": iso(NOW)}, ["ark", "bic"], "comparator_backoff")):
+            with self.subTest(status=status):
+                tracking = {candidate.identity: {"bic": {**values, "unverified_urls": ["https://bic.example/new"]}}}
+                result = build(peers=[], tracking=tracking, verifiable_stores=verifiable)
+                self.assertEqual(result["candidates"][0]["status"], status)
+                self.assertEqual(sum(result["summary"]["reserved_requests"].values()), 0)
+        tracking = {candidate.identity: {s: {"unverified_urls": ["https://example.test/new"]} for s in ("ark", "yahoo")}}
+        self.assertEqual(build(peers=[], tracking=tracking)["candidates"][0]["status"], "no_known_comparator")
+
+    def test_unverified_url_already_observed_and_duplicate_known_url(self):
+        candidate, peer = offer(), offer("bic")
+        tracking = {candidate.identity: {"bic": {"unverified_urls": [peer.url, peer.url]}}}
+        result = build(peers=[peer], tracking=tracking)
+        self.assertEqual(len(result["candidates"][0]["bundle"]), 1)
+        self.assertEqual(len(result["confirm"]["bic"]), 1)
+        result = build(peers=[], current=[candidate, peer], tracking=tracking, verifiable_stores=["ark"])
+        self.assertEqual(result["candidates"][0]["status"], "already_confirmed")
+
     def test_not_met_and_expensive_candidates_are_planned_after_others(self):
         candidates = [offer(price=11000, product_id="expensive"), offer(product_id="new")]
         rows = [{"offer": offer(price=p, observed_at=iso(NOW - timedelta(days=d))).to_dict()}
@@ -233,6 +284,77 @@ class PlannerTests(unittest.TestCase):
 
 
 class TrackingTests(unittest.TestCase):
+    def test_discoveries_merge_without_mutating_inputs_and_fetching_alone_settles_nothing(self):
+        candidate = offer()
+        tracking = {candidate.identity: {"bic": {"unverified_urls": ["done", "pending"]},
+                                       "sofmap": {"unverified_urls": ["done"]}}}
+        discoveries = {"bic": {"unverified": [{"identity": candidate.identity, "url": url} for url in ("new", "new")],
+                               "verified": [{"identity": candidate.identity, "url": "done"}]}}
+        before = deepcopy((tracking, discoveries))
+        result = update_tracking(tracking, build(peers=[]), [candidate], {}, {}, NOW, discoveries)
+        # "done" was fetched, but no observation settles what it is.
+        self.assertEqual(result[candidate.identity]["bic"]["unverified_urls"], ["done", "new", "pending"])
+        self.assertEqual(result[candidate.identity]["sofmap"]["unverified_urls"], ["done"])
+        self.assertEqual((tracking, discoveries), before)
+
+    def settle(self, found, candidate=None, url="https://bic.example/found"):
+        candidate = candidate or offer()
+        tracking = {candidate.identity: {"bic": {"unverified_urls": [url]}}}
+        current = [candidate] + ([found] if found is not None else [])
+        result = update_tracking(tracking, build(peers=[], tracking=tracking), current, {}, {}, NOW,
+                                 {"bic": {"verified": [{"identity": candidate.identity, "url": url}]}})
+        return result[candidate.identity]["bic"]
+
+    def test_matching_usable_same_product_becomes_a_known_comparator(self):
+        url = "https://bic.example/found"
+        values = self.settle(offer("bic", 10000, product_id="found", url=url))
+        self.assertEqual(values["unverified_urls"], [])
+        self.assertEqual(values["settled_urls"][0]["reason"], "became_known_comparator")
+
+    def test_same_kind_of_identifier_with_another_value_is_a_confirmed_mismatch(self):
+        url = "https://bic.example/found"
+        values = self.settle(offer("bic", 10000, product_id="found", url=url, model="MODEL-B"))
+        self.assertEqual(values["unverified_urls"], [])
+        self.assertEqual(values["settled_urls"][0]["reason"], "identity_mismatch")
+
+    def test_another_kind_of_identifier_or_none_stays_open(self):
+        url = "https://bic.example/found"
+        candidate = offer(jan="4943765048398")
+        for found in (offer("bic", 10000, product_id="found", url=url),            # model only
+                      offer("bic", 10000, product_id="found", url=url, model=None)):  # unidentified
+            with self.subTest(identity=found.identity):
+                self.assertEqual(self.settle(found, candidate)["unverified_urls"], [url])
+
+    def test_matching_identifier_with_unknown_configuration_stays_open(self):
+        url = "https://bic.example/found"
+        candidate = offer(variant="2枚組")
+        found = offer("bic", 10000, product_id="found", url=url)
+        self.assertEqual(self.settle(found, candidate)["unverified_urls"], [url])
+
+    def test_matching_offer_with_unknown_conditions_stays_open(self):
+        url = "https://bic.example/found"
+        found = offer("bic", 10000, product_id="found", url=url, shipping_yen=None)
+        self.assertEqual(self.settle(found)["unverified_urls"], [url])
+
+    def test_explicit_end_of_the_same_product_settles(self):
+        url = "https://bic.example/found"
+        found = offer("bic", 10000, product_id="found", url=url, stock="out_of_stock")
+        values = self.settle(found)
+        self.assertEqual(values["unverified_urls"], [])
+        self.assertEqual(values["settled_urls"][0]["reason"], "ended")
+
+    def test_fetched_page_without_an_observation_stays_open(self):
+        self.assertEqual(self.settle(None)["unverified_urls"], ["https://bic.example/found"])
+
+    def test_without_a_current_candidate_nothing_is_handed_over(self):
+        url = "https://bic.example/found"
+        candidate = offer()
+        tracking = {candidate.identity: {"bic": {"unverified_urls": [url]}}}
+        found = offer("bic", 10000, product_id="found", url=url)
+        result = update_tracking(tracking, build(peers=[], tracking=tracking), [found], {}, {}, NOW,
+                                 {"bic": {"verified": [{"identity": candidate.identity, "url": url}]}})
+        self.assertEqual(result[candidate.identity]["bic"]["unverified_urls"], [url])
+
     def test_success_failure_and_unreached_are_distinct_without_mutation(self):
         candidate = offer()
         peers = [offer(s) for s in ("bic", "sofmap", "tsukumo")]

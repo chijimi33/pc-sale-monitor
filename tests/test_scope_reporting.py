@@ -8,7 +8,7 @@ from unittest.mock import patch
 from sale_monitor.comparison_integrity import (known_comparators, missing_comparators,
                                                out_of_scope_comparators)
 from sale_monitor.models import STORES, Offer, iso
-from sale_monitor.reporting import aggregate, validation
+from sale_monitor.reporting import aggregate, historical_rows, validation
 from sale_monitor.storage import Store, read_json
 
 
@@ -69,6 +69,85 @@ class ScopeReporting(unittest.TestCase):
     def decision(self, store="ark", product_id="one"):
         return next(d for d in read_json(self.public / "evidence.json", {})["decisions"]
                     if d["offer"]["store"] == store and d["offer"]["product_id"] == product_id)
+
+    def test_prior_journal_low_blocks_B_only_in_scoped_mode(self):
+        for scoped in (False, True):
+            for journal_price in (None, 8000):
+                with self.subTest(scoped=scoped, journal_price=journal_price):
+                    root = self.root / f"{scoped}-{journal_price}"
+                    disk = Store(root)
+                    for item in (offer(price=10000), offer("dospara", 11000)):
+                        disk.save(f"stores/{item.store}.json", {"store": item.store, "run_id": RUN,
+                            "offers": {item.key: item.to_dict()}, "queue": {}, "journal": []})
+                    old = offer(price=12000, observed_at=iso(NOW - timedelta(days=2)), observed_run_id="old")
+                    disk.save("history/ark/old.json", [{"observation_id": "old", "run_id": "old", "offer": old.to_dict()}])
+                    if journal_price:
+                        low = offer(price=journal_price, observed_at=iso(NOW - timedelta(days=1)), observed_run_id="failed")
+                        disk.save("stores/bic.json", {"journal": [{"observation_id": "pending", "run_id": "failed", "offer": low.to_dict()}]})
+                    aggregate(root, root / "public", RUN, NOW, self.scope if scoped else None)
+                    decision = next(r["payment"] for r in read_json(root / "public/evidence.json", {})["decisions"]
+                                    if r["offer"]["store"] == "ark")
+                    self.assertEqual(decision["status"] == "accepted", not (scoped and journal_price))
+
+    def test_historical_rows_deduplicate_and_exclude_current_run_without_mutation(self):
+        rows = [{"observation_id": "old", "run_id": "old"}, {"observation_id": "current", "run_id": RUN}]
+        states = {"ark": {"journal": [rows[0], rows[1], {"observation_id": "pending", "run_id": "old"}]}}
+        self.disk.save("history/ark/old.json", rows)
+        original = deepcopy(states)
+        self.assertEqual(historical_rows(self.disk, states, RUN), [rows[0], states["ark"]["journal"][-1]])
+        self.assertEqual(states, original)
+        self.assertEqual(self.disk.history(), rows)
+
+    def test_paused_in_scope_comparator_holds_and_exposes_route_status(self):
+        self.candidates()
+        self.save(offer("sofmap", 8000, observed_run_id="old", observed_at=iso(NOW - timedelta(days=2))))
+        self.scope["routes"]["sofmap:direct"]["functions"]["product_verify"] = "paused_maintenance"
+        self.aggregate()
+        decision = self.decision()
+        self.assertEqual(decision["payment"]["reasons"], ["known_comparator_not_verified_this_run"])
+        row = next(r for r in decision["comparison_scope"]["unconfirmed"] if r["store"] == "sofmap")
+        self.assertEqual((row["category"], row["reason"]), ("in_scope_not_confirmed", "paused_maintenance"))
+
+    def test_discovered_url_holds_until_removed_and_never_notifies(self):
+        self.candidates()
+        candidate = offer()
+        urls = [{"store": "sofmap", "url": "https://sofmap.example/pending"}]
+        self.disk.save("comparison_tracking.json", {candidate.identity: {"sofmap": {"unverified_urls": [urls[0]["url"]]}}})
+        self.aggregate()
+        decision = self.decision()
+        for basis in ("payment", "points"):
+            self.assertEqual(decision[basis]["status"], "insufficient")
+            self.assertEqual(decision[basis]["provisional_rule"], "A")
+            self.assertEqual(decision[basis]["reasons"], ["in_scope_comparator_url_not_verified"])
+            self.assertEqual(decision[basis]["unverified_comparator_urls"], urls)
+        row = next(r for r in decision["comparison_scope"]["unconfirmed"] if r.get("url") == urls[0]["url"])
+        self.assertEqual((row["category"], row["reason"]), ("in_scope_not_confirmed", "discovered_url_not_verified"))
+        self.assertFalse(read_json(self.public / "notifications.json", {})["events"])
+        self.disk.save("comparison_tracking.json", {})
+        self.aggregate()
+        self.assertEqual(self.decision()["payment"]["status"], "accepted")
+        self.assertTrue(read_json(self.public / "notifications.json", {})["events"])
+
+    def test_unverified_urls_outside_scope_and_own_store_do_not_hold(self):
+        self.candidates()
+        self.disk.save("comparison_tracking.json", {offer().identity: {
+            s: {"unverified_urls": ["https://example.test/pending"]} for s in ("ark", "tsukumo")}})
+        self.aggregate()
+        self.assertEqual(self.decision()["payment"]["status"], "accepted")
+
+    def test_comparison_promotion_requires_same_product_for_events_and_reviews(self):
+        for changes in ({"condition": "used"}, {"variant": "bundle"}, {"warranty": "other"}, {}):
+            with self.subTest(changes=changes):
+                root = self.root / str(len(list(self.root.iterdir())))
+                disk = Store(root)
+                offers = [offer(warranty="standard"), offer("sofmap", 10000, discovery_kind="comparison", **changes)]
+                for item in offers:
+                    disk.save(f"stores/{item.store}.json", {"store": item.store, "run_id": RUN,
+                        "offers": {item.key: item.to_dict()}, "queue": {}})
+                aggregate(root, root / "public", RUN, NOW, self.scope)
+                reviews = read_json(root / "public/review_queue.json", {})["candidates"]
+                self.assertEqual(any(r["store"] == "sofmap" for r in reviews), not changes)
+                self.assertNotIn(offers[-1].key, disk.load("events/registry.json", {})["states"] if changes else {})
 
     def test_legacy_output_keys_remain_unchanged_on_repeated_aggregation(self):
         self.candidates()

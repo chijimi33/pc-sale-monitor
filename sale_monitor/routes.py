@@ -87,8 +87,9 @@ class RouteState:
 
     def scope(self) -> dict:
         scope = deepcopy(self.config["scope"])
-        scope["in_scope_stores"] = list(dict.fromkeys(self.routes[route_id]["store"] for route_id in scope["in_scope"]
-                                                   if self.status(route_id, "product_verify") == "active"))
+        scope["in_scope_stores"] = list(dict.fromkeys(self.routes[route_id]["store"] for route_id in scope["in_scope"]))
+        scope["verifiable_stores"] = list(dict.fromkeys(self.routes[route_id]["store"] for route_id in scope["in_scope"]
+                                                     if self.status(route_id, "product_verify") == "active"))
         scope["out_of_scope"] = {route_id: {
             "status": {name: function["status"] for name, function in route["functions"].items()},
             "reason": route.get("reason", "outside_comparison_scope"),

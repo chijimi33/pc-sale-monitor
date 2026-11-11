@@ -31,6 +31,15 @@ class RouteTests(TestCase):
         self.assertEqual(set(self.routes.scope()["in_scope_stores"]), {"ark", "koubou", "dospara", "sofmap"})
         self.assertEqual(self.routes.scope()["out_of_scope"]["joshin:direct"]["status"]["product_verify"], "paused_refused")
 
+    def test_scope_membership_is_fixed_when_verification_is_paused(self):
+        before = self.routes.scope()
+        self.routes.routes["sofmap:direct"]["functions"]["product_verify"]["status"] = "paused_maintenance"
+        after = self.routes.scope()
+        self.assertEqual(after["version"], before["version"])
+        self.assertEqual(after["in_scope_stores"], before["in_scope_stores"])
+        self.assertNotIn("sofmap", after["verifiable_stores"])
+        self.assertIn("sofmap", after["in_scope_stores"])
+
     def test_refused_and_configuration_never_probed_even_with_definition(self):
         for route_id in ("joshin:direct", "yahoo:api"):
             self.routes.routes[route_id]["probe"] = {"interval_hours": 1}

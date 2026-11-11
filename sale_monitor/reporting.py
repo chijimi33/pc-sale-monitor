@@ -7,7 +7,7 @@ from statistics import median
 import shutil
 
 from .engine import evaluate, update_events
-from .models import STORES, Offer, digest, fresh, iso, timestamp, utcnow
+from .models import STORES, Offer, digest, fresh, iso, same_product, timestamp, utcnow
 from .storage import Store, atomic_json, read_json
 from .scheduling import plan_comparisons
 from .comparison_integrity import known_comparators, missing_comparators
@@ -193,6 +193,22 @@ def flyer_dismissals(records) -> tuple[dict, list]:
     return dismissed, issues
 
 
+def historical_rows(disk, states, run_id) -> list[dict]:
+    """Include unarchived prior observations, excluding this run everywhere."""
+    rows, seen = [], set()
+    for group in (disk.history(), (row for state in states.values() for row in state.get("journal", []))):
+        for row in group:
+            if row.get("run_id") == run_id:
+                continue
+            observation_id = row.get("observation_id")
+            if observation_id is not None:
+                if observation_id in seen:
+                    continue
+                seen.add(observation_id)
+            rows.append(row)
+    return rows
+
+
 def aggregate(root: Path, public: Path, run_id: str, now=None, scope: dict | None = None) -> dict:
     now = now or utcnow()
     disk = Store(root)
@@ -232,7 +248,9 @@ def aggregate(root: Path, public: Path, run_id: str, now=None, scope: dict | Non
             # for a missing job or failed fetch in this run.
             if offer.observed_run_id == run_id and fresh(offer.observed_at, now) and "latest_fetch_failed" not in offer.issues:
                 current.append(offer)
-    historical = [row for row in disk.history() if row.get("run_id") != run_id]
+    # Legacy aggregation preserves its original history inputs and row sequence.
+    historical = (historical_rows(disk, states, run_id) if scope is not None else
+                  [row for row in disk.history() if row.get("run_id") != run_id])
     known = known_comparators(states, historical, now)
     current_by_identity, history_by_identity = comparison_inputs_by_identity(current, historical)
     current_by_key = {(o.store, o.key): o for o in current}
@@ -240,29 +258,54 @@ def aggregate(root: Path, public: Path, run_id: str, now=None, scope: dict | Non
     registry = disk.load("events/registry.json", {"states": {}, "events": {}})
     decisions = []
     reviews = []
-    sale_identities = {o.identity for o in current if o.identity and o.discovery_kind != "comparison"} if scope is not None else set()
+    sale_candidates = [o for o in current if o.discovery_kind != "comparison"] if scope is not None else []
+    tracking = disk.load("comparison_tracking.json", {}) if scope is not None else {}
     for offer in current:
         identity = offer.identity
         peers = current_by_identity.get(identity, [])
         past = history_by_identity.get(identity, [])
         payment = evaluate(offer, peers, past, now)
         points = evaluate(offer, peers, past, now, points=True)
+        unverified_urls = [{"store": store, "url": url}
+            for store, entry in sorted(tracking.get(identity, {}).items())
+            if store in scope["in_scope_stores"] and store != offer.store
+            for url in sorted(set(entry.get("unverified_urls", [])))] if scope is not None else []
         for basis in (payment, points):
             if basis["status"] == "accepted":
                 options = {"in_scope_stores": scope["in_scope_stores"]} if scope is not None else {}
                 missing = missing_comparators(offer, known, current_by_key, now, points=basis["basis"] == "points", **options)
-                if missing:
-                    reasons = ["known_comparator_not_verified_this_run"]
+                if missing or unverified_urls:
+                    reasons = ["known_comparator_not_verified_this_run"] if missing else []
                     if any(item.get("unverified_member_price") for item in missing):
                         reasons.append("comparator_member_price_not_verified")
+                    if unverified_urls:
+                        reasons.append("in_scope_comparator_url_not_verified")
                     basis.update(status="insufficient", provisional_rule=basis["rule"], rule=None,
-                                 reasons=reasons, missing_comparators=missing)
+                                 reasons=reasons)
+                    if missing:
+                        basis["missing_comparators"] = missing
+                    if unverified_urls:
+                        basis["unverified_comparator_urls"] = unverified_urls
                     held_offer_keys.add(offer.key)
         decision = payment if payment["status"] == "accepted" or points["status"] != "accepted" else points
         decisions.append({"offer": offer.to_dict(), "payment": payment, "points": points})
         if scope is not None:
             decisions[-1]["comparison_scope"] = decision_scope(offer, payment, peers, known, current_by_key, now, scope)
-        if offer.discovery_kind != "comparison" or scope is not None and identity in sale_identities:
+            unconfirmed = decisions[-1]["comparison_scope"]["unconfirmed"]
+            for row in unconfirmed:
+                if row["category"] != "in_scope_not_confirmed":
+                    continue
+                functions = scope.get("routes", {}).get(row["route"], {}).get("functions", {})
+                status = functions.get("product_verify", "active")
+                status = status.get("status") if isinstance(status, dict) else status
+                if status != "active":
+                    row["reason"] = status
+            for row in unverified_urls:
+                route = next((route for route in scope["in_scope"]
+                    if scope.get("routes", {}).get(route, {}).get("store", route.split(":", 1)[0]) == row["store"]), None)
+                unconfirmed.append({**row, "route": route, "category": "in_scope_not_confirmed",
+                                    "reason": "discovered_url_not_verified"})
+        if offer.discovery_kind != "comparison" or scope is not None and any(same_product(candidate, offer) for candidate in sale_candidates):
             events, state = update_events(offer, decision, registry["states"].get(offer.key), now)
             registry["states"][offer.key] = state
             for event in events:
