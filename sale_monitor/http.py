@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime
 from email.utils import parsedate_to_datetime
 from http.client import IncompleteRead
@@ -8,12 +8,16 @@ import json
 import math
 import re
 import time
+from typing import TYPE_CHECKING, Callable
 from urllib.error import HTTPError
 from urllib.parse import urlsplit
 from urllib.request import HTTPRedirectHandler, Request, build_opener
 
 from .models import allowed_url, iso
 from .http_evidence import ResponseEvidence, retry_after_evidence
+
+if TYPE_CHECKING:
+    from .budget import HostBudget, Robots
 
 
 class FetchError(RuntimeError):
@@ -23,9 +27,16 @@ class FetchError(RuntimeError):
 
 
 class SafeRedirect(HTTPRedirectHandler):
+    def __init__(self, before_redirect=None):
+        self.before_redirect = before_redirect
+
     def redirect_request(self, req, fp, code, msg, headers, newurl):
         if not allowed_url(newurl):
             raise FetchError("excluded_redirect_host")
+        if getattr(req, "single_request", False):
+            raise FetchError("probe_redirect", page=Page(req.full_url, b"", iso(), status=code, headers=dict(headers or {})))
+        if self.before_redirect is not None:
+            self.before_redirect(newurl)
         return super().redirect_request(req, fp, code, msg, headers, newurl)
 
 
@@ -37,6 +48,7 @@ class Page:
     method: str = "http"
     content_type: str = ""
     status: int = 200
+    headers: dict = field(default_factory=dict)
 
     @property
     def text(self):
@@ -52,11 +64,29 @@ class Page:
             return self.body.decode("utf-8", "replace")
 
 
+def _denial_body(response) -> bytes:
+    try:
+        return response.read(200_000)
+    except Exception:
+        # An unreadable denial must still be treated as an HTTP refusal.
+        return b""
+
+
 class Client:
-    def __init__(self, browser: bool = False, delay: float = 1.0, timeout: int = 25):
+    def __init__(self, browser: bool = False, delay: float = 1.0, timeout: int = 25,
+                 budget: HostBudget | None = None, robots: Robots | None = None,
+                 page_denial: Callable[[str, Page], bool] | None = None):
         self.browser = browser
         self.delay = delay
         self.timeout = timeout
+        self.budget = budget
+        self.robots = robots
+        self.page_denial = page_denial
+        if robots is not None and budget is not None:
+            if robots.budget is not None and robots.budget is not budget:
+                raise ValueError("robots_budget_mismatch")
+            robots.budget = budget
+        self.refused_hosts = set()
         self.last_request = {}
         self.rate_limit_spacing = {}
         self.retry_after = {}
@@ -67,9 +97,27 @@ class Client:
         self.count = 0
         self.errors = []
         self.evidence = ResponseEvidence()
-        self.opener = build_opener(SafeRedirect())
+        self.opener = build_opener(SafeRedirect(self._before_redirect))
+
+    def _before_redirect(self, url: str):
+        # Redirect hops are additional requests under the same host budgets.
+        if self.budget is not None or self.robots is not None:
+            self._check_robots(url)
+            self.wait_for_host(urlsplit(url).hostname)
+            self.space_request(urlsplit(url).hostname)
+            self.count += 1
 
     def space_request(self, host: str):
+        if self.budget is not None:
+            self.budget.spend(host)
+            # Only wait for the part of learned spacing not covered by budget.
+            if host in self.last_request:
+                wait = self.rate_limit_spacing.get(host, 0) - (self.budget.clock() - self.last_request[host])
+                if wait > 0:
+                    self.budget.sleep(wait)
+            self.last_request[host] = self.budget.clock()
+            self.budget.last_request[host] = self.last_request[host]
+            return
         # A cooldown alone can repeat the same burst immediately afterwards.
         # Keep the lower rate for this collection after a 429, independently
         # of the server's mandatory Retry-After deadline.
@@ -78,6 +126,18 @@ class Client:
         if elapsed < spacing:
             time.sleep(spacing - elapsed)
         self.last_request[host] = time.monotonic()
+
+    def _check_robots(self, url: str):
+        if self.robots is not None:
+            # Robots treats unreadable policies as denial. An empty request
+            # budget must remain a budget outcome, not a policy refusal.
+            if self.budget is not None and self.budget.remaining(urlsplit(url).hostname) <= 0:
+                raise FetchError("host_budget_exhausted")
+            allowed = self.robots.allowed(url)
+            if self.budget is not None:
+                self.budget.set_crawl_delay(urlsplit(url).hostname, self.robots.crawl_delay(urlsplit(url).hostname))
+            if not allowed:
+                raise FetchError("robots_disallowed")
 
     def wait_for_host(self, host: str):
         access = self.access_retry_after.get(host)
@@ -104,6 +164,7 @@ class Client:
         if status != 403:
             self.access_failed_urls.pop(host, None)
             return None
+        self.refused_hosts.add(host)
         failed = self.access_failed_urls.setdefault(host, set())
         # Bounded distinct denial evidence, never cookies or response bodies.
         if len(failed) < 3:
@@ -159,63 +220,89 @@ class Client:
             self.retry_after[host] = max(self.retry_after.get(host, 0), time.time() + wait)
         return wait
 
-    def get(self, url: str, *, data: bytes | None = None, method: str = "GET", headers: dict | None = None) -> Page:
+    def get(self, url: str, *, data: bytes | None = None, method: str = "GET", headers: dict | None = None,
+            max_attempts: int = 3) -> Page:
+        if type(max_attempts) is not int or not 1 <= max_attempts <= 3:
+            raise ValueError("invalid_max_attempts")
         if not allowed_url(url):
             raise FetchError("excluded_source")
         host = urlsplit(url).hostname
-        for attempt in range(3):
+        self._check_robots(url)
+        for attempt in range(max_attempts):
             self.wait_for_host(host)
             self.space_request(host)
             try:
                 self.count += 1
                 request = Request(url, data=data, method=method, headers={"User-Agent": "PCSaleMonitor/0.1 (+https://github.com/chijimi33/pc-sale-monitor)", "Accept-Language": "ja,en;q=0.5", "Cache-Control": "no-cache", **(headers or {})})
+                request.single_request = max_attempts == 1
                 with self.opener.open(request, timeout=self.timeout) as result:
-                    page = Page(result.url, result.read(), iso(), content_type=result.headers.get("Content-Type", ""))
                     response_status = getattr(result, "status", None)
+                    body = _denial_body(result) if response_status == 403 else result.read()
+                    page = Page(result.url, body, iso(), content_type=result.headers.get("Content-Type", ""),
+                                status=response_status if type(response_status) is int else 200, headers=dict(result.headers))
+                if response_status == 403 and self.page_denial is not None and self.page_denial(url, page):
+                    self.evidence.record(url, "http", status=403)
+                    raise FetchError("page_access_restricted", page=page)
                 self.evidence.record(url, "http", status=response_status)
                 self.access_response(url, response_status)
+                if response_status == 403:
+                    self.refused_hosts.add(urlsplit(page.url).hostname)
+                    raise FetchError("http_403", page=page)
                 self.transport_failed_urls.pop(host, None)
                 self.check_maintenance(url, page)
                 return page
             except HTTPError as exc:
                 self.transport_failed_urls.pop(host, None)
+                error_page = None
+                if max_attempts == 1 or exc.code == 403:
+                    try:
+                        body = (_denial_body(exc) if exc.code == 403 else exc.read()) if exc.fp is not None else b""
+                    except (OSError, IncompleteRead):
+                        body = b""
+                    error_page = Page(exc.url, body, iso(), status=exc.code,
+                                      content_type=(exc.headers or {}).get("Content-Type", ""),
+                                      headers=dict(exc.headers or {}))
                 if exc.code == 403:
+                    if self.page_denial is not None and self.page_denial(url, error_page):
+                        self.evidence.record(url, "http", status=403)
+                        raise FetchError("page_access_restricted", page=error_page) from exc
+                    self.refused_hosts.add(urlsplit(exc.url).hostname)
                     retry = (exc.headers or {}).get("Retry-After", "")
                     until = self.access_response(url, exc.code, retry)
                     self.evidence.record(url, "http", status=403, retry=retry, until=until)
-                    raise FetchError("http_403") from exc
+                    raise FetchError("http_403", page=error_page) from exc
                 self.access_response(url, exc.code)
                 if exc.code == 404:
                     try:
-                        body = exc.read()
+                        body = error_page.body if error_page is not None else exc.read()
                     except IncompleteRead as body_error:
                         # A handler's exceptions do not enter sibling handlers.
                         # Count this attempt only as an incomplete body; never
                         # offer partial bytes to store-specific 404 classifiers.
                         self.evidence.record(url, "http", error=body_error)
-                        if attempt == 2:
+                        if attempt == max_attempts - 1:
                             raise FetchError("IncompleteRead") from body_error
                         time.sleep(2 ** (attempt + 1))
                         continue
                     self.evidence.record(url, "http", status=exc.code)
-                    page = Page(exc.url, body, iso(), content_type=(exc.headers or {}).get("Content-Type", ""), status=404)
+                    page = error_page or Page(exc.url, body, iso(), content_type=(exc.headers or {}).get("Content-Type", ""), status=404)
                     raise FetchError("http_404", page=page) from exc
                 if exc.code not in (429, 500, 502, 503, 504):
                     self.evidence.record(url, "http", status=exc.code)
-                    raise FetchError(f"http_{exc.code}") from exc
+                    raise FetchError(f"http_{exc.code}", page=error_page) from exc
                 retry = (exc.headers or {}).get("Retry-After", "")
                 # Retry-After applies to the host, including other product URLs
                 # and browser fallback. The collector persists this deadline.
                 wait = self.defer_response(host, exc.code, retry, attempt)
                 self.evidence.record(url, "http", status=exc.code, retry=retry, until=self.retry_after[host])
-                if wait > 60 or attempt == 2:
+                if wait > 60 or attempt == max_attempts - 1:
                     code = "rate_limited_retry_later" if retry or exc.code == 429 else f"http_{exc.code}"
-                    raise FetchError(code) from exc
+                    raise FetchError(code, page=error_page) from exc
             except FetchError:
                 raise
             except (OSError, TimeoutError, IncompleteRead) as exc:
                 self.evidence.record(url, "http", error=exc)
-                if attempt == 2:
+                if attempt == max_attempts - 1:
                     # One broken URL is not a host outage. Only defer after
                     # exhausted retries on three distinct URLs without a
                     # response in between; keep the original transport cause.
@@ -236,11 +323,17 @@ class Client:
             raise FetchError("invalid_json") from exc
 
     def rendered(self, url: str) -> Page:
+        host = urlsplit(url).hostname
         if not self.browser:
             raise FetchError("browser_disabled")
         if not allowed_url(url):
             raise FetchError("excluded_source")
-        self.wait_for_host(urlsplit(url).hostname)
+        self._check_robots(url)
+        # A shared host deadline keeps its own reason; an explicit refusal in
+        # this run then blocks rendering even before that deadline exists.
+        self.wait_for_host(host)
+        if host in self.refused_hosts:
+            raise FetchError("browser_blocked_after_refusal")
         from playwright.sync_api import sync_playwright
         with sync_playwright() as p:
             browser = p.chromium.launch(headless=True)
@@ -255,6 +348,7 @@ class Client:
                     self.evidence.record(url, "browser", error=exc)
                     raise
                 if response and response.status == 403:
+                    self.refused_hosts.add(urlsplit(response.url).hostname)
                     retry = response.header_value("Retry-After")
                     until = self.access_response(url, 403, retry)
                     self.evidence.record(url, "browser", status=403, retry=retry, until=until)

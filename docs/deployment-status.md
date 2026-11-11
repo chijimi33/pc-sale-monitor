@@ -1,3 +1,5 @@
+> この文書は2026年9月の導入時点の記録です。2026-11-11 に設計を作り直しました。現在の仕様は [architecture.md](architecture.md)、現在の状況は [公開JSON](https://raw.githubusercontent.com/chijimi33/pc-sale-monitor/monitor-data/public/latest.json) を参照してください。以下の本文は歴史的記録として残しています。
+
 # 導入状況（2026年9月14日）
 
 ## 稼働済み

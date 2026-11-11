@@ -1,7 +1,8 @@
 from __future__ import annotations
 
+from collections import Counter
 from copy import deepcopy
-from datetime import timedelta
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 import hashlib
 import os
@@ -14,10 +15,10 @@ from . import adapters
 from .flyers import collect_flyer
 from .http import Client, FetchError, Page
 from .models import STORES, Offer, allowed_url, digest, fresh, iso, timestamp, utcnow
-from .parsing import canonical, confirmed_empty_search, confirmed_missing_product, discover, parse_product, search_form
+from .parsing import canonical, confirmed_empty_search, confirmed_missing_product, discover, page_level_denial, parse_product, search_form
 from .storage import Store
 from .scheduling import plan_comparison_refresh, select_task
-from .retrying import runnable, transient
+from .retrying import deferred_until, dependency_url, runnable, transient
 from . import koubou_search, sofmap_search, tsukumo_shipping, comparison_routing, comparison_priority
 
 
@@ -46,8 +47,39 @@ def new_dependency(task: dict, **updates) -> dict:
              "retry_at_epoch_seconds")}
 
 
+def _plan_identities(task: dict) -> list[str]:
+    """Read both current and legacy request provenance."""
+    return sorted(set(task.get("plan_identities", [])) | ({task["plan_identity"]} if task.get("plan_identity") else set()))
+
+
+def record_unverified_discoveries(state: dict) -> None:
+    """Retain unresolved exploration products before discarding the stage queue."""
+    verification = state["verification"]
+    pending = {(row["identity"], row["url"]): row for row in verification.get("unverified_discoveries", [])}
+    # Legacy URL-only receipts cannot prove which identity was verified.
+    verified = {(row["identity"], row["url"]) for row in verification.get("verified_discoveries", [])
+                if isinstance(row, dict)}
+    for task_id, task in state.get("verification_queue", {}).items():
+        if task.get("type") != "product" or "plan_offer_key" in task:
+            continue
+        result = verification.get("results", {}).get(task_id, {})
+        if result.get("result") != "ok":
+            for identity in _plan_identities(task):
+                row = {"identity": identity, "url": task["url"], "reason": result.get("reason") or "not_reached"}
+                pending[identity, row["url"]] = row
+    verification["unverified_discoveries"] = [row for key, row in sorted(pending.items()) if key not in verified]
+    verification["verified_discoveries"] = [{"identity": identity, "url": url} for identity, url in sorted(verified)]
+
+
 class Collector:
-    def __init__(self, root: Path, store: str, config: dict, run_id: str, client: Client | None = None):
+    def __init__(self, root: Path, store: str, config: dict, run_id: str, client: Client | None = None,
+                 phase: str | None = None, plan: dict | None = None):
+        if phase not in (None, "discovery", "verification"):
+            raise ValueError("invalid_phase")
+        self.phase = phase
+        self.plan = plan
+        self.queue_key = "verification_queue" if phase == "verification" else "queue"
+        self.done_key = "verification_done" if phase == "verification" else "done"
         if store not in STORES:
             raise ValueError("excluded_store")
         self.disk = Store(root)
@@ -56,8 +88,30 @@ class Collector:
         self.config = config
         self.run_id = run_id
         self.client = client or Client(browser=self.cfg.get("browser_fallback", False))
+        if phase is not None and hasattr(self.client, "page_denial") and self.client.page_denial is None:
+            self.client.page_denial = lambda url, page: page_level_denial(self.store, url, page)
         self.name = f"stores/{store}.json"
         self.state = self.disk.load(self.name, {"schema_version": 1, "store": store, "queue": {}, "done": [], "offers": {}, "journal": [], "cycle_complete": True})
+        if phase is not None:
+            self.state["phase"] = phase
+        if phase == "verification":
+            if self.state.get("verification", {}).get("run_id") != run_id:
+                self.state["verification_queue"] = {}
+                self.state["verification_done"] = []
+                self.state["verification"] = {"run_id": run_id, "results": {}, "failed_urls": [],
+                                              "searched_identities": [], "not_reached": 0,
+                                              "unverified_discoveries": [], "verified_discoveries": []}
+                for request in (plan or {}).get("confirm", {}).get(store, []):
+                    row = self.state["offers"].get(request["offer_key"], {})
+                    self.enqueue({"type": "product", "url": request["url"],
+                                  "kind": row.get("discovery_kind", "comparison"), "requested": True,
+                                  "plan_offer_key": request["offer_key"], "plan_identity": request["identity"]})
+                for request in (plan or {}).get("explore", {}).get(store, []):
+                    self.enqueue({"type": "search", "query": request["query"], "kind": "comparison",
+                                  "requested": True, "plan_identity": request["identity"]})
+            for key, default in ((self.queue_key, {}), (self.done_key, []), ("list_pages", 0),
+                                 ("listed_candidates", 0), ("discovery_gaps", [])):
+                self.state.setdefault(key, default)
         if isinstance(getattr(self.client, "access_retry_after", None), dict):
             for host, failure in self.state.get("access_retry_after", {}).items():
                 if failure["until"] > self.client.access_retry_after.get(host, {}).get("until", 0):
@@ -93,9 +147,11 @@ class Collector:
             self.state["errors"] = []
             self.state.pop("access_block", None)
         self.state.setdefault("errors", [])
-        self.attempted = {key for key, task in self.state["queue"].items()
+        self.attempted = {key for key, task in self.state[self.queue_key].items()
                           if task.get("last_attempt_run_id") == run_id}
         self.pages = {}
+        self.active_task = None
+        self.budget_exhausted = False
         self.page_failures = {}
         self.page_failure_retry_at = {}
         self.shipping_policy_checked = False
@@ -103,8 +159,36 @@ class Collector:
 
     def save(self):
         self.state["checkpoint_at"] = iso()
-        self.state["pending_count"] = len(self.state["queue"])
-        self.state["request_count"] = self.client.count
+        self.state["pending_count"] = len(self.state[self.queue_key])
+        if self.phase == "discovery":
+            deferred = self._deferred_tasks()
+            self.state["deferred_failures"] = {
+                "run_id": self.run_id, "count": len(deferred),
+                "by_reason": dict(Counter(self.state[self.queue_key][key]["last_error"] for key in deferred)),
+                "next_retry_at": iso(datetime.fromtimestamp(min(deferred.values()), timezone.utc)) if deferred else None,
+            }
+        budget = getattr(self.client, "budget", None)
+        if self.phase is None:
+            self.state["request_count"] = self.client.count
+        else:
+            # Each stage has its own client. Report the run total, and keep a
+            # resumed stage's earlier requests through its restored budget.
+            counts = self.state.get("request_counts", {})
+            counts = dict(counts.get("by_phase", {})) if counts.get("run_id") == self.run_id else {}
+            counts[self.phase] = sum(budget.snapshot().values()) if budget is not None else self.client.count
+            self.state["request_counts"] = {"run_id": self.run_id, "by_phase": counts}
+            self.state["request_count"] = sum(counts.values())
+        if budget is not None:
+            previous = self.state.get("budget", {})
+            # A stage owns its time budget; usage never carries into another stage.
+            same = previous.get("run_id") == self.run_id and previous.get("phase") == self.phase
+            exhausted = previous.get("exhausted_hosts", []) if same else []
+            self.state["budget"] = {"run_id": self.run_id, "phase": self.phase, "used": budget.snapshot(),
+                                    "exhausted_hosts": sorted(set(exhausted) | {
+                                        host for host in budget.snapshot() if budget.remaining(host) <= 0})}
+        robots = getattr(self.client, "robots", None)
+        if isinstance(getattr(robots, "responses", None), dict):
+            self.state["robots"] = {"run_id": self.run_id, "responses": robots.responses}
         if isinstance(getattr(self.client, "rate_limit_spacing", None), dict):
             self.state["rate_limit_spacing_seconds"] = self.client.rate_limit_spacing.copy()
         if getattr(self.client, "evidence", None) is not None:
@@ -117,15 +201,28 @@ class Collector:
             self.state["access_retry_after"] = {host: failure.copy() for host, failure in self.client.access_retry_after.items() if failure["until"] > time.time()}
         self.disk.save(self.name, self.state)
 
-    def enqueue(self, task: dict):
+    def enqueue(self, task: dict, relisted: bool = False):
+        if self.phase == "verification":
+            identities = sorted(set(_plan_identities(task)) | set(_plan_identities(getattr(self, "active_task", None) or {})))
+            task = {**task, "plan_identities": identities, "plan_identity": identities[0] if identities else None}
+        if self.phase == "discovery" and task.get("kind") == "comparison":
+            return None
         if task.get("url") and not allowed_url(task["url"]):
             return
         related = comparison_priority.queries(task, self.store) if task.get("comparison_queries") else []
         if related:
             task = {**task, "comparison_queries": related}
         task_id = digest([task["type"], task.get("url"), task.get("query"), task.get("start"), task.get("kind"), task.get("item", {}).get("product_id")])[:24]
-        if task_id in self.state["queue"]:
-            existing = self.state["queue"][task_id]
+        if task_id in self.state[self.queue_key]:
+            existing = self.state[self.queue_key][task_id]
+            if self.phase == "verification":
+                identities = sorted(set(_plan_identities(existing)) | set(_plan_identities(task)))
+                existing.update(plan_identities=identities, plan_identity=identities[0] if identities else None)
+                receipt = self.state["verification"]["results"].get(task_id)
+                if receipt is not None:
+                    receipt.update(plan_identities=identities, plan_identity=identities[0] if identities else None)
+            if relisted:
+                existing["relisted_run_id"] = self.run_id
             if task.get("priority", 3) < existing.get("priority", 3):
                 existing["priority"] = task["priority"]
             if task.get("created_at") and task["created_at"] < existing["created_at"]:
@@ -138,8 +235,20 @@ class Collector:
                 prior = existing.get("discovery_origin")
                 if not prior or task["discovery_origin"]["created_at"] < prior["created_at"]:
                     existing["discovery_origin"] = deepcopy(task["discovery_origin"])
-        elif task_id not in self.state["done"]:
-            self.state["queue"][task_id] = {"created_at": iso(), "attempts": 0, **task}
+        elif task_id not in self.state[self.done_key]:
+            self.state[self.queue_key][task_id] = {"created_at": iso(), "attempts": 0, **task}
+        elif self.phase == "verification":
+            receipt = self.state["verification"]["results"].get(task_id, {})
+            identities = sorted(set(_plan_identities(receipt)) | set(_plan_identities(task)))
+            if identities != _plan_identities(receipt):
+                task = {**task, "plan_identities": identities, "plan_identity": identities[0]}
+                if task["type"] == "product":
+                    self._verification_result(task_id, {**receipt, **task}, receipt["result"], receipt["reason"])
+                else:
+                    # Replay traversal for new owners through the shared page cache.
+                    self.state[self.done_key].remove(task_id)
+                    self.state[self.queue_key][task_id] = {"created_at": iso(), "attempts": 0, **task}
+                    self.attempted.discard(task_id)
         return task_id
 
     def record(self, offer: Offer):
@@ -158,6 +267,8 @@ class Collector:
         self.state["offers"][offer.key] = row
         observation_id = digest([offer.key, offer.observed_at, row])
         self.state["journal"].append({"observation_id": observation_id, "run_id": self.run_id, "offer": deepcopy(row)})
+        if self.phase == "verification" and self.active_task and self.active_task["type"] == "product":
+            self.active_task.update(observed_offer_key=offer.key, observed_url=offer.url)
         if previous is None:
             priority = "new"
         elif previous.get("stock") == "out_of_stock" and offer.stock == "in_stock":
@@ -169,8 +280,8 @@ class Collector:
         self.state.setdefault("changes", {})[offer.key] = priority
 
     def seed(self):
-        requests = self.disk.load(f"requests/{self.store}.json", None)
-        candidates = self.disk.load("requests/candidate_identities.json", [])
+        requests = self.disk.load(f"requests/{self.store}.json", None) if self.phase is None else None
+        candidates = self.disk.load("requests/candidate_identities.json", []) if self.phase is None else []
         candidates = {x for x in candidates if isinstance(x, str)} if isinstance(candidates, list) else set()
         priorities = {r["identity"]: r.get("priority", 3) for r in requests or []
                       if isinstance(r, dict) and isinstance(r.get("identity"), str)}
@@ -181,8 +292,10 @@ class Collector:
             # unresolved parse having been verified. Preserve that finding.
             unresolved = [gap for gap in self.state.get("discovery_gaps", [])
                           if gap.get("reason") == "no_sale_candidates_parser_review"]
-            self.state.update(done=[], changes={}, cycle_started_at=iso(), cycle_complete=False, list_pages=0, listed_candidates=0, discovery_gaps=unresolved)
-            comparison_priority.refresh(self.state["queue"], requests, self.store)
+            self.state.update(changes={}, cycle_started_at=iso(), cycle_complete=False, list_pages=0, listed_candidates=0, discovery_gaps=unresolved)
+            self.state[self.done_key] = []
+            if self.phase is None:
+                comparison_priority.refresh(self.state[self.queue_key], requests, self.store)
             adapter = self.cfg["adapter"]
             if adapter == "html":
                 for url in self.cfg.get("seed_urls", []):
@@ -196,10 +309,16 @@ class Collector:
                     self.enqueue({"type": "yahoo", "query": query, "start": 1})
             elif adapter == "amazon":
                 self.enqueue({"type": "amazon_discovery"})
-            refresh, refresh_details = plan_comparison_refresh(self.state["offers"], requests, candidates)
-            self.state["comparison_refresh"] = refresh_details
+            refresh = set()
+            if self.phase is None:
+                refresh, refresh_details = plan_comparison_refresh(self.state["offers"], requests, candidates)
+                self.state["comparison_refresh"] = refresh_details
             for key, row in self.state["offers"].items():
+                # Dospara and Yahoo sale items are re-listed by their own
+                # adapters each cycle, with coupon and API conditions verified.
                 if row.get("channel") != "online" or adapter in ("dospara", "yahoo"):
+                    continue
+                if self.phase == "discovery" and row.get("discovery_kind") != "sale":
                     continue
                 # Recheck known sale products and exact comparison matches only.
                 # Existing queued work is retained even when its old identity is
@@ -233,9 +352,9 @@ class Collector:
         key = digest([task["type"], None, task["query"], None, task["kind"], None])[:24]
         # Routing never completes, replaces, or changes the original age of an
         # already queued broad search. A completed head may have pending pages.
-        if key in self.state["queue"]:
+        if key in self.state[self.queue_key]:
             return self.enqueue(task)
-        if key in self.state["done"]:
+        if key in self.state[self.done_key]:
             return key
         if existing_only:
             return None
@@ -262,7 +381,7 @@ class Collector:
                 "kind": other.discovery_kind, "source": other.discovery_url, "title": other.title,
                 "requested": True, "priority": request.get("priority", 3)})
             expected = comparison_routing.scope(other)
-            task = self.state["queue"].get(task_id)
+            task = self.state[self.queue_key].get(task_id)
             if task is not None:
                 routes = task.setdefault("comparison_routes", {})
                 # Keep the original request time across interruption and future
@@ -307,18 +426,26 @@ class Collector:
             # The client still enforces any newer host-wide waiting deadline.
             self.page_failures.pop(url)
             self.page_failure_retry_at.pop(url)
-        if url not in self.pages:
+        key = (url, "http")
+        browser_key = (url, "browser")
+        if key not in self.pages and allow_browser and browser_key in self.pages:
+            return self.pages[browser_key]
+        if key not in self.pages:
             try:
                 try:
-                    self.pages[url] = self.client.get(url)
+                    self.pages[key] = self.client.get(url)
                 except FetchError as exc:
                     if confirmed_missing_product(self.store, url, exc.page):
                         # Keep the task and this response as a failed fetch;
                         # a known server 404 does not need another navigation.
                         raise
-                    if not allow_browser or str(exc) in ("rate_limited_retry_later", "store_maintenance") or str(exc).startswith(("transport_retry_later:", "access_retry_later:")) or (exc.page is not None and confirmed_empty_search(self.store, exc.page)) or not self.cfg.get("browser_fallback"):
+                    if str(exc) == "amazon_access_challenge":
+                        if not isinstance(getattr(self.client, "refused_hosts", None), set):
+                            self.client.refused_hosts = set()
+                        self.client.refused_hosts.add(urlsplit(url).hostname)
+                    if not allow_browser or str(exc) in ("http_403", "page_access_restricted", "amazon_access_challenge", "robots_disallowed", "host_budget_exhausted", "browser_blocked_after_refusal", "rate_limited_retry_later", "store_maintenance") or str(exc).startswith(("transport_retry_later:", "access_retry_later:")) or (exc.page is not None and confirmed_empty_search(self.store, exc.page)) or not self.cfg.get("browser_fallback"):
                         raise
-                    self.pages[url] = self.client.rendered(url)
+                    return self._rendered_page(url)
             except Exception as exc:
                 failure = exc if isinstance(exc, FetchError) else type(exc).__name__
                 self.page_failures[url] = failure
@@ -331,7 +458,13 @@ class Collector:
                         getattr(self.client, "retry_after", {}).get(host, 0),
                         getattr(self.client, "transport_retry_after", {}).get(host, {}).get("until", 0))
                 raise
-        return self.pages[url]
+        return self.pages[key]
+
+    def _rendered_page(self, url):
+        key = (url, "browser")
+        if key not in self.pages:
+            self.pages[key] = self.client.rendered(url)
+        return self.pages[key]
 
     def process_koubou_search(self, task: dict, query: str, offset: int = 0):
         url = koubou_search.search_url(query, offset)
@@ -422,7 +555,7 @@ class Collector:
                 return
             products, pagination, campaigns = discover(page, self.cfg, sale_page=task.get("sale_page", False), comparison=task.get("kind") == "comparison")
             if not products and task.get("sale_page") and self.cfg.get("browser_fallback") and page.method != "browser":
-                page = self.client.rendered(fetch_url)
+                page = self._rendered_page(fetch_url)
                 products, pagination, campaigns = discover(page, self.cfg, sale_page=True, comparison=task.get("kind") == "comparison")
             if replacement and not products:
                 raise FetchError("discovery_replacement_unverified")
@@ -482,7 +615,8 @@ class Collector:
                 discovery_origin = {**discovery_origin, "created_at": min(discovery_origin["created_at"], task["created_at"])}
                 origin = {"created_at": discovery_origin["created_at"], "discovery_origin": discovery_origin}
             for product in products:
-                self.enqueue({"type": "product", **product, "priority": task.get("priority", 3), **origin})
+                self.enqueue({"type": "product", **product, "priority": task.get("priority", 3), **origin},
+                             relisted=self.phase == "discovery" and task.get("kind") != "comparison")
             for url in pagination:
                 self.enqueue(new_dependency(task, url=url, **origin))
             # Follow explicitly linked sale pages, including nested sale portals.
@@ -504,7 +638,7 @@ class Collector:
                 page = self.page(task["url"])
                 offer = parse_product(self.store, page, self.cfg, task)
                 if not offer.verified and "member_price_not_verified" not in offer.issues and self.cfg.get("browser_fallback") and page.method != "browser":
-                    page = self.client.rendered(task["url"])
+                    page = self._rendered_page(task["url"])
                     offer = parse_product(self.store, page, self.cfg, task)
                 if self.store == "tsukumo" and tsukumo_shipping.standard_product(page, offer):
                     if not self.shipping_policy_checked:
@@ -555,9 +689,15 @@ class Collector:
         self.state["listed_candidates"] += len(products)
 
     def collect(self, seconds: int = 2100, review_root: Path = Path("config/flyer_reviews")) -> dict:
-        self.seed()
+        if self.phase != "verification":
+            self.seed()
+        else:
+            self.save()
         if self.state.get("access_block", {}).get("run_id") == self.run_id:
-            self.state.update(status="access_required", cycle_complete=False)
+            self.state["status"] = "access_required"
+            if self.phase != "verification":
+                self.state["cycle_complete"] = False
+            self._finish_verification()
             self.save()
             return self.state
         deadline = time.monotonic() + seconds
@@ -567,11 +707,12 @@ class Collector:
             if not os.environ.get("YAHOO_CLIENT_ID"):
                 self.state["status"] = "configuration_needed"
                 self.state["errors"].append({"reason": "YAHOO_CLIENT_ID_missing"})
+                self._finish_verification()
                 self.save()
                 return self.state
         while (tick := time.monotonic()) < deadline:
             wall_now = time.time()
-            pending, waits = runnable(self.state["queue"], self.attempted, self.cfg, self.client,
+            pending, waits = runnable(self._pending_queue(), self.attempted, self.cfg, self.client,
                                       self.page_failure_retry_at, wall_now)
             self.state["waiting_dependencies"] = waits
             if not pending:
@@ -589,22 +730,45 @@ class Collector:
                 self.state["retry_activity"]["wait_seconds"] += delay
                 continue
             task_id, task = select_task(pending, self.state["scheduler"], task_order, utcnow(), self.attempted)
-            self.attempted.add(task_id)
+            self.active_task = task
             if task.get("retry_at_epoch_seconds") is not None:
                 self.state["retry_activity"]["retries_started"] += 1
             try:
                 self.process(task)
+                self.attempted.add(task_id)
+                self._verification_result(task_id, task, "ok", None)
                 if task.get("last_error"):
                     self.state["retry_activity"]["recovered_tasks"] += 1
                     self.state.setdefault("recovered_errors", []).append({"task_id": task_id,
                         "reason": task["last_error"], "attempts": task.get("attempts", 0), "recovered_at": iso()})
                     self.state["errors"] = [e for e in self.state["errors"] if e.get("task_id") != task_id]
-                self.state["done"].append(task_id)
-                del self.state["queue"][task_id]
+                self.state[self.done_key].append(task_id)
+                del self.state[self.queue_key][task_id]
             except Exception as exc:
+                if isinstance(exc, FetchError) and str(exc) == "host_budget_exhausted":
+                    self.budget_exhausted = True
+                    host = urlsplit(dependency_url(task, self.cfg) or "").hostname
+                    previous = self.state.get("budget", {})
+                    same = previous.get("run_id") == self.run_id and previous.get("phase") == self.phase
+                    exhausted = previous.get("exhausted_hosts", []) if same else []
+                    self.state["budget"] = {"run_id": self.run_id, "phase": self.phase,
+                                            "exhausted_hosts": sorted(set(exhausted) | ({host} if host else set()))}
+                    self.save()
+                    break
+                if isinstance(exc, FetchError) and str(exc) == "robots_disallowed":
+                    self.state.setdefault("robots_disallowed", []).append({
+                        "url": task.get("url") or dependency_url(task, self.cfg), "task_id": task_id,
+                        "run_id": self.run_id, "at": iso()})
+                    self._verification_result(task_id, task, "failed", "robots_disallowed")
+                    del self.state[self.queue_key][task_id]
+                    self.state["errors"] = [e for e in self.state["errors"] if e.get("task_id") != task_id]
+                    self.save()
+                    continue
+                self.attempted.add(task_id)
                 # Only sanitized error types/codes are persisted; URLs with API
                 # credentials and raw exception messages never enter the feed.
                 reason = str(exc) if isinstance(exc, FetchError) and "http" not in str(exc)[5:] and len(str(exc)) < 100 else type(exc).__name__
+                self._verification_result(task_id, task, "failed", reason)
                 task.update(attempts=task.get("attempts", 0)+1, last_error=reason, last_attempt_at=iso(),
                             last_attempt_run_id=self.run_id)
                 task.pop("retry_at_epoch_seconds", None)
@@ -630,6 +794,11 @@ class Collector:
                             row["issues"] = sorted(set(row.get("issues", []) + ["latest_fetch_failed"]))
                 if self.store == "amazon" and reason == "amazon_access_challenge":
                     page = exc.page if isinstance(exc, FetchError) else None
+                    if not isinstance(getattr(self.client, "refused_hosts", None), set):
+                        self.client.refused_hosts = set()
+                    refused_url = task.get("url") or (page.url if page else None)
+                    if refused_url:
+                        self.client.refused_hosts.add(urlsplit(refused_url).hostname)
                     self.state["access_block"] = {
                         "run_id": self.run_id, "reason": reason, "url": task.get("url"),
                         "checked_at": page.observed_at if page else iso(),
@@ -638,7 +807,7 @@ class Collector:
                     self.save()
                     break
             self.save()
-        if self.store == "koubou":
+        if self.store == "koubou" and self.phase != "verification" and not self.budget_exhausted and (self.phase is None or time.monotonic() < deadline):
             try:
                 offers, metadata = collect_flyer(self.client, self.disk, self.config["flyer"], review_root)
                 self.state["flyer"] = metadata
@@ -646,13 +815,62 @@ class Collector:
                     self.record(offer)
             except Exception as exc:
                 self.state["flyer"] = {"status": "fetch_failed", "reason": type(exc).__name__, "checked_at": iso()}
-        self.state["cycle_complete"] = not self.state["queue"]
-        _, self.state["waiting_dependencies"] = runnable(self.state["queue"], self.attempted, self.cfg,
+        complete = not self._pending_queue()
+        if self.phase != "verification":
+            self.state["cycle_complete"] = complete
+        _, self.state["waiting_dependencies"] = runnable(self._pending_queue(), self.attempted, self.cfg,
             self.client, self.page_failure_retry_at, time.time())
         if self.state.get("access_block", {}).get("run_id") == self.run_id:
             self.state["status"] = "access_required"
         else:
-            self.state["status"] = "complete" if self.state["cycle_complete"] and not self.state.get("discovery_gaps") else "partial"
+            self.state["status"] = "complete" if complete and not self.state.get("discovery_gaps") else "partial"
         self.state["completed_at"] = iso()
+        self._finish_verification()
         self.save()
         return self.state
+
+    def _pending_queue(self):
+        queue = self.state[self.queue_key]
+        if self.phase != "discovery":
+            return queue
+        deferred = self._deferred_tasks()
+        return {key: task for key, task in queue.items() if task.get("kind") != "comparison" and key not in deferred}
+
+    def _deferred_tasks(self):
+        now = time.time()
+        return {key: until for key, task in self.state[self.queue_key].items()
+                if task.get("kind") != "comparison" and task.get("relisted_run_id") != self.run_id
+                and (until := deferred_until(task)) is not None and until > now}
+
+    def _verification_result(self, task_id, task, result, reason):
+        if self.phase != "verification":
+            return
+        verification = self.state["verification"]
+        url = task.get("url") or dependency_url(task, self.cfg)
+        identities = _plan_identities(task)
+        verification["results"][task_id] = {"url": url, "plan_identity": identities[0] if identities else None,
+                                            "plan_identities": identities,
+                                            "type": task["type"], "result": result, "reason": reason}
+        if task["type"] == "product" and result == "ok":
+            verification["results"][task_id].update({key: task[key] for key in ("observed_offer_key", "observed_url") if key in task})
+        if task["type"] == "product" and identities:
+            if result == "ok":
+                record_unverified_discoveries(self.state)
+                verification["verified_discoveries"].extend({"identity": identity, "url": url} for identity in identities)
+            elif "plan_offer_key" not in task:
+                pending = verification.setdefault("unverified_discoveries", [])
+                pending[:] = [row for row in pending if (row["identity"], row["url"]) not in {(identity, url) for identity in identities}]
+                pending.extend({"identity": identity, "url": url, "reason": reason} for identity in identities)
+            record_unverified_discoveries(self.state)
+        verification["failed_urls"] = sorted({row["url"] for row in verification["results"].values()
+                                              if row["result"] == "failed" and row["url"]})
+        verification["searched_identities"] = sorted({identity for row in verification["results"].values()
+            if row["result"] == "ok" and (row["type"] in ("koubou_search", "list") or
+                row["type"] == "search" and self.store == "koubou") for identity in _plan_identities(row)})
+
+    def _finish_verification(self):
+        if self.phase == "verification":
+            verification = self.state["verification"]
+            record_unverified_discoveries(self.state)
+            verification["not_reached"] += sum(key not in verification["results"] for key in self.state[self.queue_key])
+            self.state[self.queue_key] = {}

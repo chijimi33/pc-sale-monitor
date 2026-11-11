@@ -335,6 +335,15 @@ def parse_product(store: str, page: Page, cfg: dict, discovery: dict | None = No
     if store == "dospara":
         if first(tree, '//*[contains(concat(" ",normalize-space(@class)," ")," free_shipping ")]') == "送料無料":
             offer.shipping_yen = 0
+        if discovery is not None:
+            # A product reached by a plain product task has not gone through the
+            # dedicated coupon verification. A coupon shown on this page would
+            # make the printed price an overstated comparator, so hold it.
+            from .vendor import dospara_coupon_tool as vendor
+            snapshot = vendor.extract_product_page_snapshot(page.text)
+            shown = snapshot is not None and snapshot.product_id and vendor.extract_product_page_coupon(page.text, snapshot.product_id)
+            if shown or snapshot is None and "couponcode" in page.text:
+                offer.issues.append("coupon_unverified_on_product_page")
         # Preserve the full displayed model string. A series name or inferred
         # abbreviated CPU name is never equated with a full part number.
         labels = tree.xpath('//h1[contains(@class,"product-show-detail")]')
@@ -430,11 +439,20 @@ def discover(page: Page, cfg: dict, *, sale_page: bool, comparison: bool = False
     return list(products.values()), sorted(pages - {canonical(page.url)}), sorted(campaigns - {canonical(page.url)})
 
 
+def page_level_denial(store: str, url: str, page: Page) -> bool:
+    """Recognize Sofmap's product-specific access error without refusing the host."""
+    parts = urlsplit(url)
+    if store != "sofmap" or parts.hostname not in ("www.sofmap.com", "sofmap.com") or parts.path != "/product_detail.aspx":
+        return False
+    text = page.text
+    return "アクセスが制限されています" in text and "The requested URL was not found on this server" in text
+
+
 def confirmed_missing_product(store: str, requested_url: str, page: Page | None) -> bool:
     """Recognize Koubou's exact missing-page response, not stock or product EOL.
 
     This only decides whether a browser retry of the same 404 is useful.
-    The original task must remain pending and be fetched again next run.
+    The original task must remain pending for a later retry.
     """
     if store != "koubou" or page is None or page.status != 404 or page.url != requested_url:
         return False

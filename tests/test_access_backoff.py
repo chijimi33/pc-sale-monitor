@@ -92,17 +92,20 @@ class AccessBackoffTests(unittest.TestCase):
                 with self.assertRaisesRegex(FetchError, 'access_retry_later'): client.rendered(BASE + '4')
                 browser.assert_not_called()
 
-    def test_browser_denials_also_start_shared_deadline(self):
+    def test_browser_denial_blocks_later_rendering_without_navigation(self):
+        # An explicit refusal is respected for the rest of the run: the browser
+        # is never used to try other URLs on the refusing host.
         with patch('sale_monitor.http.time.time', return_value=1000):
             client = Client(browser=True, delay=0)
-            for n in range(3):
-                with patch('playwright.sync_api.sync_playwright') as factory:
-                    browser = factory.return_value.__enter__.return_value.chromium.launch.return_value
-                    response = browser.new_page.return_value.goto.return_value
-                    response.status = 403; response.url = BASE + str(n); response.header_value.return_value = None
-                    with self.assertRaisesRegex(FetchError, '^http_403$'): client.rendered(BASE + str(n))
-            with self.assertRaisesRegex(FetchError, 'access_retry_later'): client.get(BASE + '4')
-            self.assertEqual(client.count, 3)
+            with patch('playwright.sync_api.sync_playwright') as factory:
+                browser = factory.return_value.__enter__.return_value.chromium.launch.return_value
+                response = browser.new_page.return_value.goto.return_value
+                response.status = 403; response.url = BASE + '0'; response.header_value.return_value = None
+                with self.assertRaisesRegex(FetchError, '^http_403$'): client.rendered(BASE + '0')
+            with patch('playwright.sync_api.sync_playwright') as factory:
+                with self.assertRaisesRegex(FetchError, '^browser_blocked_after_refusal$'): client.rendered(BASE + '1')
+                factory.assert_not_called()
+            self.assertEqual(client.count, 1)
 
     def test_restart_preserves_waiters_age_attempts_and_history(self):
         with tempfile.TemporaryDirectory() as tmp, ExitStack() as stack:

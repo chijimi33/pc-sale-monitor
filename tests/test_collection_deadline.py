@@ -142,16 +142,20 @@ class CollectionDeadline(unittest.TestCase):
         self.assertEqual(error.exception.code, 2)
         self.assertFalse(self.root.exists())
 
-    def test_workflow_keeps_export_upload_after_deadline_failure(self):
+    def test_workflow_saves_state_after_a_failed_run_and_migrates_first(self):
         workflow = (REPO / '.github/workflows/monitor.yml').read_text()
-        collect = workflow.split('      - name: Collect with durable checkpoints', 1)[1]
-        self.assertIn('timeout-minutes: 39', collect)
-        self.assertIn('--seconds 2100 --deadline-seconds 2220', collect)
-        self.assertIn('python -m sale_monitor.collection_deadline', collect)
-        self.assertIn('      - name: Export only this store\'s state\n        if: always()', collect)
-        self.assertIn('      - uses: actions/upload-artifact@v4\n        if: always()', collect)
         self.assertIn("cron: '17 */4 * * *'", workflow)
-        self.assertIn('timeout-minutes: 45', workflow)
+        self.assertIn('group: sale-monitor-state\n  cancel-in-progress: false', workflow)
+        # One job runs every stage; there is no store matrix or artifact hand-off.
+        self.assertNotIn('matrix:', workflow)
+        migrate = workflow.index('python -m sale_monitor.cli migrate --state state-repo/state')
+        saved = workflow.index('python scripts/state_branch.py publish --state-only')
+        run = workflow.index('python -m sale_monitor.cli run --state state-repo/state')
+        self.assertLess(migrate, saved)
+        self.assertLess(saved, run)
+        after_run = workflow[run:]
+        self.assertIn('        if: always()\n        run: python scripts/state_branch.py publish\n', after_run)
+        self.assertIn('      - uses: actions/upload-artifact@v4\n        if: always()', after_run)
 
     @unittest.skipUnless(os.name == 'posix', 'CI Linux process-group cleanup')
     def test_descendant_ignoring_term_is_stopped_with_owned_group(self):
