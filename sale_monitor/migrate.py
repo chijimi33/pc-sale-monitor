@@ -32,7 +32,8 @@ def fingerprint(root: Path) -> dict:
 
 
 def _restore(backups):
-    for path, content in backups.items():
+    # Restore queues before removing the archives that protect their tasks.
+    for path, content in reversed(backups.items()):
         if content is None:
             path.unlink(missing_ok=True)
         else:
@@ -49,10 +50,15 @@ def apply(root: Path, routes: RouteState, input_sha: str | None = None, now=None
     applied = any(row["version"] == MIGRATION_VERSION for row in schema.get("migrations", []))
     archived, remaining = {}, {}
     backups = {}
-    changed = {}
+    changed_archives, changed_stores = {}, {}
+    archives = {path.stem: disk.load(f"archive/{path.stem}.json", {"schema_version": 1, "entries": {}})
+                for path in sorted((root / "stores").glob("*.json"))}
     if isinstance(now, (float, int)):
         now = datetime.fromtimestamp(now, timezone.utc)
-    archived_at = iso(now)
+    # Reuse the first durable migration timestamp after an interrupted apply.
+    archived_at = min((record["archived_at"] for archive in archives.values()
+                       for record in archive["entries"].values()
+                       if record.get("migration_version") == MIGRATION_VERSION), default=iso(now))
     for path in sorted((root / "stores").glob("*.json")):
         store = path.stem
         state = disk.load(f"stores/{path.name}", {})
@@ -61,7 +67,7 @@ def apply(root: Path, routes: RouteState, input_sha: str | None = None, now=None
         if not applied:
             channel = {"yahoo": "api", "amazon": "chimolog"}.get(store, "direct")
             status = routes.status(f"{store}:{channel}", "sale_discovery")
-            entries = disk.load(f"archive/{store}.json", {"schema_version": 1, "entries": {}})
+            entries = archives[store]
             for task_id, task in list(queue.items()):
                 reason = f"route_paused:{status}" if status != "active" else (
                     "comparison_debt_abolished" if task.get("kind") == "comparison" else None)
@@ -76,15 +82,21 @@ def apply(root: Path, routes: RouteState, input_sha: str | None = None, now=None
             if counts:
                 state["pending_count"] = len(queue)
                 state["waiting_dependencies"] = []
-                changed[path] = state
-                changed[root / f"archive/{store}.json"] = entries
+                changed_stores[path] = state
+                changed_archives[root / f"archive/{store}.json"] = entries
         archived[store] = dict(counts)
         remaining[store] = len(queue)
     try:
         if not applied:
             schema["state_schema_version"] = STATE_SCHEMA_VERSION
+            # The receipt describes all archived work; the report counts only
+            # tasks removed from queues by this invocation.
             schema.setdefault("migrations", []).append({"version": MIGRATION_VERSION, "applied_at": archived_at,
-                "input_sha": input_sha, "archived": {store: sum(counts.values()) for store, counts in archived.items()}})
+                "input_sha": input_sha, "archived": {store: len(archive["entries"])
+                                                      for store, archive in archives.items()}})
+        # Every task must be durable in its archive before any queue loses it.
+        changed = {**changed_archives, **changed_stores}
+        if not applied:
             changed[root / "schema.json"] = schema
         for path, value in changed.items():
             backups[path] = path.read_bytes() if path.exists() else None

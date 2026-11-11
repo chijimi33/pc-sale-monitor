@@ -53,7 +53,7 @@ class RouteState:
         self.disk = disk
         self.config = deepcopy(config)
         saved = disk.load("routes.json", {})
-        reuse = saved.get("config_revision", 0) >= config["config_revision"]
+        reuse = saved.get("config_revision", 0) == config["config_revision"]
         self.routes = {}
         for route_id, configured in self.config["routes"].items():
             route = deepcopy(configured)
@@ -63,13 +63,12 @@ class RouteState:
                 old = previous.get("functions", {}).get(name, {})
                 base = function["status"]
                 target = old.get("status")
-                valid_transition = base in RECOVERABLE and (
-                    target == "active" or base == "paused_unreachable" and target == "paused_refused")
+                valid_transition = base in RECOVERABLE and target == "paused_refused"
                 if old.get("automatic") and old.get("config_status") == base and valid_transition:
                     function.update(deepcopy(old))
                 elif target == base:
                     function["since"] = old.get("since", function["since"])
-            for key in ("last_probe", "probe_log", "consecutive_successes", "retry_after_until"):
+            for key in ("recovery_candidate", "last_probe", "probe_log", "consecutive_successes", "retry_after_until"):
                 if key in previous:
                     route[key] = deepcopy(previous[key])
             self.routes[route_id] = route
@@ -115,14 +114,18 @@ class RouteState:
         checked_at = iso(_now(now))
         successes = route.get("consecutive_successes", 0) + 1 if result["ok"] and not result["explicit_refusal"] else 0
         route["consecutive_successes"] = successes
+        if successes and successes >= route.get("probe", {}).get("successes_to_resume", 2):
+            route["recovery_candidate"] = {
+                "since": route.get("recovery_candidate", {}).get("since", checked_at),
+                "consecutive_successes": successes, "last_ok_at": checked_at, "evidence": deepcopy(result),
+            }
+        else:
+            route.pop("recovery_candidate", None)
         for name, function in route["functions"].items():
             previous = function["status"]
             target = previous
-            if result["explicit_refusal"] and previous == "paused_unreachable":
+            if result["explicit_refusal"] and previous in RECOVERABLE:
                 target = "paused_refused"
-            elif result["ok"] and not result["explicit_refusal"] and previous in RECOVERABLE:
-                if successes >= route.get("probe", {}).get("successes_to_resume", 2):
-                    target = "active"
             if target != previous:
                 function.update(status=target, since=checked_at, automatic=True,
                                 config_status=self.config["routes"][route_id]["functions"][name]["status"],
@@ -145,6 +148,7 @@ class RouteState:
             "reason": route.get("reason", ""), "evidence": deepcopy(route.get("evidence", {})),
             "since": min((function["since"] for function in route["functions"].values()), default=None),
             "last_probe": deepcopy(route.get("last_probe")),
+            "recovery_candidate": deepcopy(route.get("recovery_candidate")),
         } for route_id, route in self.routes.items()}
 
 

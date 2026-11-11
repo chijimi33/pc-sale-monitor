@@ -3,6 +3,7 @@ from copy import deepcopy
 from datetime import datetime, timedelta, timezone
 import os
 from pathlib import Path
+import signal
 import subprocess
 import sys
 import tempfile
@@ -234,6 +235,25 @@ class PipelineTests(Fixture):
         saved = self.disk.load("routes.json", {})
         self.assertEqual(saved["routes"]["tsukumo:direct"]["last_probe"]["summary"], "probe_ok")
 
+    def test_probe_candidate_does_not_start_paused_store_children(self):
+        route = self.route_config["routes"]["tsukumo:direct"]
+        route["probe"] = {"url": "https://example.invalid/robots.txt", "interval_hours": 24, "successes_to_resume": 2}
+        for function in route["functions"].values():
+            function["status"] = "paused_maintenance"
+        self.save_config()
+        state = pipeline.routes.RouteState(self.disk, self.route_config, now=NOW)
+        state.record_probe("tsukumo:direct", {"ok": True, "explicit_refusal": False, "summary": "ok"},
+                           NOW - timedelta(days=1))
+        state.save()
+        spawn = Mock(side_effect=lambda *a, **k: SimpleNamespace(poll=lambda: 0))
+        with patch("sale_monitor.pipeline.routes.probe", return_value={
+                "ok": True, "explicit_refusal": False, "summary": "robots_ok"}):
+            self.run_pipeline(spawn=spawn)
+        summary = self.disk.load("routes.json", {})["routes"]["tsukumo:direct"]
+        self.assertEqual(summary["recovery_candidate"]["consecutive_successes"], 2)
+        self.assertEqual({row["status"] for row in summary["functions"].values()}, {"paused_maintenance"})
+        self.assertNotIn("tsukumo", {call.args[0][call.args[0].index("--store") + 1] for call in spawn.call_args_list})
+
     def test_parallel_children_skip_paused_stores_and_keep_failure_exit_codes(self):
         calls = []
 
@@ -407,6 +427,69 @@ class VerticalPipeline(Fixture):
 
 
 class RealProcessTrees(unittest.TestCase):
+    def test_real_child_group_is_killed_and_missing_group_is_ignored(self):
+        with subprocess.Popen([sys.executable, "-c", "raise SystemExit(0)"]) as process:
+            process.wait(timeout=5)
+            for error in (None, ProcessLookupError()):
+                with self.subTest(error=error), patch("sale_monitor.pipeline.os.name", "posix"), patch(
+                        "sale_monitor.pipeline.os.killpg", create=True, side_effect=error) as killpg, patch(
+                        "sale_monitor.pipeline.signal.SIGKILL", getattr(signal, "SIGKILL", 9), create=True):
+                    pipeline._kill_remaining_process_group(process)
+                    killpg.assert_called_once_with(process.pid, signal.SIGKILL)
+
+    def test_fake_spawn_never_signals_a_process_group(self):
+        with patch("sale_monitor.pipeline.os.name", "posix"), patch(
+                "sale_monitor.pipeline.os.killpg", create=True) as killpg:
+            fake = SimpleNamespace(pid=os.getpid(), poll=lambda: 0)
+            result = pipeline._run_children(["ark"], "discovery", 1, "unused", RUN, "unused", "unused",
+                                            lambda *args, **kwargs: fake, time.monotonic)
+        self.assertEqual(result["ark"]["status"], "completed")
+        killpg.assert_not_called()
+
+    @unittest.skipUnless(os.name == "posix", "POSIX orphaned process-group cleanup")
+    def test_exited_worker_reaps_its_term_ignoring_grandchild(self):
+        for exit_code in (0, 7):
+            with self.subTest(exit_code=exit_code), tempfile.TemporaryDirectory(prefix="pipeline-exit-") as directory:
+                root = Path(directory)
+                heartbeat = root / "heartbeat"
+                grandchild = ("import signal,time\nfrom pathlib import Path\n"
+                              "signal.signal(signal.SIGTERM, signal.SIG_IGN)\n"
+                              f"p=Path({str(heartbeat)!r})\n"
+                              "while True:\n with p.open('ab') as f: f.write(b'beat\\n')\n time.sleep(.03)\n")
+                worker = ("import subprocess,sys,time\nfrom pathlib import Path\n"
+                          f"subprocess.Popen([sys.executable,'-c',{grandchild!r}])\n"
+                          f"p=Path({str(heartbeat)!r})\n"
+                          "while not p.exists(): time.sleep(.01)\n"
+                          f"raise SystemExit({exit_code})\n")
+                spawned = []
+
+                def spawn(command, **kwargs):
+                    process = subprocess.Popen([sys.executable, "-c", worker], **kwargs)
+                    spawned.append(process)
+                    return process
+
+                started = time.monotonic()
+                try:
+                    with patch("sale_monitor.pipeline.DEADLINE_GRACE", .1):
+                        result = pipeline._run_children(["ark"], "discovery", 3, root, RUN,
+                            Path("unused"), Path("unused"), spawn, time.monotonic)
+                    self.assertLess(time.monotonic() - started, 8)
+                    self.assertEqual(result, {"ark": {
+                        "status": "completed" if exit_code == 0 else "failed", "exit_code": exit_code}})
+                    self.assertTrue(heartbeat.exists(), "grandchild must start before the worker exits")
+                    time.sleep(.1)
+                    before = heartbeat.read_bytes()
+                    self.assertTrue(before)
+                    time.sleep(.2)
+                    self.assertEqual(heartbeat.read_bytes(), before)
+                finally:
+                    for process in spawned:
+                        try:
+                            os.killpg(process.pid, signal.SIGKILL)
+                        except ProcessLookupError:
+                            pass
+                        process.wait(timeout=5)
+
     def test_deadline_stops_real_worker_and_its_grandchild(self):
         with tempfile.TemporaryDirectory(prefix="pipeline-tree-") as directory:
             root = Path(directory)
