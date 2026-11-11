@@ -3,6 +3,7 @@ from __future__ import annotations
 from collections import Counter
 from datetime import timedelta
 from pathlib import Path
+from statistics import median
 import shutil
 
 from .engine import evaluate, update_events
@@ -10,7 +11,8 @@ from .models import STORES, Offer, digest, fresh, iso, timestamp, utcnow
 from .storage import Store, atomic_json, read_json
 from .scheduling import plan_comparisons
 from .comparison_integrity import known_comparators, missing_comparators
-from .routing_reporting import summary as routing_summary
+from .routing_reporting import (summary as routing_summary, scope_summary, decision_scope,
+                                plan_summary, run_outcome, route_counts)
 from .http_evidence import summary as http_summary
 from .validation_integrity import audit_counts, scheduled_samples, verified_provenance
 
@@ -190,7 +192,7 @@ def flyer_dismissals(records) -> tuple[dict, list]:
     return dismissed, issues
 
 
-def aggregate(root: Path, public: Path, run_id: str, now=None) -> dict:
+def aggregate(root: Path, public: Path, run_id: str, now=None, scope: dict | None = None) -> dict:
     now = now or utcnow()
     disk = Store(root)
     states = {name: disk.load(f"stores/{name}.json", {}) for name in STORES}
@@ -203,6 +205,12 @@ def aggregate(root: Path, public: Path, run_id: str, now=None) -> dict:
         if state.get("run_id") != run_id:
             state = {**state, "status": "job_missing", "cycle_complete": False}
         statuses[name] = health(state, now)
+        if scope is not None and name in scope.get("paused_stores", {}):
+            route = next((r for r in scope.get("routes", {}).values() if r.get("store") == name), {})
+            archive = disk.load(f"archive/{name}.json", {})
+            statuses[name].update(status="paused", cycle_complete=False, route_status=scope["paused_stores"][name],
+                                  route_reason=route.get("reason"), archived_count=len(archive.get("entries", [])))
+            state = {**state, "status": "paused", "cycle_complete": False}
         comparison_routing[name] = {"run_id": state.get("run_id"), "checkpoint_at": state.get("checkpoint_at"),
                                     "status": state.get("status", "not_run"),
                                     "comparison_routing": state.get("comparison_routing")}
@@ -227,6 +235,7 @@ def aggregate(root: Path, public: Path, run_id: str, now=None) -> dict:
     registry = disk.load("events/registry.json", {"states": {}, "events": {}})
     decisions = []
     reviews = []
+    sale_identities = {o.identity for o in current if o.identity and o.discovery_kind != "comparison"} if scope is not None else set()
     for offer in current:
         identity = offer.identity
         peers = current_by_identity.get(identity, [])
@@ -235,7 +244,8 @@ def aggregate(root: Path, public: Path, run_id: str, now=None) -> dict:
         points = evaluate(offer, peers, past, now, points=True)
         for basis in (payment, points):
             if basis["status"] == "accepted":
-                missing = missing_comparators(offer, known, current_by_key, now, points=basis["basis"] == "points")
+                options = {"in_scope_stores": scope["in_scope_stores"]} if scope is not None else {}
+                missing = missing_comparators(offer, known, current_by_key, now, points=basis["basis"] == "points", **options)
                 if missing:
                     reasons = ["known_comparator_not_verified_this_run"]
                     if any(item.get("unverified_member_price") for item in missing):
@@ -245,7 +255,9 @@ def aggregate(root: Path, public: Path, run_id: str, now=None) -> dict:
                     held_offer_keys.add(offer.key)
         decision = payment if payment["status"] == "accepted" or points["status"] != "accepted" else points
         decisions.append({"offer": offer.to_dict(), "payment": payment, "points": points})
-        if offer.discovery_kind != "comparison":
+        if scope is not None:
+            decisions[-1]["comparison_scope"] = decision_scope(offer, payment, peers, known, current_by_key, now, scope)
+        if offer.discovery_kind != "comparison" or scope is not None and identity in sale_identities:
             events, state = update_events(offer, decision, registry["states"].get(offer.key), now)
             registry["states"][offer.key] = state
             for event in events:
@@ -274,21 +286,24 @@ def aggregate(root: Path, public: Path, run_id: str, now=None) -> dict:
     # Spending every store's collection time on an unusable candidate cannot
     # establish an A/B decision. Keep that candidate visible while its own
     # missing fields are resolved. Existing unfinished work is never discarded.
-    requests, comparison_plan = plan_comparisons(current, changes, STORES, now)
-    comparison_plan["run_id"] = run_id
-    comparison_plan["generated_at"] = iso(now)
-    for name, items in requests.items():
-        disk.save(f"requests/{name}.json", items)
-    # A held or temporarily unobserved sale can recover in the next collection.
-    # Keep its known comparators fresh without starting new broad searches.
-    candidate_identities = sorted({o.identity for state in states.values()
-        for row in state.get("offers", {}).values()
-        for o in [Offer.from_dict(row)]
-        if o.channel == "online" and o.discovery_kind != "comparison" and o.identity})
-    disk.save("requests/candidate_identities.json", candidate_identities)
-    comparison_plan["summary"]["refresh_candidate_identities"] = len(candidate_identities)
-    comparison_plan["summary"]["known_comparator_hold_offers"] = len(held_offer_keys)
-    disk.save("comparison_plan.json", comparison_plan)
+    if scope is None:
+        requests, comparison_plan = plan_comparisons(current, changes, STORES, now)
+        comparison_plan["run_id"] = run_id
+        comparison_plan["generated_at"] = iso(now)
+        for name, items in requests.items():
+            disk.save(f"requests/{name}.json", items)
+        # A held or temporarily unobserved sale can recover in the next collection.
+        # Keep its known comparators fresh without starting new broad searches.
+        candidate_identities = sorted({o.identity for state in states.values()
+            for row in state.get("offers", {}).values()
+            for o in [Offer.from_dict(row)]
+            if o.channel == "online" and o.discovery_kind != "comparison" and o.identity})
+        disk.save("requests/candidate_identities.json", candidate_identities)
+        comparison_plan["summary"]["refresh_candidate_identities"] = len(candidate_identities)
+        comparison_plan["summary"]["known_comparator_hold_offers"] = len(held_offer_keys)
+        disk.save("comparison_plan.json", comparison_plan)
+    else:
+        comparison_plan = plan_summary(disk, run_id, now, scope)
     public.mkdir(parents=True, exist_ok=True)
     events = [e for e in registry["events"].values() if timestamp(e["occurred_at"]) and now - timestamp(e["occurred_at"]) <= timedelta(days=7)]
     events.sort(key=lambda e: (e["occurred_at"], e["event_id"]))
@@ -305,9 +320,15 @@ def aggregate(root: Path, public: Path, run_id: str, now=None) -> dict:
     index = {"schema_version": 1, "generated_at": iso(now), "run_id": run_id, "run_provenance": provenance, "mode": "parallel_validation", "monitored_store_count": 10,
              "excluded_stores": ["rakuten"], "complete_stores": complete, "collection_completion_rate": complete/10,
              "stores": statuses, "notification_count": len(notification), "review_count": len(reviews),
-             "comparison_planning": comparison_plan["summary"],
+             "comparison_planning": comparison_plan.get("summary", comparison_plan),
              "files": {"notifications": "notifications.json", "reviews": "review_queue.json", "flyer_review": "flyer_review.json", "evidence": "evidence.json", "validation": "validation.json", "collection_errors": "collection_errors.json", "comparison_plan": "comparison_plan.json", "comparison_routing": "comparison_routing.json"},
              "delivery_guarantee": "at_least_once_best_effort; publication_and_delivery_are_distinct", "full_rescan_needed": False}
+    if scope is not None:
+        active = [name for name in STORES if name not in scope.get("paused_stores", {})]
+        index.update(schema_version=2, comparison_scope=scope_summary(scope), routes=scope.get("routes", {}),
+                     route_counts=route_counts(scope), run_outcome=run_outcome(states, current, run_id, scope),
+                     active_store_count=len(active),
+                     active_complete_stores=sum(statuses[name]["status"] == "complete" for name in active))
     atomic_json(public / "notifications.json", {"generated_at": iso(now), "events": notification})
     atomic_json(public / "comparison_plan.json", comparison_plan)
     atomic_json(public / "collection_errors.json", {"generated_at": iso(now), "run_id": run_id, "stores": collection_errors})
@@ -328,13 +349,13 @@ def aggregate(root: Path, public: Path, run_id: str, now=None) -> dict:
                 "collection_status": statuses["koubou"].get("flyer"), "quantity_scope": "common_flyer_not_store_inventory"})
     atomic_json(public / "evidence.json", {"generated_at": iso(now), "decisions": decisions})
     disk.save(f"metrics/{run_id}.json", index)
-    report = validation(root, now)
+    report = validation(root, now) if scope is None else validation(root, now, scope)
     atomic_json(public / "validation.json", report)
     atomic_json(public / "latest.json", index)
     return index
 
 
-def validation(root: Path, now=None) -> dict:
+def validation(root: Path, now=None, scope=None) -> dict:
     now = now or utcnow()
     snapshots = [read_json(p, {}) for p in (root / "metrics").glob("*.json")]
     snapshots = [s for s in snapshots if timestamp(s.get("generated_at")) and timestamp(s["generated_at"]) <= now]
@@ -374,7 +395,23 @@ def validation(root: Path, now=None) -> dict:
         reasons.append("manual_audit_unresolved_findings")
     if verified_audit["invalid_records"] or verified_audit["declared_count_mismatches"]:
         reasons.append("manual_audit_record_integrity")
-    return {"started_at": iso(start), "earliest_cutover_at": iso(start + timedelta(days=7)), "measured_runs": len(snapshots),
+    report = {"started_at": iso(start), "earliest_cutover_at": iso(start + timedelta(days=7)), "measured_runs": len(snapshots),
             "recent_runs": len(recent), "measured_four_hour_windows": len(sampled), "run_provenance": provenance,
             "coverage": coverage, "manual_review": audit, "manual_review_verified": verified_audit, "cutover_ready": not reasons, "reasons": reasons,
             "amazon_keepa_comparison": {"adoption": "not_enabled", "free_current_conditions_coverage": coverage.get("amazon"), "decision": "measure_free_gaps_before_paid_comparison"}}
+    if scope is not None:
+        scoped = sorted((s for s in recent if s.get("schema_version") == 2),
+                        key=lambda s: timestamp(s["generated_at"]))
+        successful = [s for s in scoped if s.get("run_outcome", {}).get("successful") is True]
+        times = [timestamp(s["generated_at"]) for s in successful]
+        observations = [s.get("run_outcome", {}).get("current_observations", 0) for s in scoped]
+        blockers = ["service_level_undetermined"] + [r for r in reasons if r.startswith("manual_")]
+        report.update(gate_model="scope_v1", comparison_scope_version=scope["version"], cutover_ready=False,
+                      cutover_blockers=blockers,
+                      baseline={"runs": len(scoped), "successful_runs": len(successful),
+                                "max_success_interval_hours": max(((b - a).total_seconds() / 3600
+                                    for a, b in zip(times, times[1:])), default=0),
+                                "current_observations_total": sum(observations),
+                                "current_observations_median": median(observations) if observations else 0,
+                                "latest_success_at": iso(times[-1]) if times else None})
+    return report

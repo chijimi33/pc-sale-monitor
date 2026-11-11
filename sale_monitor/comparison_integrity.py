@@ -52,10 +52,12 @@ def known_comparators(states: dict, history: list[dict], now) -> dict:
     return indexed
 
 
-def missing_comparators(offer: Offer, known: dict, current: dict, now, *, points=False) -> list[dict]:
+def missing_comparators(offer: Offer, known: dict, current: dict, now, *, points=False, in_scope_stores=None) -> list[dict]:
     missing = []
     seen = set()
     for other in known.get(offer.identity, []):
+        if in_scope_stores is not None and other.store not in in_scope_stores:
+            continue
         if other.seller_id == offer.seller_id or not same_product(offer, other) or (not member_price_pending(other) and amount(other, points) is None):
             continue
         key = (other.store, other.key)
@@ -85,3 +87,17 @@ def missing_comparators(offer: Offer, known: dict, current: dict, now, *, points
             item["unverified_member_price"] = True
         missing.append(item)
     return missing
+
+
+def out_of_scope_comparators(offer: Offer, known: dict, in_scope_stores) -> list[dict]:
+    """Describe known excluded sources without turning them into holds."""
+    result, seen = [], set()
+    for other in known.get(offer.identity, []):
+        key = (other.store, other.key)
+        if (other.store in in_scope_stores or key in seen or
+                other.seller_id == offer.seller_id or not same_product(offer, other)):
+            continue
+        seen.add(key)
+        result.append({"store": other.store, "offer_key": other.key, "seller_id": other.seller_id,
+                       "url": other.url, "last_verified_at": None if member_price_pending(other) else other.observed_at})
+    return result
