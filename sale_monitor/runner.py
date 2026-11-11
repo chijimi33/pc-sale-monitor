@@ -132,12 +132,23 @@ class Collector:
     def save(self):
         self.state["checkpoint_at"] = iso()
         self.state["pending_count"] = len(self.state[self.queue_key])
-        self.state["request_count"] = self.client.count
         budget = getattr(self.client, "budget", None)
+        if self.phase is None:
+            self.state["request_count"] = self.client.count
+        else:
+            # Each stage has its own client. Report the run total, and keep a
+            # resumed stage's earlier requests through its restored budget.
+            counts = self.state.get("request_counts", {})
+            counts = dict(counts.get("by_phase", {})) if counts.get("run_id") == self.run_id else {}
+            counts[self.phase] = sum(budget.snapshot().values()) if budget is not None else self.client.count
+            self.state["request_counts"] = {"run_id": self.run_id, "by_phase": counts}
+            self.state["request_count"] = sum(counts.values())
         if budget is not None:
             previous = self.state.get("budget", {})
-            exhausted = previous.get("exhausted_hosts", []) if previous.get("run_id") == self.run_id else []
-            self.state["budget"] = {"run_id": self.run_id, "used": budget.snapshot(),
+            # A stage owns its time budget; usage never carries into another stage.
+            same = previous.get("run_id") == self.run_id and previous.get("phase") == self.phase
+            exhausted = previous.get("exhausted_hosts", []) if same else []
+            self.state["budget"] = {"run_id": self.run_id, "phase": self.phase, "used": budget.snapshot(),
                                     "exhausted_hosts": sorted(set(exhausted) | {
                                         host for host in budget.snapshot() if budget.remaining(host) <= 0})}
         robots = getattr(self.client, "robots", None)
@@ -679,8 +690,10 @@ class Collector:
                     self.budget_exhausted = True
                     host = urlsplit(dependency_url(task, self.cfg) or "").hostname
                     previous = self.state.get("budget", {})
-                    exhausted = previous.get("exhausted_hosts", []) if previous.get("run_id") == self.run_id else []
-                    self.state["budget"] = {"run_id": self.run_id, "exhausted_hosts": sorted(set(exhausted) | ({host} if host else set()))}
+                    same = previous.get("run_id") == self.run_id and previous.get("phase") == self.phase
+                    exhausted = previous.get("exhausted_hosts", []) if same else []
+                    self.state["budget"] = {"run_id": self.run_id, "phase": self.phase,
+                                            "exhausted_hosts": sorted(set(exhausted) | ({host} if host else set()))}
                     self.save()
                     break
                 if isinstance(exc, FetchError) and str(exc) == "robots_disallowed":

@@ -50,6 +50,14 @@ def _validate_run_id(run_id):
         raise ValueError("invalid_run_id")
 
 
+def saved_budget_use(saved: dict, run_id: str, phase: str) -> dict | None:
+    """Resume only the same stage of the same run; each stage has its own budget."""
+    previous = saved.get("budget", {})
+    if previous.get("run_id") == run_id and previous.get("phase") == phase:
+        return previous.get("used")
+    return None
+
+
 def stage(state_root, store, phase, run_id, seconds, config_path, routes_path, plan_path=None) -> dict:
     """Run one active store in the child process, preserving its checkpoint."""
     _validate_run_id(run_id)
@@ -62,9 +70,7 @@ def stage(state_root, store, phase, run_id, seconds, config_path, routes_path, p
         return {"store": store, "phase": phase, "status": "skipped"}
     config = read_json(Path(config_path), None)
     saved = disk.load(f"stores/{store}.json", {})
-    previous = saved.get("budget", {})
-    budget = HostBudget(route_state.config["hosts"], seconds,
-                        used=previous.get("used") if previous.get("run_id") == run_id else None)
+    budget = HostBudget(route_state.config["hosts"], seconds, used=saved_budget_use(saved, run_id, phase))
     policies = saved.get("robots", {})
     responses = dict(policies.get("responses", {})) if policies.get("run_id") == run_id else {}
 

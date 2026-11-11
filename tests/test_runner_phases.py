@@ -186,7 +186,7 @@ class RunnerPhases(unittest.TestCase):
         host = "www.ark-pc.co.jp"
         client = FakeClient(budget=HostBudget({}, 2, used={host: 1}))
         result = self.collector("verification", self.plan(offer()), client).collect(3)
-        self.assertEqual(result["budget"], {"run_id": "run1", "used": {host: 1}, "exhausted_hosts": [host]})
+        self.assertEqual(result["budget"], {"run_id": "run1", "phase": "verification", "used": {host: 1}, "exhausted_hosts": [host]})
         self.assertEqual(result["errors"], [])
         self.assertEqual(result["verification"]["not_reached"], 1)
 

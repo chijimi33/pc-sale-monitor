@@ -93,7 +93,7 @@ class StageTests(Fixture):
     def test_same_run_budget_usage_is_restored_and_next_run_gets_new_budget(self):
         host = "www.ark-pc.co.jp"
         value = self.save_offer(item("ark"))
-        value["budget"] = {"run_id": RUN, "used": {host: 1}, "exhausted_hosts": [host]}
+        value["budget"] = {"run_id": RUN, "phase": "discovery", "used": {host: 1}, "exhausted_hosts": [host]}
         self.disk.save("stores/ark.json", value)
         clients = []
 
@@ -117,16 +117,31 @@ class StageTests(Fixture):
         self.assertGreater(result["budget"]["used"][host], 0)
         self.assertEqual(result["budget"]["run_id"], "next-run")
 
-    def test_verification_budget_uses_saved_discovery_usage(self):
+    def test_verification_resumes_its_own_usage_within_the_same_run(self):
         peer = item("ark", discovery_kind="comparison")
         state = self.save_offer(peer)
-        state["budget"] = {"run_id": RUN, "used": {"www.ark-pc.co.jp": 1}}
+        state["budget"] = {"run_id": RUN, "phase": "verification", "used": {"www.ark-pc.co.jp": 1}}
         self.disk.save("stores/ark.json", state)
         with patch("sale_monitor.pipeline.Client", side_effect=FakeClient):
             result = self.stage(phase="verification", plan_path=self.plan_file(peer))
         self.assertEqual(result["budget"]["used"], {"www.ark-pc.co.jp": 1})
         self.assertEqual(result["verification"]["not_reached"], 1)
         self.assertEqual(result["errors"], [])
+
+    def test_exhausted_discovery_budget_does_not_starve_verification(self):
+        # Each stage is given its own time budget. Carrying discovery usage
+        # over would stop verification before its first planned request.
+        peer = item("ark", discovery_kind="comparison")
+        state = self.save_offer(peer)
+        state["budget"] = {"run_id": RUN, "phase": "discovery", "used": {"www.ark-pc.co.jp": 1},
+                           "exhausted_hosts": ["www.ark-pc.co.jp"]}
+        self.disk.save("stores/ark.json", state)
+        with patch("sale_monitor.pipeline.Client", side_effect=FakeClient), patch(
+                "sale_monitor.runner.parse_product", return_value=peer):
+            result = self.stage(phase="verification", plan_path=self.plan_file(peer))
+        self.assertEqual(result["budget"]["phase"], "verification")
+        self.assertEqual(result["verification"]["not_reached"], 0)
+        self.assertEqual([row["result"] for row in result["verification"]["results"].values()], ["ok"])
 
     def test_missing_or_wrong_run_verification_plan_is_rejected(self):
         with self.assertRaisesRegex(ValueError, "verification_plan_required"):

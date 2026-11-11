@@ -211,6 +211,10 @@ def aggregate(root: Path, public: Path, run_id: str, now=None, scope: dict | Non
             statuses[name].update(status="paused", cycle_complete=False, route_status=scope["paused_stores"][name],
                                   route_reason=route.get("reason"), archived_count=len(archive.get("entries", [])))
             state = {**state, "status": "paused", "cycle_complete": False}
+            if state.get("run_id") != run_id:
+                # Failures recorded before the pause are not current findings.
+                statuses[name].update(errors=[], waiting_dependencies=[])
+                state = {**state, "errors": [], "discovery_gaps": []}
         comparison_routing[name] = {"run_id": state.get("run_id"), "checkpoint_at": state.get("checkpoint_at"),
                                     "status": state.get("status", "not_run"),
                                     "comparison_routing": state.get("comparison_routing")}
