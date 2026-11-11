@@ -154,7 +154,7 @@ class CollectionDeadline(unittest.TestCase):
         self.assertLess(migrate, saved)
         self.assertLess(saved, run)
         after_run = workflow[run:]
-        self.assertIn('        if: always()\n        run: python scripts/state_branch.py publish\n', after_run)
+        self.assertIn('        if: always()\n        run: if [ -d state-repo/.git ]; then python scripts/state_branch.py publish;', after_run)
         self.assertIn('      - uses: actions/upload-artifact@v4\n        if: always()', after_run)
 
     @unittest.skipUnless(os.name == 'posix', 'CI Linux process-group cleanup')
