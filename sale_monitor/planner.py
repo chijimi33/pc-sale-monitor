@@ -191,28 +191,38 @@ def update_tracking(tracking: dict, plan: dict, current: list[Offer], failed: di
     # Fetching the page is not enough: an unidentified product, a different
     # kind of identifier, or unknown purchase conditions all remain open.
     observations = [o for o in current if o.observed_run_id == plan["run_id"]]
-    by_url = {(o.store, o.url): o for o in observations}
+    by_url, by_key, verified_keys = {}, {}, {}
+    for offer in observations:
+        by_url.setdefault((offer.store, offer.url), []).append(offer)
+        by_key.setdefault((offer.store, offer.key), []).append(offer)
+    for store, discovery in (discoveries or {}).items():
+        for row in discovery.get("verified", []):
+            if isinstance(row, dict) and row.get("offer_key"):
+                verified_keys.setdefault((row["identity"], store, row["url"]), set()).add(row["offer_key"])
 
     def settled(identity, store, url):
-        offer = by_url.get((store, url))
-        if offer is None or not offer.identity:
+        offers = list(by_url.get((store, url), []))
+        for key in verified_keys.get((identity, store, url), set()):
+            offers.extend(by_key.get((store, key), []))
+        if not offers or any(not o.identity or o.identity.split(":", 1)[0] != identity.split(":", 1)[0] for o in offers):
             return None
-        if offer.identity != identity:
-            same_kind = offer.identity.split(":", 1)[0] == identity.split(":", 1)[0]
-            return {"reason": "identity_mismatch", "observed_identity": offer.identity} if same_kind else None
+        matching = [o for o in offers if o.identity == identity]
+        if not matching:
+            return {"reason": "identity_mismatch", "observed_identity": sorted({o.identity for o in offers})[0]}
         # The same identifier does not prove the same configuration. Hand the
         # obligation to the known-comparator rule only when every current sale
         # candidate is the same product; otherwise that rule would skip it.
         candidates = [c for c in observations if c.identity == identity and c.store != store
                       and c.discovery_kind != "comparison"]
-        if not candidates or not all(same_product(c, offer) for c in candidates):
+        if not candidates or not all(same_product(c, o) for c in candidates for o in matching):
             return None
-        if not offer.errors(now):
-            return {"reason": "became_known_comparator", "offer_key": offer.key}
+        key = sorted({o.key for o in matching})[0]
+        if all(not o.errors(now) for o in matching):
+            return {"reason": "became_known_comparator", "offer_key": key}
         # A verified sell-out answers this run only. The URL stays an open
         # obligation, so a later restock is checked instead of being forgotten.
-        ended = offer.stock == "out_of_stock" and offer.verified and offer.evidence and not offer.issues
-        return {"reason": "ended_this_run", "offer_key": offer.key} if ended else None
+        ended = all(o.stock == "out_of_stock" and o.verified and o.evidence and not o.issues for o in matching)
+        return {"reason": "ended_this_run", "offer_key": key} if ended else None
 
     for store, discovery in sorted((discoveries or {}).items()):
         for row in list(discovery.get("unverified", [])) + [r for r in discovery.get("verified", []) if isinstance(r, dict)]:

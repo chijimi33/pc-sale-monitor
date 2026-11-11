@@ -47,21 +47,28 @@ def new_dependency(task: dict, **updates) -> dict:
              "retry_at_epoch_seconds")}
 
 
+def _plan_identities(task: dict) -> list[str]:
+    """Read both current and legacy request provenance."""
+    return sorted(set(task.get("plan_identities", [])) | ({task["plan_identity"]} if task.get("plan_identity") else set()))
+
+
 def record_unverified_discoveries(state: dict) -> None:
     """Retain unresolved exploration products before discarding the stage queue."""
     verification = state["verification"]
     pending = {(row["identity"], row["url"]): row for row in verification.get("unverified_discoveries", [])}
-    verified = set(verification.get("verified_discoveries", []))
+    # Legacy URL-only receipts cannot prove which identity was verified.
+    verified = {(row["identity"], row["url"]) for row in verification.get("verified_discoveries", [])
+                if isinstance(row, dict)}
     for task_id, task in state.get("verification_queue", {}).items():
-        if task.get("type") != "product" or not task.get("plan_identity") or "plan_offer_key" in task:
+        if task.get("type") != "product" or "plan_offer_key" in task:
             continue
         result = verification.get("results", {}).get(task_id, {})
         if result.get("result") != "ok":
-            row = {"identity": task["plan_identity"], "url": task["url"],
-                   "reason": result.get("reason") or "not_reached"}
-            pending[row["identity"], row["url"]] = row
-    verification["unverified_discoveries"] = [row for key, row in sorted(pending.items()) if row["url"] not in verified]
-    verification["verified_discoveries"] = sorted(verified)
+            for identity in _plan_identities(task):
+                row = {"identity": identity, "url": task["url"], "reason": result.get("reason") or "not_reached"}
+                pending[identity, row["url"]] = row
+    verification["unverified_discoveries"] = [row for key, row in sorted(pending.items()) if key not in verified]
+    verification["verified_discoveries"] = [{"identity": identity, "url": url} for identity, url in sorted(verified)]
 
 
 class Collector:
@@ -195,8 +202,9 @@ class Collector:
         self.disk.save(self.name, self.state)
 
     def enqueue(self, task: dict, relisted: bool = False):
-        if self.phase == "verification" and getattr(self, "active_task", None):
-            task = {**{key: self.active_task[key] for key in ("plan_identity",) if key in self.active_task}, **task}
+        if self.phase == "verification":
+            identities = sorted(set(_plan_identities(task)) | set(_plan_identities(getattr(self, "active_task", None) or {})))
+            task = {**task, "plan_identities": identities, "plan_identity": identities[0] if identities else None}
         if self.phase == "discovery" and task.get("kind") == "comparison":
             return None
         if task.get("url") and not allowed_url(task["url"]):
@@ -207,6 +215,12 @@ class Collector:
         task_id = digest([task["type"], task.get("url"), task.get("query"), task.get("start"), task.get("kind"), task.get("item", {}).get("product_id")])[:24]
         if task_id in self.state[self.queue_key]:
             existing = self.state[self.queue_key][task_id]
+            if self.phase == "verification":
+                identities = sorted(set(_plan_identities(existing)) | set(_plan_identities(task)))
+                existing.update(plan_identities=identities, plan_identity=identities[0] if identities else None)
+                receipt = self.state["verification"]["results"].get(task_id)
+                if receipt is not None:
+                    receipt.update(plan_identities=identities, plan_identity=identities[0] if identities else None)
             if relisted:
                 existing["relisted_run_id"] = self.run_id
             if task.get("priority", 3) < existing.get("priority", 3):
@@ -223,6 +237,18 @@ class Collector:
                     existing["discovery_origin"] = deepcopy(task["discovery_origin"])
         elif task_id not in self.state[self.done_key]:
             self.state[self.queue_key][task_id] = {"created_at": iso(), "attempts": 0, **task}
+        elif self.phase == "verification":
+            receipt = self.state["verification"]["results"].get(task_id, {})
+            identities = sorted(set(_plan_identities(receipt)) | set(_plan_identities(task)))
+            if identities != _plan_identities(receipt):
+                task = {**task, "plan_identities": identities, "plan_identity": identities[0]}
+                if task["type"] == "product":
+                    self._verification_result(task_id, {**receipt, **task}, receipt["result"], receipt["reason"])
+                else:
+                    # Replay traversal for new owners through the shared page cache.
+                    self.state[self.done_key].remove(task_id)
+                    self.state[self.queue_key][task_id] = {"created_at": iso(), "attempts": 0, **task}
+                    self.attempted.discard(task_id)
         return task_id
 
     def record(self, offer: Offer):
@@ -241,6 +267,8 @@ class Collector:
         self.state["offers"][offer.key] = row
         observation_id = digest([offer.key, offer.observed_at, row])
         self.state["journal"].append({"observation_id": observation_id, "run_id": self.run_id, "offer": deepcopy(row)})
+        if self.phase == "verification" and self.active_task and self.active_task["type"] == "product":
+            self.active_task.update(observed_offer_key=offer.key, observed_url=offer.url)
         if previous is None:
             priority = "new"
         elif previous.get("stock") == "out_of_stock" and offer.stock == "in_stock":
@@ -819,21 +847,26 @@ class Collector:
             return
         verification = self.state["verification"]
         url = task.get("url") or dependency_url(task, self.cfg)
-        verification["results"][task_id] = {"url": url, "plan_identity": task.get("plan_identity"),
+        identities = _plan_identities(task)
+        verification["results"][task_id] = {"url": url, "plan_identity": identities[0] if identities else None,
+                                            "plan_identities": identities,
                                             "type": task["type"], "result": result, "reason": reason}
-        if task["type"] == "product" and task.get("plan_identity"):
+        if task["type"] == "product" and result == "ok":
+            verification["results"][task_id].update({key: task[key] for key in ("observed_offer_key", "observed_url") if key in task})
+        if task["type"] == "product" and identities:
             if result == "ok":
-                verification["verified_discoveries"] = sorted(set(verification.get("verified_discoveries", [])) | {url})
+                record_unverified_discoveries(self.state)
+                verification["verified_discoveries"].extend({"identity": identity, "url": url} for identity in identities)
             elif "plan_offer_key" not in task:
                 pending = verification.setdefault("unverified_discoveries", [])
-                pending[:] = [row for row in pending if (row["identity"], row["url"]) != (task["plan_identity"], url)]
-                pending.append({"identity": task["plan_identity"], "url": url, "reason": reason})
+                pending[:] = [row for row in pending if (row["identity"], row["url"]) not in {(identity, url) for identity in identities}]
+                pending.extend({"identity": identity, "url": url, "reason": reason} for identity in identities)
             record_unverified_discoveries(self.state)
         verification["failed_urls"] = sorted({row["url"] for row in verification["results"].values()
                                               if row["result"] == "failed" and row["url"]})
-        verification["searched_identities"] = sorted({row["plan_identity"] for row in verification["results"].values()
+        verification["searched_identities"] = sorted({identity for row in verification["results"].values()
             if row["result"] == "ok" and (row["type"] in ("koubou_search", "list") or
-                row["type"] == "search" and self.store == "koubou") and row["plan_identity"]})
+                row["type"] == "search" and self.store == "koubou") for identity in _plan_identities(row)})
 
     def _finish_verification(self):
         if self.phase == "verification":

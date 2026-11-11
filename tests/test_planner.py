@@ -284,6 +284,90 @@ class PlannerTests(unittest.TestCase):
 
 
 class TrackingTests(unittest.TestCase):
+    def track_observations(self, observations, *, requested=None, receipts=None):
+        candidate = offer()
+        url = requested or "https://bic.example/found"
+        tracking = {candidate.identity: {"bic": {"unverified_urls": [url]}}}
+        discoveries = {"bic": {"verified": receipts or []}}
+        before = deepcopy((tracking, observations, discoveries))
+        result = update_tracking(tracking, build(peers=[]), [candidate, *observations], {}, {}, NOW, discoveries)
+        self.assertEqual((tracking, observations, discoveries), before)
+        return result[candidate.identity]["bic"]
+
+    def test_all_observations_at_shared_url_are_considered_in_any_order(self):
+        url = "https://bic.example/found"
+        unresolved = offer("bic", url=url, shipping_yen=None)
+        mismatch = offer("bic", url=url, model="MODEL-B", product_id="other")
+        for observations in ([unresolved, mismatch], [mismatch, unresolved]):
+            with self.subTest(order=[o.model for o in observations]):
+                self.assertEqual(self.track_observations(observations)["unverified_urls"], [url])
+        for observations, reason in (([mismatch, mismatch], "identity_mismatch"),
+                                     ([offer("bic", url=url)] * 2, "became_known_comparator")):
+            with self.subTest(reason=reason):
+                values = self.track_observations(observations)
+                self.assertEqual(values["unverified_urls"], [])
+                self.assertEqual(values["settled_urls"][0]["reason"], reason)
+
+    def test_unknown_or_different_identity_kind_in_any_observation_prevents_release(self):
+        url = "https://bic.example/found"
+        for extra in (offer("bic", url=url, model=None), offer("bic", url=url, jan="4943765048398")):
+            for found in (offer("bic", url=url), offer("bic", url=url, model="MODEL-B"),
+                          offer("bic", url=url, stock="out_of_stock")):
+                with self.subTest(extra=extra.identity, found=found.stock):
+                    values = self.track_observations([found, extra])
+                    self.assertEqual(values["unverified_urls"], [url])
+                    self.assertEqual(values["ended_urls"], {})
+
+    def test_every_matching_observation_must_meet_the_same_release_condition(self):
+        url = "https://bic.example/found"
+        good = offer("bic", url=url)
+        ended = offer("bic", url=url, stock="out_of_stock")
+        for observations in ([good, offer("bic", url=url, shipping_yen=None)],
+                             [good, offer("bic", url=url, variant="bundle")],
+                             [ended, offer("bic", url=url, stock="out_of_stock", verified=False)],
+                             [ended, offer("bic", url=url, stock="out_of_stock", issues=["unknown"])],
+                             [good, ended]):
+            with self.subTest(observations=observations):
+                values = self.track_observations(observations)
+                self.assertEqual(values["unverified_urls"], [url])
+                self.assertEqual(values["ended_urls"], {})
+        values = self.track_observations([ended, ended])
+        self.assertEqual(values["unverified_urls"], [url])
+        self.assertEqual(values["ended_urls"], {url: RUN})
+
+    def test_redirect_receipts_resolve_only_current_observations_for_that_identity_and_store(self):
+        requested = "https://bic.example/requested"
+        for changes, reason in (({}, "became_known_comparator"), ({"model": "MODEL-B"}, "identity_mismatch"),
+                                ({"stock": "out_of_stock"}, "ended_this_run")):
+            for valid in (True, False):
+                with self.subTest(changes=changes, valid=valid):
+                    found = offer("bic", url="https://bic.example/redirected", observed_run_id=RUN if valid else "old", **changes)
+                    receipt = {"identity": offer().identity, "url": requested, "offer_key": found.key}
+                    values = self.track_observations([found], requested=requested, receipts=[receipt])
+                    if not valid:
+                        self.assertEqual(values["unverified_urls"], [requested])
+                        self.assertEqual(values["ended_urls"], {})
+                    elif reason == "ended_this_run":
+                        self.assertEqual(values["ended_urls"], {requested: RUN})
+                    else:
+                        self.assertEqual(values["unverified_urls"], [])
+                        self.assertEqual(values["settled_urls"][0]["reason"], reason)
+        found = offer("bic", url="https://bic.example/redirected")
+        for receipt in ({"identity": offer().identity, "url": requested},
+                        {"identity": offer(model="MODEL-B").identity, "url": requested, "offer_key": found.key},
+                        {"identity": offer().identity, "url": requested, "offer_key": "missing"}):
+            with self.subTest(receipt=receipt):
+                values = self.track_observations([found], requested=requested, receipts=[receipt])
+                self.assertEqual(values["unverified_urls"], [requested])
+
+    def test_url_and_redirect_observations_are_combined_without_losing_unresolved_evidence(self):
+        url = "https://bic.example/found"
+        found = offer("bic", url="https://bic.example/redirected", product_id="redirected")
+        unresolved = offer("bic", url=url, shipping_yen=None)
+        receipt = {"identity": offer().identity, "url": url, "offer_key": found.key}
+        values = self.track_observations([unresolved, found], receipts=[receipt])
+        self.assertEqual(values["unverified_urls"], [url])
+
     def test_discoveries_merge_without_mutating_inputs_and_fetching_alone_settles_nothing(self):
         candidate = offer()
         tracking = {candidate.identity: {"bic": {"unverified_urls": ["done", "pending"]},
