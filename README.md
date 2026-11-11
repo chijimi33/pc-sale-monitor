@@ -77,7 +77,7 @@ A/Bの数値基準は不変ですが、比較範囲を「10店すべて」から
 
 robots.txtはrun・ホストごとに1回取得し、Disallowの対象にはアクセスしません。401/403以外の4xxは制限なし、5xx・タイムアウト・401/403はそのrunのホスト取得を停止します。403やアクセス確認画面などの明示拒否後は同じrunでブラウザーへ進みません。ボット検知の回避は実装しません。
 
-段階Dが失敗しても収集済み状態を保存する設計です。書き手は常に1つとします。新設計による一連の実行・保存・公開は未実証です。
+段階Dが失敗しても、収集済みの状態は保存されます。書き手は常に1つです。予算は段階ごとに持ち、発見段階の使用数は確認段階へ繰り越しません。運用の実績は公開JSONの `run_outcome` と `validation.json` の `baseline` で確認します。
 
 ## 実行方法
 
@@ -91,18 +91,20 @@ python -m playwright install chromium
 python -m unittest discover -s tests -v
 ```
 
-以下は**新CLIの実装反映後に使う手順**です。この作業ツリーでは `pipeline.py` とCLIの `run`・`stage`・`migrate`・`probe` はまだ未実装で、下記コマンドの実行成功は未実証です。経路・予算・移行・計画・履歴評価・scope付き集計のモジュールはあります。段階別実行の仕様は設計書3章を参照してください。
+定期実行は `.github/workflows/monitor.yml` が1ジョブで行います。手元で動かす場合のコマンドは次のとおりです。
 
 ```sh
-python -m sale_monitor.cli run --state <dir> --public <dir> --run-id <id>
-python -m sale_monitor.cli migrate --state <dir> --input-sha <最終データSHA>
-python -m sale_monitor.cli migrate --state <dir> --revert
-python -m sale_monitor.cli probe --route <route_id>
+python -m sale_monitor.cli migrate --state <状態の保存先> --input-sha <移行前のデータSHA>
+python -m sale_monitor.cli run --state <状態の保存先> --public <公開先> --run-id <id>
+python -m sale_monitor.cli probe --state <状態の保存先> --route <route_id>
+python -m sale_monitor.cli migrate --state <状態の保存先> --revert
 ```
 
-`<dir>` は状態保存先と公開先をそれぞれ指定します。移行前には旧方式の自動改修・状態更新を停止し、実行中・待機中の書き手がないことを確認します。最終データSHAと復元地点を固定し、移行後に履歴・観測・未反映journal・イベントID・配信状態の保持を確認します。停止経路の旧タスクと廃止した比較依頼は削除せず `state/archive/` へ退避します。撤回時は戻すコードと状態の組も明記します。移行完了は正式切替と別に記録します。
+`run` は状態スキーマが版2でなければ `state_migration_required` で停止し、何も書きません。先に `migrate` を実行します。`migrate` は、停止中の経路の旧タスクと廃止した比較依頼を削除せず `state/archive/` へ退避します。履歴・観測・未反映journal・イベントが変わらないことを指紋で照合し、一致しなければ変更を書き戻します。2回実行しても結果は変わりません。`--revert` は退避したタスクを元のキューへ戻します。ワークフローは毎回 `migrate` を実行し、その結果を収集の前に保存します。
 
-旧 `collect` / `aggregate` は互換のため残っていますが、新設計の定期実行では使いません。このツリーの `.github/workflows/monitor.yml` はまだ旧店舗別ジョブ構成で、新設計へ反映済みとは扱いません。
+`probe` は人の判断で行う1回だけの疎通確認です。`paused_refused` の経路に自動の疎通確認は行いません。
+
+旧 `collect` / `aggregate` は互換のため残っていますが、定期実行では使いません。
 
 ### 実装上の注記
 
