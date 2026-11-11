@@ -140,6 +140,7 @@ def update_tracking(tracking: dict, plan: dict, current: list[Offer], failed: di
     """Apply reached requests only, keeping the supplied tracking unchanged."""
     result = deepcopy(tracking)
     observed = {(o.store, o.url) for o in current if o.observed_run_id == plan["run_id"]}
+    observed_keys = {(o.store, o.key) for o in current if o.observed_run_id == plan["run_id"]}
     updated_at = iso(now)
 
     def entry(identity, store):
@@ -149,7 +150,8 @@ def update_tracking(tracking: dict, plan: dict, current: list[Offer], failed: di
     outcomes = {}
     for store, requests in plan["confirm"].items():
         for request in requests:
-            success = (store, request["url"]) in observed
+            success = ((store, request["url"]) in observed or
+                       (store, request.get("offer_key")) in observed_keys)
             failure = request["url"] in failed.get(store, set())
             if success or failure:
                 values = outcomes.setdefault((request["identity"], store), [False, 0])

@@ -279,8 +279,14 @@ class TrackingTests(unittest.TestCase):
         result = update_tracking({}, build(peers=[peer]), [observed], {}, {}, NOW)
         self.assertEqual(result[peer.identity]["bic"]["last_success_at"], iso(NOW))
 
-    def test_observation_of_different_url_does_not_complete_request(self):
-        peer = offer("bic", url="https://bic.example/not-requested")
+    def test_same_offer_at_a_changed_url_completes_request(self):
+        # A redirect can change the URL spelling of the planned offer.
+        peer = offer("bic", url="https://bic.example/redirected")
+        result = update_tracking({}, build(), [peer], {}, {}, NOW)
+        self.assertEqual(result[peer.identity]["bic"]["last_success_at"], iso(NOW))
+
+    def test_observation_of_another_offer_and_url_does_not_complete_request(self):
+        peer = offer("bic", product_id="unrelated", url="https://bic.example/not-requested")
         self.assertEqual(update_tracking({}, build(), [peer], {}, {}, NOW), {})
 
     def test_partial_success_retains_failure_for_incomplete_bundle(self):

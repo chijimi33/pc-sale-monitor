@@ -335,6 +335,15 @@ def parse_product(store: str, page: Page, cfg: dict, discovery: dict | None = No
     if store == "dospara":
         if first(tree, '//*[contains(concat(" ",normalize-space(@class)," ")," free_shipping ")]') == "送料無料":
             offer.shipping_yen = 0
+        if discovery is not None:
+            # A product reached by a plain product task has not gone through the
+            # dedicated coupon verification. A coupon shown on this page would
+            # make the printed price an overstated comparator, so hold it.
+            from .vendor import dospara_coupon_tool as vendor
+            snapshot = vendor.extract_product_page_snapshot(page.text)
+            shown = snapshot is not None and snapshot.product_id and vendor.extract_product_page_coupon(page.text, snapshot.product_id)
+            if shown or snapshot is None and "couponcode" in page.text:
+                offer.issues.append("coupon_unverified_on_product_page")
         # Preserve the full displayed model string. A series name or inferred
         # abbreviated CPU name is never equated with a full part number.
         labels = tree.xpath('//h1[contains(@class,"product-show-detail")]')
