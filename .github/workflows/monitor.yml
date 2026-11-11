@@ -46,8 +46,16 @@ jobs:
         with:
           python-version: '3.12'
       - run: pip install -e .
-      - run: python -m playwright install --with-deps chromium
-      - run: sudo apt-get update && sudo apt-get install -y tesseract-ocr tesseract-ocr-jpn poppler-utils
+      - name: Install the browser and OCR tools (retry transient package failures)
+        run: |
+          for attempt in 1 2 3; do
+            if python -m playwright install --with-deps chromium               && sudo apt-get update               && sudo apt-get install -y tesseract-ocr tesseract-ocr-jpn poppler-utils; then
+              exit 0
+            fi
+            echo "setup attempt $attempt failed"
+            sleep 20
+          done
+          exit 1
       - run: python scripts/state_branch.py prepare
       - name: Archive legacy queues (idempotent, keeps history and events unchanged)
         run: python -m sale_monitor.cli migrate --state state-repo/state --input-sha "$(git -C state-repo rev-parse HEAD)"
@@ -59,7 +67,7 @@ jobs:
         run: python -m sale_monitor.cli run --state state-repo/state --public state-repo/public --run-id "$RUN_ID"
       - name: Save collected state even when the run failed
         if: always()
-        run: python scripts/state_branch.py publish
+        run: if [ -d state-repo/.git ]; then python scripts/state_branch.py publish; else echo "state was never fetched; nothing to save"; fi
       - uses: actions/upload-artifact@v4
         if: always()
         with:
