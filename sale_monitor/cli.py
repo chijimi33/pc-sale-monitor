@@ -13,10 +13,16 @@ from .storage import Store, read_json
 
 def main(argv=None):
     parser = argparse.ArgumentParser(description="10店の特価監視。楽天価格取得は対象外。")
-    parser.add_argument("command", choices=["collect", "checkpoint", "aggregate", "validate", "ack"])
+    parser.add_argument("command", choices=["collect", "checkpoint", "aggregate", "validate", "ack", "run", "stage", "migrate", "probe"])
     parser.add_argument("--state", type=Path, default=Path("data"))
     parser.add_argument("--public", type=Path, default=Path("public"))
     parser.add_argument("--config", type=Path, default=Path("config/sources.json"))
+    parser.add_argument("--routes", type=Path, default=Path("config/routes.json"))
+    parser.add_argument("--phase", choices=["discovery", "verification"])
+    parser.add_argument("--plan", type=Path)
+    parser.add_argument("--input-sha")
+    parser.add_argument("--revert", action="store_true")
+    parser.add_argument("--route")
     parser.add_argument("--store", choices=STORES)
     parser.add_argument("--incoming", type=Path)
     parser.add_argument("--seconds", type=int, default=2100, help="Runner時間制限。中断位置は永続化し次回再開。Web呼出数の上限ではない。")
@@ -40,6 +46,45 @@ def main(argv=None):
             from .transport_diagnostic import save_after_collection
             save_after_collection(collector)
         print(json.dumps({"store": args.store, "status": result["status"], "offers": len(result["offers"]), "pending": len(result["queue"]), "errors": result["errors"]}, ensure_ascii=False))
+    elif args.command == "run":
+        from . import pipeline
+        result = pipeline.run(args.state, args.public, args.run_id, config_path=args.config, routes_path=args.routes)
+        print(json.dumps({"run_id": args.run_id, "run_outcome": result["run_outcome"],
+                          "notification_count": result["notification_count"],
+                          "stage_results": result["run"]["stage_results"]}, ensure_ascii=False))
+    elif args.command == "stage":
+        from . import pipeline
+        if not args.store or not args.phase:
+            parser.error("stage requires --store and --phase")
+        if args.seconds < 0:
+            parser.error("stage requires nonnegative --seconds")
+        result = pipeline.stage(args.state, args.store, args.phase, args.run_id, args.seconds,
+                                args.config, args.routes, args.plan)
+        print(json.dumps({"store": args.store, "phase": args.phase, "status": result["status"],
+                          "verification": result.get("verification")}, ensure_ascii=False))
+    elif args.command == "migrate":
+        from . import migrate, routes
+        result = migrate.revert(args.state) if args.revert else migrate.apply(
+            args.state, routes.RouteState(Store(args.state), routes.load_config(args.routes)), args.input_sha)
+        print(json.dumps(result, ensure_ascii=False))
+    elif args.command == "probe":
+        from . import routes
+        from .http import Client
+        route_state = routes.RouteState(Store(args.state), routes.load_config(args.routes))
+        if args.route not in route_state.routes:
+            parser.error("probe requires a known --route")
+        route = route_state.routes[args.route]
+        if not route.get("probe"):
+            config = read_json(args.config, {})
+            source = config.get("stores", {}).get(route["store"], {})
+            url = next(iter(source.get("seed_urls", [])), source.get("source_url"))
+            if not url:
+                parser.error("route has no probe URL configured")
+            route = {**route, "probe": {"url": url}}
+        result = routes.probe(Client(browser=False), args.route, route)
+        route_state.record_probe(args.route, result, utcnow())
+        route_state.save()
+        print(json.dumps(result, ensure_ascii=False))
     elif args.command == "checkpoint":
         if args.incoming is None:
             parser.error("checkpoint requires --incoming")

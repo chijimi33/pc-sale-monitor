@@ -119,6 +119,10 @@ class Client:
 
     def _check_robots(self, url: str):
         if self.robots is not None:
+            # Robots treats unreadable policies as denial. An empty request
+            # budget must remain a budget outcome, not a policy refusal.
+            if self.budget is not None and self.budget.remaining(urlsplit(url).hostname) <= 0:
+                raise FetchError("host_budget_exhausted")
             allowed = self.robots.allowed(url)
             if self.budget is not None:
                 self.budget.set_crawl_delay(urlsplit(url).hostname, self.robots.crawl_delay(urlsplit(url).hostname))
