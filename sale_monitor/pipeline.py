@@ -128,16 +128,14 @@ def _kill_remaining_process_group(process):
 def _await_leader_exit(process, seconds):
     """Give TERM time to close browsers, without reaping the leader's PID."""
     waitid = getattr(os, "waitid", None)
-    deadline = time.monotonic() + seconds
-    while time.monotonic() < deadline:
-        if waitid is None:
-            time.sleep(min(0.2, max(0, deadline - time.monotonic())))
-            continue
-        try:
-            if waitid(os.P_PID, process.pid, os.WEXITED | os.WNOWAIT | os.WNOHANG) is not None:
+    # Bounded by iterations, not by a clock a caller may have frozen.
+    for _ in range(int(seconds * 10)):
+        if waitid is not None:
+            try:
+                if waitid(os.P_PID, process.pid, os.WEXITED | os.WNOWAIT | os.WNOHANG) is not None:
+                    return
+            except (ChildProcessError, OSError, TypeError, ValueError):
                 return
-        except (ChildProcessError, OSError):
-            return
         time.sleep(0.1)
 
 
