@@ -83,12 +83,20 @@ class KoubouNotFound(unittest.TestCase):
                 self.assertEqual(fake.browser, 1)
 
     def test_other_status_does_not_trigger_the_404_shortcut(self):
-        for status in [200, 403, 500]:
+        for status in [200, 500]:
             with self.subTest(status=status), tempfile.TemporaryDirectory() as d:
                 fake = Fake(Page(URL, BODY, NOW, status=status))
                 c = Collector(Path(d), 'koubou', CFG, 'one', fake)
                 c.page(URL)
                 self.assertEqual(fake.browser, 0 if status == 200 else 1)
+
+    def test_explicit_refusal_never_falls_back_to_the_browser(self):
+        with tempfile.TemporaryDirectory() as d:
+            fake = Fake(Page(URL, BODY, NOW, status=403))
+            c = Collector(Path(d), 'koubou', CFG, 'one', fake)
+            with self.assertRaisesRegex(FetchError, '^http_403$'):
+                c.page(URL)
+            self.assertEqual(fake.browser, 0)
 
     def test_missing_response_body_keeps_browser_fallback(self):
         with tempfile.TemporaryDirectory() as d:

@@ -316,7 +316,11 @@ class Collector:
                         # Keep the task and this response as a failed fetch;
                         # a known server 404 does not need another navigation.
                         raise
-                    if not allow_browser or str(exc) in ("rate_limited_retry_later", "store_maintenance") or str(exc).startswith(("transport_retry_later:", "access_retry_later:")) or (exc.page is not None and confirmed_empty_search(self.store, exc.page)) or not self.cfg.get("browser_fallback"):
+                    if str(exc) == "amazon_access_challenge":
+                        if not isinstance(getattr(self.client, "refused_hosts", None), set):
+                            self.client.refused_hosts = set()
+                        self.client.refused_hosts.add(urlsplit(url).hostname)
+                    if not allow_browser or str(exc) in ("http_403", "amazon_access_challenge", "robots_disallowed", "host_budget_exhausted", "browser_blocked_after_refusal", "rate_limited_retry_later", "store_maintenance") or str(exc).startswith(("transport_retry_later:", "access_retry_later:")) or (exc.page is not None and confirmed_empty_search(self.store, exc.page)) or not self.cfg.get("browser_fallback"):
                         raise
                     self.pages[url] = self.client.rendered(url)
             except Exception as exc:
@@ -630,6 +634,11 @@ class Collector:
                             row["issues"] = sorted(set(row.get("issues", []) + ["latest_fetch_failed"]))
                 if self.store == "amazon" and reason == "amazon_access_challenge":
                     page = exc.page if isinstance(exc, FetchError) else None
+                    if not isinstance(getattr(self.client, "refused_hosts", None), set):
+                        self.client.refused_hosts = set()
+                    refused_url = task.get("url") or (page.url if page else None)
+                    if refused_url:
+                        self.client.refused_hosts.add(urlsplit(refused_url).hostname)
                     self.state["access_block"] = {
                         "run_id": self.run_id, "reason": reason, "url": task.get("url"),
                         "checked_at": page.observed_at if page else iso(),
