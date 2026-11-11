@@ -17,7 +17,7 @@ from . import comparison_integrity, migrate, planner, reporting, routes
 from .budget import HostBudget, Robots
 from .http import Client
 from .models import STORES, Offer, fresh, iso, utcnow
-from .runner import Collector
+from .runner import Collector, record_unverified_discoveries
 from .storage import Store, read_json
 
 
@@ -196,6 +196,7 @@ def _finish_interrupted_verification(disk, store, run_id):
     state = disk.load(f"stores/{store}.json", {})
     verification = state.get("verification", {})
     if verification.get("run_id") == run_id:
+        record_unverified_discoveries(state)
         verification["not_reached"] = verification.get("not_reached", 0) + sum(
             key not in verification["results"] for key in state.get("verification_queue", {}))
         state["verification_queue"] = {}
@@ -288,19 +289,21 @@ def run(state_root: Path, public: Path, run_id: str, *, config_path=Path("config
 
     now = fixed_now or utcnow()
     states, current, changes = _observations(disk, run_id, now)
-    historical = [row for row in disk.history() if row.get("run_id") != run_id]
+    historical = reporting.historical_rows(disk, states, run_id)
     known = comparison_integrity.known_comparators(states, historical, now)
     _, history_by_identity = reporting.comparison_inputs_by_identity(current, historical)
     scope = route_state.scope()
     scope_stores = scope["in_scope_stores"]
+    verifiable_stores = scope["verifiable_stores"]
     lookup_stores = [store for store in scope_stores if route_state.is_active(store, "comparison_lookup", _channel(store))]
     budget = HostBudget(routes_config["hosts"], verification_seconds)
     budgets = {store: budget.limit("www.dospara.co.jp" if store == "dospara" else
-               urlsplit(config["stores"][store]["seed_urls"][0]).hostname) for store in scope_stores}
+               urlsplit(config["stores"][store]["seed_urls"][0]).hostname) for store in verifiable_stores}
     tracking = disk.load("comparison_tracking.json", {})
     comparison_plan = planner.plan([o for o in current if o.discovery_kind != "comparison" and o.channel == "online"],
         current, known, history_by_identity, scope_stores, lookup_stores, budgets, tracking, changes, now,
-        run_id=run_id, scope_version=scope["version"], exploration_share=run_config.get("exploration_share", 0.2))
+        run_id=run_id, scope_version=scope["version"], exploration_share=run_config.get("exploration_share", 0.2),
+        verifiable_stores=verifiable_stores)
     plan_path = root / "plans" / f"{run_id}.json"
     disk.save(f"plans/{run_id}.json", comparison_plan)
 
@@ -316,13 +319,21 @@ def run(state_root: Path, public: Path, run_id: str, *, config_path=Path("config
 
     now = fixed_now or utcnow()
     states, current, _ = _observations(disk, run_id, now)
-    failed, searched = {}, {}
+    failed, searched, discoveries = {}, {}, {}
     for store, state in states.items():
         verification = state.get("verification", {})
         if verification.get("run_id") == run_id:
             failed[store] = set(verification.get("failed_urls", []))
             searched[store] = set(verification.get("searched_identities", []))
-    disk.save("comparison_tracking.json", planner.update_tracking(tracking, comparison_plan, current, failed, searched, now))
+            # Fetched pages are passed with their target identity: tracking
+            # decides from the observation whether the obligation is settled.
+            discoveries[store] = {"unverified": verification.get("unverified_discoveries", []),
+                                  "verified": [{"identity": row["plan_identity"], "url": row["url"]}
+                                               for row in verification.get("results", {}).values()
+                                               if row.get("type") == "product" and row.get("result") == "ok"
+                                               and row.get("plan_identity") and row.get("url")]}
+    disk.save("comparison_tracking.json", planner.update_tracking(tracking, comparison_plan, current, failed, searched, now,
+                                                                  discoveries=discoveries))
     summary = route_state.public_summary()
     scope["routes"] = {route_id: {**row, "store": route_state.routes[route_id]["store"],
         "channel": route_state.routes[route_id]["channel"],

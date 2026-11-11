@@ -213,6 +213,57 @@ class StageTests(Fixture):
 
 
 class PipelineTests(Fixture):
+    def test_planning_and_evaluation_include_unarchived_old_run_low(self):
+        self.save_offer(item("ark", 10000), RUN)
+        self.save_offer(item("dospara", 11000), RUN)
+        high = item("ark", 12000, observed_run_id="old", observed_at=iso(NOW - timedelta(days=2)))
+        low = item("ark", 8000, observed_run_id="failed", observed_at=iso(NOW - timedelta(days=1)))
+        self.disk.save("history/ark/old.json", [{"observation_id": "high", "run_id": "old", "offer": high.to_dict()}])
+        self.disk.save("stores/bic.json", {"journal": [{"observation_id": "low", "run_id": "failed", "offer": low.to_dict()}]})
+        self.run_pipeline()
+        planned = self.disk.load(f"plans/{RUN}.json", {})
+        candidate = next(row for row in planned["candidates"] if row["store"] == "ark")
+        self.assertNotEqual(candidate["history_status"], "met")
+        decision = next(row for row in read_json(self.public / "evidence.json", {})["decisions"] if row["offer"]["store"] == "ark")
+        self.assertNotEqual(decision["payment"]["status"], "accepted")
+        self.assertTrue(any(row["observation_id"] == "low" for row in self.disk.history()))
+
+    def test_paused_in_scope_verification_remains_in_bundle_without_budget(self):
+        self.route_config["routes"]["sofmap:direct"]["functions"]["product_verify"]["status"] = "paused_maintenance"
+        self.config["stores"]["sofmap"]["seed_urls"] = []
+        self.save_config()
+        self.save_offer(item("ark", 9000), RUN)
+        self.save_offer(item("dospara", 11000), RUN)
+        self.save_offer(item("tsukumo", 11000), RUN)
+        self.save_offer(item("sofmap", 8000, observed_run_id="old", observed_at=iso(NOW - timedelta(days=1))))
+        self.run_pipeline()
+        planned = self.disk.load(f"plans/{RUN}.json", {})
+        candidate = next(row for row in planned["candidates"] if row["store"] == "ark")
+        self.assertEqual(candidate["status"], "comparator_unverifiable")
+        self.assertNotIn("sofmap", planned["confirm"])
+        self.assertNotIn("sofmap", planned["summary"]["confirm_budget"])
+        decision = next(row for row in read_json(self.public / "evidence.json", {})["decisions"] if row["offer"]["store"] == "ark")
+        self.assertIn("known_comparator_not_verified_this_run", decision["payment"]["reasons"])
+
+    def test_interrupted_verification_preserves_discoveries_and_is_idempotent(self):
+        identity = item("ark").identity
+        queue = {"pending": {"type": "product", "plan_identity": identity, "url": "pending"},
+                 "failed": {"type": "product", "plan_identity": identity, "url": "failed"},
+                 "confirm": {"type": "product", "plan_identity": identity, "url": "confirm", "plan_offer_key": None}}
+        state = self.save_offer(item("sofmap"))
+        state.update(queue={"discovery": {"keep": 17}}, verification_queue=queue, verification={
+            "run_id": RUN, "results": {"failed": {"result": "failed", "reason": "http_404"}}, "not_reached": 0})
+        self.disk.save("stores/sofmap.json", state)
+        for _ in range(2):
+            pipeline._finish_interrupted_verification(self.disk, "sofmap", RUN)
+        result = self.disk.load("stores/sofmap.json", {})
+        self.assertEqual(result["verification"]["unverified_discoveries"], [
+            {"identity": identity, "url": "failed", "reason": "http_404"},
+            {"identity": identity, "url": "pending", "reason": "not_reached"}])
+        self.assertEqual(result["verification"]["not_reached"], 2)
+        self.assertEqual(result["queue"], state["queue"])
+        self.assertEqual(result["verification_queue"], {})
+
     def test_schema_mismatch_writes_nothing_and_never_spawns_or_probes(self):
         self.disk.save("schema.json", {"state_schema_version": 1})
         before = {p: p.read_bytes() for p in self.base.rglob("*") if p.is_file()}
@@ -346,6 +397,77 @@ class PipelineTests(Fixture):
 
 
 class VerticalPipeline(Fixture):
+    def discovery_url_roundtrip(self, final_price):
+        self.route_config["hosts"]["default"]["min_interval_seconds"] = 20
+        self.route_config["run"]["exploration_share"] = 1
+        self.save_config()
+        first_url = URLS["sofmap"] + "&discovered=1"
+        extra_url = URLS["sofmap"] + "&discovered=2"
+        run_id, observed_at, pending_url = RUN, NOW, None
+        reached = []
+
+        def spawn(command, **kwargs):
+            store = command[command.index("--store") + 1]
+            phase = command[command.index("--phase") + 1]
+            plan_path = Path(command[command.index("--plan") + 1]) if "--plan" in command else None
+            pipeline.stage(self.root, store, phase, run_id, 60, self.config_path, self.routes_path, plan_path)
+            return SimpleNamespace(poll=lambda: 0)
+
+        def client(**kwargs):
+            kwargs["budget"].sleep = lambda seconds: None
+            return FakeClient(**kwargs)
+
+        def discover(page, cfg, **kwargs):
+            store = cfg["fixture_store"]
+            if kwargs.get("comparison"):
+                urls = [URLS[store], extra_url] if store == "sofmap" else [URLS[store]]
+                return [{"url": url, "kind": "comparison"} for url in urls], [], []
+            return ([{"url": page.url, "kind": "sale"}] if store == "ark" else []), [], []
+
+        def parse(store, page, cfg, task):
+            reached.append((run_id, page.url))
+            price = 9000 if store == "ark" else final_price if page.url == pending_url else 11000
+            return item(store, price, url=page.url, product_id="extra" if page.url == extra_url else "fixture",
+                        observed_at=iso(observed_at), discovery_kind=task.get("kind", "sale"))
+
+        with patch("sale_monitor.pipeline.Client", side_effect=client), patch(
+                "sale_monitor.runner.discover", side_effect=discover), patch(
+                "sale_monitor.runner.sofmap_search.parse_listing", return_value=(
+                    [{"url": url, "kind": "comparison"} for url in (first_url, extra_url)], [], {})), patch(
+                "sale_monitor.runner.search_form", side_effect=lambda page, query: page.url + "&search=1"), patch(
+                "sale_monitor.runner.parse_product", side_effect=parse):
+            self.run_pipeline(spawn=spawn, clock=lambda: 0)
+            first = next(row for row in read_json(self.public / "evidence.json", {})["decisions"] if row["offer"]["store"] == "ark")
+            self.assertEqual(first["payment"]["provisional_rule"], "A")
+            self.assertEqual(first["payment"]["reasons"], ["in_scope_comparator_url_not_verified"])
+            self.assertFalse(read_json(self.public / "notifications.json", {})["events"])
+            tracking = self.disk.load("comparison_tracking.json", {})
+            pending_url, = tracking[item("ark").identity]["sofmap"]["unverified_urls"]
+            self.assertNotIn((RUN, pending_url), reached)
+
+            run_id, observed_at = RUN + "2", NOW + timedelta(hours=1)
+            self.route_config["run"]["exploration_share"] = 0
+            self.save_config()
+            pipeline.run(self.root, self.public, run_id, config_path=self.config_path, routes_path=self.routes_path,
+                         now=observed_at, spawn=spawn, clock=lambda: 0)
+        planned = self.disk.load(f"plans/{run_id}.json", {})
+        request = next(row for row in planned["confirm"]["sofmap"] if row["url"] == pending_url)
+        self.assertIsNone(request["offer_key"])
+        self.assertIn((run_id, pending_url), reached)
+        self.assertEqual(self.disk.load("comparison_tracking.json", {})[item("ark").identity]["sofmap"]["unverified_urls"], [])
+        return next(row for row in read_json(self.public / "evidence.json", {})["decisions"] if row["offer"]["store"] == "ark")
+
+    def test_discovered_url_next_run_cheaper_price_rejects_candidate(self):
+        decision = self.discovery_url_roundtrip(8000)
+        self.assertEqual(decision["payment"]["status"], "rejected")
+        self.assertEqual(decision["payment"]["reasons"], ["cheaper_current_offer"])
+
+    def test_discovered_url_next_run_higher_price_allows_candidate(self):
+        decision = self.discovery_url_roundtrip(12000)
+        self.assertEqual(decision["payment"]["status"], "accepted")
+        self.assertEqual(decision["payment"]["rule"], "A")
+        self.assertTrue(any(event["offer"]["store"] == "ark" for event in read_json(self.public / "notifications.json", {})["events"]))
+
     def execute(self, fail=False, skip_verification=False):
         # Discovery has no comparator sale to refresh at this store.
         self.config["stores"]["sofmap"]["seed_urls"] = [URLS["sofmap"]]

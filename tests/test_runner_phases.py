@@ -50,6 +50,49 @@ class FakeClient:
 
 
 class RunnerPhases(unittest.TestCase):
+    def test_exploration_retains_unreached_and_verified_products_at_budget_limit(self):
+        search_url = "https://www.ark-pc.co.jp/search/?q=MODEL-A"
+        identity = offer().identity
+        planned = {"confirm": {}, "explore": {"ark": [{"query": "MODEL-A", "identity": identity}]}}
+        previous = self.state(queue={"original": {"type": "list", "url": HOME, "attempts": 7}})
+        client = FakeClient(budget=HostBudget({"default": {"min_interval_seconds": 1}}, 3))
+        collector = self.collector("verification", planned, client)
+        with patch("sale_monitor.runner.search_form", return_value=search_url), patch(
+                "sale_monitor.runner.discover", return_value=([{"url": url, "kind": "comparison"}
+                    for url in (SALE_URL, PEER_URL)], [], [])), patch(
+                "sale_monitor.runner.parse_product", side_effect=lambda store, page, cfg, task: offer(page.url, "comparison")):
+            result = collector.collect(3)
+        verification = result["verification"]
+        self.assertEqual(len(verification["verified_discoveries"]), 1)
+        verified = verification["verified_discoveries"][0]
+        unverified = ({SALE_URL, PEER_URL} - {verified}).pop()
+        self.assertEqual(verification["unverified_discoveries"], [{"identity": identity, "url": unverified, "reason": "not_reached"}])
+        self.assertEqual(result["queue"], previous["queue"])
+        self.assertEqual(result["verification_queue"], {})
+
+    def test_exploration_failure_and_robots_denial_keep_discovered_url(self):
+        identity = offer().identity
+        planned = {"confirm": {}, "explore": {"ark": [{"query": "MODEL-A", "identity": identity}]}}
+        for reason in ("http_404", "robots_disallowed"):
+            with self.subTest(reason=reason):
+                collector = self.collector("verification", planned, FakeClient({SALE_URL: FetchError(reason)}), run=reason)
+                with patch("sale_monitor.runner.search_form", return_value=HOME + "search"), patch(
+                        "sale_monitor.runner.discover", return_value=([{"url": SALE_URL, "kind": "comparison"}], [], [])):
+                    result = collector.collect(3)
+                self.assertEqual(result["verification"]["unverified_discoveries"], [{"identity": identity, "url": SALE_URL, "reason": reason}])
+                self.assertEqual(result["verification"]["verified_discoveries"], [])
+
+    def test_confirm_without_offer_key_is_comparison_and_clears_successful_url(self):
+        identity = offer().identity
+        planned = {"confirm": {"ark": [{"url": SALE_URL, "identity": identity, "offer_key": None}]}, "explore": {}}
+        collector = self.collector("verification", planned)
+        task = next(iter(collector.state["verification_queue"].values()))
+        self.assertEqual(task["kind"], "comparison")
+        with patch("sale_monitor.runner.parse_product", return_value=offer(condition="used")):
+            result = collector.collect(3)
+        self.assertEqual(result["verification"]["verified_discoveries"], [SALE_URL])
+        self.assertEqual(result["verification"]["unverified_discoveries"], [])
+
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory(prefix="runner-phases-")
         self.addCleanup(self.temp.cleanup)
