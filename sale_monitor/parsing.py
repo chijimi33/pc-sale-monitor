@@ -439,11 +439,20 @@ def discover(page: Page, cfg: dict, *, sale_page: bool, comparison: bool = False
     return list(products.values()), sorted(pages - {canonical(page.url)}), sorted(campaigns - {canonical(page.url)})
 
 
+def page_level_denial(store: str, url: str, page: Page) -> bool:
+    """Recognize Sofmap's product-specific access error without refusing the host."""
+    parts = urlsplit(url)
+    if store != "sofmap" or parts.hostname not in ("www.sofmap.com", "sofmap.com") or parts.path != "/product_detail.aspx":
+        return False
+    text = page.text
+    return "アクセスが制限されています" in text and "The requested URL was not found on this server" in text
+
+
 def confirmed_missing_product(store: str, requested_url: str, page: Page | None) -> bool:
     """Recognize Koubou's exact missing-page response, not stock or product EOL.
 
     This only decides whether a browser retry of the same 404 is useful.
-    The original task must remain pending and be fetched again next run.
+    The original task must remain pending for a later retry.
     """
     if store != "koubou" or page is None or page.status != 404 or page.url != requested_url:
         return False

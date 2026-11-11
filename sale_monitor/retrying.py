@@ -4,6 +4,8 @@ from __future__ import annotations
 from collections import Counter
 from urllib.parse import urlsplit
 
+from .models import timestamp
+
 
 def transient(reason: str) -> bool:
     return reason in {
@@ -11,6 +13,19 @@ def transient(reason: str) -> bool:
         "ConnectionRefusedError", "BrokenPipeError", "IncompleteRead", "rate_limited_retry_later",
         "http_429", "http_500", "http_502", "http_503", "http_504", "store_maintenance",
     } or reason.startswith(("transport_retry_later:", "access_retry_later:"))
+
+
+def deferred_until(task: dict) -> float | None:
+    """Epoch seconds before which a repeatedly failing task is not retried, else None."""
+    attempts = task.get("attempts", 0)
+    reason = task.get("last_error")
+    if (type(attempts) is not int or attempts < 1 or not reason or transient(reason)
+            or reason in ("host_budget_exhausted", "robots_disallowed")):
+        return None
+    last_attempt = timestamp(task.get("last_attempt_at"))
+    if last_attempt is None:
+        return None
+    return last_attempt.timestamp() + min(4 * 3600 * 2 ** min(attempts - 1, 6), 7 * 24 * 3600)
 
 
 def dependency_url(task: dict, cfg: dict) -> str | None:

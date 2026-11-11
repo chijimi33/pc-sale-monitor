@@ -77,7 +77,8 @@ def health(state: dict, now) -> dict:
             "http_evidence": http_summary(state),
             "comparison_no_results": sum(r.get("result") == "no_results" and r.get("observed_run_id") == state.get("run_id") for r in state.get("comparison_searches", {}).values()),
             "pending_over_24h": sum(now - t > timedelta(hours=24) for t in created), "errors": summarize_errors(state.get("errors", [])),
-            "discovery_gaps": state.get("discovery_gaps", []), "source_metadata": state.get("source_metadata"), "flyer": state.get("flyer")}
+            "discovery_gaps": state.get("discovery_gaps", []), "source_metadata": state.get("source_metadata"), "flyer": state.get("flyer"),
+            **({"deferred_failures": state["deferred_failures"]} if "deferred_failures" in state else {})}
 
 
 def merge_incoming(root: Path, incoming: Path):
