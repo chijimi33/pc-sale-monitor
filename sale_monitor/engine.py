@@ -53,6 +53,28 @@ def evaluate(offer: Offer, others: list[Offer], history: list[dict], now: dateti
     if not compared:
         decision["reasons"].append("B_current_comparison_missing")
         return decision
+    basis = history_basis(offer, history, now, points)
+    decision["history"] = basis["history"]
+    if basis["status"] == "met":
+        decision.update(status="accepted", rule=basis["rule"], reasons=[])
+        return decision
+    decision["reasons"].extend(basis["reasons"])
+    if len(compared) >= 2 and "B_history_gap_below_threshold" in decision["reasons"]:
+        decision["status"] = "rejected"
+    return decision
+
+
+def history_basis(offer: Offer, history: list[dict], now: datetime, points: bool = False) -> dict:
+    """Return history-only evidence, independent of current comparisons."""
+    result = {"status": "insufficient", "rule": None, "history": {}, "reasons": []}
+    errors = offer.errors(now)
+    if errors:
+        result["reasons"] = errors
+        return result
+    price = amount(offer, points)
+    if price is None:
+        result["reasons"] = ["points_unknown"]
+        return result
     records = []
     for row in history:
         try:
@@ -70,8 +92,8 @@ def evaluate(offer: Offer, others: list[Offer], history: list[dict], now: dateti
     if year:
         minimum = min(r[1] for r in year)
         if minimum - price >= 500:
-            decision.update(status="accepted", rule="B_observed_year_low", reasons=[], history={"minimum_yen": minimum, "from": iso(min(r[0] for r in year)), "to": iso(max(r[0] for r in year)), "samples": len(year), "scope": "observed_period_only", "sources": sorted(set(r[2] for r in year))})
-            return decision
+            result.update(status="met", rule="B_observed_year_low", history={"minimum_yen": minimum, "from": iso(min(r[0] for r in year)), "to": iso(max(r[0] for r in year)), "samples": len(year), "scope": "observed_period_only", "sources": sorted(set(r[2] for r in year))})
+            return result
     # Use one market minimum per day, never count repeat observations as distinct days.
     recent = [r for r in records if now - timedelta(days=90) <= r[0] < now]
     daily = {}
@@ -81,16 +103,14 @@ def evaluate(offer: Offer, others: list[Offer], history: list[dict], now: dateti
     if len(daily) >= 3 and (now - min(r[0] for r in recent)).days >= 30:
         baseline = Fraction(median([Fraction(v) for v in daily.values()]))
         delta = baseline - price
-        decision["history"] = {"median_yen": float(baseline), "minimum_yen": min(daily.values()), "from": min(daily), "to": max(daily), "days": len(daily), "samples": len(recent), "sources": sorted(set(r[2] for r in recent)), "scope": "observed_days_only"}
+        result["history"] = {"median_yen": float(baseline), "minimum_yen": min(daily.values()), "from": min(daily), "to": max(daily), "days": len(daily), "samples": len(recent), "sources": sorted(set(r[2] for r in recent)), "scope": "observed_days_only"}
         if delta >= 500 and delta * 10 >= baseline and price <= min(daily.values()):
-            decision.update(status="accepted", rule="B_recent_median", reasons=[])
-            return decision
-        decision["reasons"].append("B_history_gap_below_threshold")
+            result.update(status="met", rule="B_recent_median")
+            return result
+        result.update(status="not_met", reasons=["B_history_gap_below_threshold"])
     else:
-        decision["reasons"].append("B_history_insufficient")
-    if len(compared) >= 2 and "B_history_gap_below_threshold" in decision["reasons"]:
-        decision["status"] = "rejected"
-    return decision
+        result["reasons"].append("B_history_insufficient")
+    return result
 
 
 def update_events(offer: Offer, decision: dict, prior: dict | None, now: datetime) -> tuple[list[dict], dict]:
