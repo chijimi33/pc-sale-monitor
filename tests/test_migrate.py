@@ -1,4 +1,5 @@
 from copy import deepcopy
+from contextlib import nullcontext
 from pathlib import Path
 import tempfile
 from unittest import TestCase
@@ -72,8 +73,113 @@ class MigrationTests(TestCase):
     def test_existing_archive_entry_is_never_overwritten(self):
         record = {"task": {"created_at": "original"}, "archived_at": "original", "task_id": "comparison"}
         self.disk.save("archive/ark.json", {"schema_version": 1, "entries": {"comparison": record}})
-        apply(self.root, self.routes, now=1000)
+        result = apply(self.root, self.routes, now=1000)
         self.assertEqual(self.disk.load("archive/ark.json", {})["entries"]["comparison"], record)
+        self.assertEqual(result["archived"]["ark"], {"comparison_debt_abolished": 1})
+
+    def snapshot(self, root):
+        return {path.relative_to(root): path.read_bytes() for path in root.rglob("*.json")}
+
+    def assert_tasks_preserved(self, root):
+        disk = Store(root)
+        for store, original in self.originals.items():
+            queue = disk.load(f"stores/{store}.json", {})["queue"]
+            archive = disk.load(f"archive/{store}.json", {"entries": {}})["entries"]
+            self.assertLessEqual(original["queue"].keys(), queue.keys() | archive.keys())
+
+    def test_apply_recovers_after_every_save_with_or_without_rollback(self):
+        initial = self.snapshot(self.root)
+        protected = fingerprint(self.root)
+        save = Store.save
+        order = []
+
+        def record_save(disk, name, value):
+            save(disk, name, value)
+            order.append(name)
+
+        with patch.object(Store, "save", record_save):
+            apply(self.root, self.routes, input_sha="fixed-sha", now=1000)
+        expected = self.snapshot(self.root)
+        stores = sorted(self.originals)
+        self.assertEqual(order, [f"archive/{store}.json" for store in stores] +
+                         [f"stores/{store}.json" for store in stores] + ["schema.json"])
+        final_queue_size = sum(len(self.disk.load(f"stores/{store}.json", {})["queue"]) for store in stores)
+        for rollback in (True, False):
+            for stop_after in range(1, len(order) + 1):
+                with self.subTest(rollback=rollback, stop_after=stop_after), tempfile.TemporaryDirectory() as directory:
+                    root = Path(directory)
+                    disk = Store(root)
+                    for relative, content in initial.items():
+                        path = root / relative
+                        path.parent.mkdir(parents=True, exist_ok=True)
+                        path.write_bytes(content)
+                    calls = []
+
+                    def interrupt(disk, name, value):
+                        save(disk, name, value)
+                        calls.append(name)
+                        if len(calls) == stop_after:
+                            raise OSError("interrupted after durable save")
+
+                    restore = nullcontext() if rollback else patch("sale_monitor.migrate._restore")
+                    with restore, patch.object(Store, "save", interrupt):
+                        with self.assertRaisesRegex(OSError, "interrupted after durable save"):
+                            apply(root, self.routes, input_sha="fixed-sha", now=1000)
+                    self.assert_tasks_preserved(root)
+                    self.assertEqual(fingerprint(root), protected)
+                    retained = {store: disk.load(f"archive/{store}.json", {"entries": {}})["entries"]
+                                for store in stores}
+                    pending = sum(len(disk.load(f"stores/{store}.json", {})["queue"]) for store in stores)
+                    result = apply(root, self.routes, input_sha="fixed-sha", now=1000 if rollback else 2000)
+                    self.assertEqual(sum(sum(counts.values()) for counts in result["archived"].values()),
+                                     pending - final_queue_size)
+                    for store, entries in retained.items():
+                        for task_id, record in entries.items():
+                            self.assertEqual(disk.load(f"archive/{store}.json", {})["entries"][task_id], record)
+                    self.assertEqual(self.snapshot(root), expected)
+                    self.assert_tasks_preserved(root)
+                    self.assertEqual(fingerprint(root), protected)
+
+    def test_revert_recovers_after_every_save_with_or_without_rollback(self):
+        apply(self.root, self.routes, input_sha="fixed-sha", now=1000)
+        initial = self.snapshot(self.root)
+        protected = fingerprint(self.root)
+        save = Store.save
+        order = []
+
+        def record_save(disk, name, value):
+            save(disk, name, value)
+            order.append(name)
+
+        with patch.object(Store, "save", record_save):
+            revert(self.root)
+        expected = self.snapshot(self.root)
+        self.assertEqual(order, [f"stores/{store}.json" for store in sorted(self.originals)] + ["schema.json"])
+        for rollback in (True, False):
+            for stop_after in range(1, len(order) + 1):
+                with self.subTest(rollback=rollback, stop_after=stop_after), tempfile.TemporaryDirectory() as directory:
+                    root = Path(directory)
+                    for relative, content in initial.items():
+                        path = root / relative
+                        path.parent.mkdir(parents=True, exist_ok=True)
+                        path.write_bytes(content)
+                    calls = []
+
+                    def interrupt(disk, name, value):
+                        save(disk, name, value)
+                        calls.append(name)
+                        if len(calls) == stop_after:
+                            raise OSError("interrupted after durable save")
+
+                    restore = nullcontext() if rollback else patch("sale_monitor.migrate._restore")
+                    with restore, patch.object(Store, "save", interrupt):
+                        with self.assertRaisesRegex(OSError, "interrupted after durable save"):
+                            revert(root)
+                    self.assert_tasks_preserved(root)
+                    self.assertEqual(fingerprint(root), protected)
+                    revert(root)
+                    self.assertEqual(self.snapshot(root), expected)
+                    self.assertEqual(fingerprint(root), protected)
 
     def test_revert_restores_queues_and_is_idempotent(self):
         apply(self.root, self.routes, now=1000)
@@ -115,6 +221,31 @@ class MigrationTests(TestCase):
             with self.assertRaisesRegex(OSError, "synthetic failure"):
                 apply(self.root, self.routes)
         self.assertEqual(before, {path: path.read_bytes() for path in self.root.rglob("*.json")})
+
+    def test_rollback_never_discards_the_only_task_copy(self):
+        before = self.snapshot(self.root)
+        save, write_bytes, unlink = Store.save, Path.write_bytes, Path.unlink
+
+        def fail_after_queue_save(disk, name, value):
+            save(disk, name, value)
+            if name.startswith("stores/"):
+                raise OSError("interrupted after queue save")
+
+        def checked_write(path, content):
+            result = write_bytes(path, content)
+            self.assert_tasks_preserved(self.root)
+            return result
+
+        def checked_unlink(path, *args, **kwargs):
+            result = unlink(path, *args, **kwargs)
+            self.assert_tasks_preserved(self.root)
+            return result
+
+        with patch.object(Store, "save", fail_after_queue_save), patch.object(
+                Path, "write_bytes", checked_write), patch.object(Path, "unlink", checked_unlink):
+            with self.assertRaisesRegex(OSError, "interrupted after queue save"):
+                apply(self.root, self.routes, now=1000)
+        self.assertEqual(self.snapshot(self.root), before)
 
     def test_normalized_store_fingerprint_ignores_json_formatting(self):
         before = fingerprint(self.root)

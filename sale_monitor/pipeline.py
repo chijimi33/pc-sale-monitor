@@ -103,6 +103,15 @@ def stage(state_root, store, phase, run_id, seconds, config_path, routes_path, p
     return collector.collect(seconds)
 
 
+def _kill_remaining_process_group(process):
+    """Reap descendants only for real children launched in an isolated session."""
+    if os.name == "posix" and isinstance(process, subprocess.Popen):
+        try:
+            os.killpg(process.pid, signal.SIGKILL)
+        except ProcessLookupError:
+            pass
+
+
 def _stop_process_tree(process):
     """Stop only the isolated process tree owned by this pipeline."""
     if os.name == "posix":
@@ -115,10 +124,7 @@ def _stop_process_tree(process):
         except subprocess.TimeoutExpired:
             pass
         # The leader can exit before a descendant which ignores TERM.
-        try:
-            os.killpg(process.pid, signal.SIGKILL)
-        except ProcessLookupError:
-            pass
+        _kill_remaining_process_group(process)
     else:
         result = subprocess.run(["taskkill", "/PID", str(process.pid), "/T", "/F"],
                                 capture_output=True, timeout=15)
@@ -218,6 +224,7 @@ def _run_children(stores, phase, seconds, root, run_id, config_path, routes_path
             for store, process in list(pending.items()):
                 code = process.poll()
                 if code is not None:
+                    _kill_remaining_process_group(process)
                     _close_job(process)
                     results[store] = {"status": "completed" if code == 0 else "failed", "exit_code": code}
                     del pending[store]

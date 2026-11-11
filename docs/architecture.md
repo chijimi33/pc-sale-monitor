@@ -24,9 +24,9 @@ route は「販売者 × チャネル」を ID（例 `ark:direct`、`yahoo:api`�
 | 状態 | 意味 | 疎通確認 |
 | --- | --- | --- |
 | `active` | 通常収集の対象 | — |
-| `paused_maintenance` | サイト自体が停止中 | 1日1回・1リクエスト。通常ページとして解析できることを連続2回確認して `active` |
+| `paused_maintenance` | サイト自体が停止中 | 1日1回・1リクエストで確認します。成功しても自動では戻さず、復旧候補として公開 JSON に出します。明示拒否なら `paused_refused` にします。 |
 | `paused_refused` | 明示的に自動取得を拒否された | 行わない。人が設定を変えた時だけ復帰。手動 `probe` のみ |
-| `paused_unreachable` | 無応答で原因未確定 | 週1回・1リクエスト。明示拒否なら `paused_refused` へ |
+| `paused_unreachable` | 無応答で原因未確定 | 週1回・1リクエストで確認します。成功しても自動では戻さず、復旧候補として公開 JSON に出します。明示拒否なら `paused_refused` にします。 |
 | `paused_configuration` | 設定待ち（APIキー等） | 行わない |
 | `not_implemented` | その機能の実装がない | — |
 
@@ -36,9 +36,15 @@ route は「販売者 × チャネル」を ID（例 `ark:direct`、`yahoo:api`�
 - 疎通確認は通常収集と別に記録する。トップページの成功だけで他の機能を復旧扱いにしない。
   Retry-After を尊重する。
 - 実行場所を変えても `paused_refused` は解除しない。
-- `state/routes.json` が設定より優先されるのは自動遷移（maintenance→active、unreachable→refused）だけ。
-  `config_revision` が上がったら設定の値で上書きする（人による変更）。
-- 公開 JSON に route ごとの状態・理由・開始日時・退避件数を出す。
+- `active` へ戻すのは、`config_revision` を上げる人の設定変更だけです。
+  自動の遷移は、疎通確認で明示拒否を受けた `paused_maintenance`・`paused_unreachable` を `paused_refused` にするものだけです。
+- 同じ `config_revision` の間だけ、`state/routes.json` の上記の自動遷移と疎通確認の記録を引き継ぎます。
+  旧実装が保存した自動の `active` 遷移は採用しません。版が変わったら設定の値を使います。
+- `successes_to_resume` は、復旧候補として表示するまでの連続成功回数です（初期値2回）。
+  閾値に達した時に route の `recovery_candidate` に候補になった日時（`since`）、連続成功回数
+  （`consecutive_successes`）、最終成功日時（`last_ok_at`）、直近の結果（`evidence`）を記録します。
+  連続成功が途切れたら候補を消します。成功が続く間は `since` を保ちます。
+- 公開 JSON に route ごとの状態・理由・開始日時・退避件数・`recovery_candidate`（候補がなければ `null`）を出します。
 
 初期状態は `config/routes.json` を参照。
 
