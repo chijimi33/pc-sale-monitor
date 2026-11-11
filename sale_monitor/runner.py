@@ -1,7 +1,8 @@
 from __future__ import annotations
 
+from collections import Counter
 from copy import deepcopy
-from datetime import timedelta
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 import hashlib
 import os
@@ -14,10 +15,10 @@ from . import adapters
 from .flyers import collect_flyer
 from .http import Client, FetchError, Page
 from .models import STORES, Offer, allowed_url, digest, fresh, iso, timestamp, utcnow
-from .parsing import canonical, confirmed_empty_search, confirmed_missing_product, discover, parse_product, search_form
+from .parsing import canonical, confirmed_empty_search, confirmed_missing_product, discover, page_level_denial, parse_product, search_form
 from .storage import Store
 from .scheduling import plan_comparison_refresh, select_task
-from .retrying import dependency_url, runnable, transient
+from .retrying import deferred_until, dependency_url, runnable, transient
 from . import koubou_search, sofmap_search, tsukumo_shipping, comparison_routing, comparison_priority
 
 
@@ -63,6 +64,8 @@ class Collector:
         self.config = config
         self.run_id = run_id
         self.client = client or Client(browser=self.cfg.get("browser_fallback", False))
+        if phase is not None and hasattr(self.client, "page_denial") and self.client.page_denial is None:
+            self.client.page_denial = lambda url, page: page_level_denial(self.store, url, page)
         self.name = f"stores/{store}.json"
         self.state = self.disk.load(self.name, {"schema_version": 1, "store": store, "queue": {}, "done": [], "offers": {}, "journal": [], "cycle_complete": True})
         if phase is not None:
@@ -132,6 +135,13 @@ class Collector:
     def save(self):
         self.state["checkpoint_at"] = iso()
         self.state["pending_count"] = len(self.state[self.queue_key])
+        if self.phase == "discovery":
+            deferred = self._deferred_tasks()
+            self.state["deferred_failures"] = {
+                "run_id": self.run_id, "count": len(deferred),
+                "by_reason": dict(Counter(self.state[self.queue_key][key]["last_error"] for key in deferred)),
+                "next_retry_at": iso(datetime.fromtimestamp(min(deferred.values()), timezone.utc)) if deferred else None,
+            }
         budget = getattr(self.client, "budget", None)
         if self.phase is None:
             self.state["request_count"] = self.client.count
@@ -166,7 +176,7 @@ class Collector:
             self.state["access_retry_after"] = {host: failure.copy() for host, failure in self.client.access_retry_after.items() if failure["until"] > time.time()}
         self.disk.save(self.name, self.state)
 
-    def enqueue(self, task: dict):
+    def enqueue(self, task: dict, relisted: bool = False):
         if self.phase == "verification" and getattr(self, "active_task", None):
             task = {**{key: self.active_task[key] for key in ("plan_identity",) if key in self.active_task}, **task}
         if self.phase == "discovery" and task.get("kind") == "comparison":
@@ -179,6 +189,8 @@ class Collector:
         task_id = digest([task["type"], task.get("url"), task.get("query"), task.get("start"), task.get("kind"), task.get("item", {}).get("product_id")])[:24]
         if task_id in self.state[self.queue_key]:
             existing = self.state[self.queue_key][task_id]
+            if relisted:
+                existing["relisted_run_id"] = self.run_id
             if task.get("priority", 3) < existing.get("priority", 3):
                 existing["priority"] = task["priority"]
             if task.get("created_at") and task["created_at"] < existing["created_at"]:
@@ -385,7 +397,7 @@ class Collector:
                         if not isinstance(getattr(self.client, "refused_hosts", None), set):
                             self.client.refused_hosts = set()
                         self.client.refused_hosts.add(urlsplit(url).hostname)
-                    if not allow_browser or str(exc) in ("http_403", "amazon_access_challenge", "robots_disallowed", "host_budget_exhausted", "browser_blocked_after_refusal", "rate_limited_retry_later", "store_maintenance") or str(exc).startswith(("transport_retry_later:", "access_retry_later:")) or (exc.page is not None and confirmed_empty_search(self.store, exc.page)) or not self.cfg.get("browser_fallback"):
+                    if not allow_browser or str(exc) in ("http_403", "page_access_restricted", "amazon_access_challenge", "robots_disallowed", "host_budget_exhausted", "browser_blocked_after_refusal", "rate_limited_retry_later", "store_maintenance") or str(exc).startswith(("transport_retry_later:", "access_retry_later:")) or (exc.page is not None and confirmed_empty_search(self.store, exc.page)) or not self.cfg.get("browser_fallback"):
                         raise
                     return self._rendered_page(url)
             except Exception as exc:
@@ -557,7 +569,8 @@ class Collector:
                 discovery_origin = {**discovery_origin, "created_at": min(discovery_origin["created_at"], task["created_at"])}
                 origin = {"created_at": discovery_origin["created_at"], "discovery_origin": discovery_origin}
             for product in products:
-                self.enqueue({"type": "product", **product, "priority": task.get("priority", 3), **origin})
+                self.enqueue({"type": "product", **product, "priority": task.get("priority", 3), **origin},
+                             relisted=self.phase == "discovery" and task.get("kind") != "comparison")
             for url in pagination:
                 self.enqueue(new_dependency(task, url=url, **origin))
             # Follow explicitly linked sale pages, including nested sale portals.
@@ -772,7 +785,16 @@ class Collector:
 
     def _pending_queue(self):
         queue = self.state[self.queue_key]
-        return {key: task for key, task in queue.items() if task.get("kind") != "comparison"} if self.phase == "discovery" else queue
+        if self.phase != "discovery":
+            return queue
+        deferred = self._deferred_tasks()
+        return {key: task for key, task in queue.items() if task.get("kind") != "comparison" and key not in deferred}
+
+    def _deferred_tasks(self):
+        now = time.time()
+        return {key: until for key, task in self.state[self.queue_key].items()
+                if task.get("kind") != "comparison" and task.get("relisted_run_id") != self.run_id
+                and (until := deferred_until(task)) is not None and until > now}
 
     def _verification_result(self, task_id, task, result, reason):
         if self.phase != "verification":

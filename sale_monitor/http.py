@@ -8,7 +8,7 @@ import json
 import math
 import re
 import time
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Callable
 from urllib.error import HTTPError
 from urllib.parse import urlsplit
 from urllib.request import HTTPRedirectHandler, Request, build_opener
@@ -64,14 +64,24 @@ class Page:
             return self.body.decode("utf-8", "replace")
 
 
+def _denial_body(response) -> bytes:
+    try:
+        return response.read(200_000)
+    except Exception:
+        # An unreadable denial must still be treated as an HTTP refusal.
+        return b""
+
+
 class Client:
     def __init__(self, browser: bool = False, delay: float = 1.0, timeout: int = 25,
-                 budget: HostBudget | None = None, robots: Robots | None = None):
+                 budget: HostBudget | None = None, robots: Robots | None = None,
+                 page_denial: Callable[[str, Page], bool] | None = None):
         self.browser = browser
         self.delay = delay
         self.timeout = timeout
         self.budget = budget
         self.robots = robots
+        self.page_denial = page_denial
         if robots is not None and budget is not None:
             if robots.budget is not None and robots.budget is not budget:
                 raise ValueError("robots_budget_mismatch")
@@ -227,8 +237,12 @@ class Client:
                 request.single_request = max_attempts == 1
                 with self.opener.open(request, timeout=self.timeout) as result:
                     response_status = getattr(result, "status", None)
-                    page = Page(result.url, result.read(), iso(), content_type=result.headers.get("Content-Type", ""),
+                    body = _denial_body(result) if response_status == 403 else result.read()
+                    page = Page(result.url, body, iso(), content_type=result.headers.get("Content-Type", ""),
                                 status=response_status if type(response_status) is int else 200, headers=dict(result.headers))
+                if response_status == 403 and self.page_denial is not None and self.page_denial(url, page):
+                    self.evidence.record(url, "http", status=403)
+                    raise FetchError("page_access_restricted", page=page)
                 self.evidence.record(url, "http", status=response_status)
                 self.access_response(url, response_status)
                 if response_status == 403:
@@ -240,15 +254,18 @@ class Client:
             except HTTPError as exc:
                 self.transport_failed_urls.pop(host, None)
                 error_page = None
-                if max_attempts == 1:
+                if max_attempts == 1 or exc.code == 403:
                     try:
-                        body = exc.read() if exc.fp is not None else b""
+                        body = (_denial_body(exc) if exc.code == 403 else exc.read()) if exc.fp is not None else b""
                     except (OSError, IncompleteRead):
                         body = b""
                     error_page = Page(exc.url, body, iso(), status=exc.code,
                                       content_type=(exc.headers or {}).get("Content-Type", ""),
                                       headers=dict(exc.headers or {}))
                 if exc.code == 403:
+                    if self.page_denial is not None and self.page_denial(url, error_page):
+                        self.evidence.record(url, "http", status=403)
+                        raise FetchError("page_access_restricted", page=error_page) from exc
                     self.refused_hosts.add(urlsplit(exc.url).hostname)
                     retry = (exc.headers or {}).get("Retry-After", "")
                     until = self.access_response(url, exc.code, retry)
