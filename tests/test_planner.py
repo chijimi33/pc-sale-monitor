@@ -336,12 +336,33 @@ class TrackingTests(unittest.TestCase):
         found = offer("bic", 10000, product_id="found", url=url, shipping_yen=None)
         self.assertEqual(self.settle(found)["unverified_urls"], [url])
 
-    def test_explicit_end_of_the_same_product_settles(self):
+    def test_verified_sell_out_answers_this_run_but_keeps_the_obligation(self):
         url = "https://bic.example/found"
         found = offer("bic", 10000, product_id="found", url=url, stock="out_of_stock")
         values = self.settle(found)
-        self.assertEqual(values["unverified_urls"], [])
-        self.assertEqual(values["settled_urls"][0]["reason"], "ended")
+        self.assertEqual(values["unverified_urls"], [url])
+        self.assertEqual(values["ended_urls"], {url: RUN})
+        self.assertNotIn("settled_urls", values)
+
+    def test_sell_out_mark_expires_when_the_next_run_does_not_verify_it(self):
+        url = "https://bic.example/found"
+        candidate = offer(observed_run_id="run2")
+        tracking = {candidate.identity: {"bic": {"unverified_urls": [url], "ended_urls": {url: RUN}}}}
+        planned = build([candidate], [], tracking=tracking, run_id="run2")
+        self.assertEqual(planned["candidates"][0]["bundle"][0]["state"], "to_verify")
+        result = update_tracking(tracking, planned, [candidate], {}, {}, NOW)
+        self.assertEqual(result[candidate.identity]["bic"]["unverified_urls"], [url])
+        self.assertEqual(result[candidate.identity]["bic"]["ended_urls"], {})
+
+    def test_restocked_obligation_becomes_a_known_comparator(self):
+        url = "https://bic.example/found"
+        candidate = offer(observed_run_id="run2")
+        tracking = {candidate.identity: {"bic": {"unverified_urls": [url], "ended_urls": {url: RUN}}}}
+        planned = build([candidate], [], tracking=tracking, run_id="run2")
+        restocked = offer("bic", 8000, product_id="found", url=url, observed_run_id="run2")
+        result = update_tracking(tracking, planned, [candidate, restocked], {}, {}, NOW)
+        self.assertEqual(result[candidate.identity]["bic"]["unverified_urls"], [])
+        self.assertEqual(result[candidate.identity]["bic"]["settled_urls"][0]["reason"], "became_known_comparator")
 
     def test_fetched_page_without_an_observation_stays_open(self):
         self.assertEqual(self.settle(None)["unverified_urls"], ["https://bic.example/found"])

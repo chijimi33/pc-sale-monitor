@@ -209,9 +209,10 @@ def update_tracking(tracking: dict, plan: dict, current: list[Offer], failed: di
             return None
         if not offer.errors(now):
             return {"reason": "became_known_comparator", "offer_key": offer.key}
-        # An explicit end is evidence, exactly as for known comparators.
+        # A verified sell-out answers this run only. The URL stays an open
+        # obligation, so a later restock is checked instead of being forgotten.
         ended = offer.stock == "out_of_stock" and offer.verified and offer.evidence and not offer.issues
-        return {"reason": "ended", "offer_key": offer.key} if ended else None
+        return {"reason": "ended_this_run", "offer_key": offer.key} if ended else None
 
     for store, discovery in sorted((discoveries or {}).items()):
         for row in list(discovery.get("unverified", [])) + [r for r in discovery.get("verified", []) if isinstance(r, dict)]:
@@ -221,14 +222,19 @@ def update_tracking(tracking: dict, plan: dict, current: list[Offer], failed: di
         for store, values in stores.items():
             if "unverified_urls" not in values:
                 continue
-            remaining = []
+            remaining, ended = [], {}
             for url in sorted(set(values["unverified_urls"])):
                 outcome = settled(identity, store, url)
                 if outcome is None:
                     remaining.append(url)
+                elif outcome["reason"] == "ended_this_run":
+                    remaining.append(url)
+                    ended[url] = plan["run_id"]
                 else:
                     log = values.setdefault("settled_urls", [])
                     log.append({"url": url, "at": updated_at, **outcome})
                     del log[:-20]
             values["unverified_urls"] = remaining
+            # Only this run's verified sell-outs lift the hold; older marks expire.
+            values["ended_urls"] = ended
     return result

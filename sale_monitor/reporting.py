@@ -269,7 +269,10 @@ def aggregate(root: Path, public: Path, run_id: str, now=None, scope: dict | Non
         unverified_urls = [{"store": store, "url": url}
             for store, entry in sorted(tracking.get(identity, {}).items())
             if store in scope["in_scope_stores"] and store != offer.store
-            for url in sorted(set(entry.get("unverified_urls", [])))] if scope is not None else []
+            for url in sorted(set(entry.get("unverified_urls", [])))
+            # A sell-out verified in this run answers the obligation for this
+            # run only; the URL itself stays tracked for the next one.
+            if entry.get("ended_urls", {}).get(url) != run_id] if scope is not None else []
         for basis in (payment, points):
             if basis["status"] == "accepted":
                 options = {"in_scope_stores": scope["in_scope_stores"]} if scope is not None else {}

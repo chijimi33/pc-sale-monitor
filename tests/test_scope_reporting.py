@@ -108,6 +108,17 @@ class ScopeReporting(unittest.TestCase):
         row = next(r for r in decision["comparison_scope"]["unconfirmed"] if r["store"] == "sofmap")
         self.assertEqual((row["category"], row["reason"]), ("in_scope_not_confirmed", "paused_maintenance"))
 
+    def test_sell_out_verified_in_this_run_lifts_the_hold_only_for_this_run(self):
+        self.candidates()
+        candidate = offer()
+        url = "https://sofmap.example/sold-out"
+        for marked_run, status in ((RUN, "accepted"), ("earlier-run", "insufficient")):
+            with self.subTest(marked_run=marked_run):
+                self.disk.save("comparison_tracking.json", {candidate.identity: {"sofmap": {
+                    "unverified_urls": [url], "ended_urls": {url: marked_run}}}})
+                self.aggregate()
+                self.assertEqual(self.decision()["payment"]["status"], status)
+
     def test_discovered_url_holds_until_removed_and_never_notifies(self):
         self.candidates()
         candidate = offer()
