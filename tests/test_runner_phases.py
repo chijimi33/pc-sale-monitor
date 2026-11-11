@@ -7,7 +7,7 @@ from unittest.mock import Mock, patch
 from sale_monitor.budget import HostBudget, Robots
 from sale_monitor.http import Client, FetchError, Page
 from sale_monitor.models import Offer, iso
-from sale_monitor.runner import Collector
+from sale_monitor.runner import Collector, record_unverified_discoveries
 from sale_monitor.storage import Store
 
 
@@ -50,6 +50,73 @@ class FakeClient:
 
 
 class RunnerPhases(unittest.TestCase):
+    def test_two_searches_share_product_receipts_for_every_identity(self):
+        identities = sorted([offer().identity, offer(model="MODEL-B").identity])
+        for reason in (None, "http_404"):
+            for shared_listing in (False, True):
+                with self.subTest(reason=reason, shared_listing=shared_listing):
+                    planned = {"confirm": {}, "explore": {"ark": [
+                        {"query": str(i), "identity": identity} for i, identity in enumerate(identities)]}}
+                    client = FakeClient({SALE_URL: FetchError(reason)} if reason else {})
+                    collector = self.collector("verification", planned, client, run=f"{reason}-{shared_listing}")
+                    with patch("sale_monitor.runner.search_form", side_effect=lambda page, query:
+                            HOME + "search/" + ("shared" if shared_listing else query)), patch(
+                            "sale_monitor.runner.discover", return_value=([{"url": SALE_URL, "kind": "comparison"}], [], [])), patch(
+                            "sale_monitor.runner.parse_product", return_value=offer(kind="comparison")):
+                        result = collector.collect(3)
+                    verification = result["verification"]
+                    receipt, = [r for r in verification["results"].values() if r["type"] == "product"]
+                    self.assertEqual(receipt["plan_identities"], identities)
+                    self.assertEqual(receipt["plan_identity"], identities[0])
+                    field = "unverified_discoveries" if reason else "verified_discoveries"
+                    expected = [{"identity": identity, "url": SALE_URL, **({"reason": reason} if reason else {})}
+                                for identity in identities]
+                    self.assertEqual(verification[field], expected)
+                    self.assertEqual(client.calls.count(SALE_URL), 1)
+
+    def test_two_listing_owners_keep_both_unreached_obligations(self):
+        identities = sorted([offer().identity, offer(model="MODEL-B").identity])
+        collector = self.collector("verification", {"confirm": {}, "explore": {}})
+        with patch("sale_monitor.runner.discover", return_value=([{"url": SALE_URL, "kind": "comparison"}], [], [])):
+            for identity in reversed(identities):
+                task = {"type": "list", "url": HOME + "search/" + identity, "kind": "comparison",
+                        "plan_identities": [identity]}
+                collector.active_task = task
+                collector.process(task)
+        task, = collector.state["verification_queue"].values()
+        self.assertEqual(task["plan_identities"], identities)
+        result = collector.collect(0)
+        self.assertEqual(result["verification"]["unverified_discoveries"], [
+            {"identity": identity, "url": SALE_URL, "reason": "not_reached"} for identity in identities])
+        self.assertEqual(result["verification"]["not_reached"], 1)
+
+    def test_verified_receipts_remove_only_matching_identity_url_pairs(self):
+        first, second = offer().identity, offer(model="MODEL-B").identity
+        pending = [{"identity": second, "url": url, "reason": "not_reached"} for url in (SALE_URL, PEER_URL)]
+        state = {"verification": {"unverified_discoveries": pending.copy(), "verified_discoveries": [
+            {"identity": first, "url": url} for url in (SALE_URL, PEER_URL)]}}
+        record_unverified_discoveries(state)
+        self.assertEqual(state["verification"]["unverified_discoveries"], pending)
+        state["verification"]["verified_discoveries"] = [SALE_URL, PEER_URL]
+        record_unverified_discoveries(state)
+        self.assertEqual(state["verification"]["unverified_discoveries"], pending)
+
+    def test_confirm_shared_url_and_redirect_preserve_all_request_owners(self):
+        identities = sorted([offer().identity, offer(model="MODEL-B").identity])
+        planned = {"confirm": {"ark": [{"identity": identity, "url": SALE_URL, "offer_key": None}
+                                     for identity in identities]}, "explore": {}}
+        collector = self.collector("verification", planned)
+        observed = offer(PEER_URL, "comparison")
+        with patch("sale_monitor.runner.parse_product", return_value=observed):
+            result = collector.collect(3)
+        receipt, = result["verification"]["results"].values()
+        self.assertEqual(receipt["plan_identities"], identities)
+        self.assertEqual(receipt["url"], SALE_URL)
+        self.assertEqual(receipt["observed_url"], PEER_URL)
+        self.assertEqual(receipt["observed_offer_key"], observed.key)
+        self.assertEqual(result["verification"]["verified_discoveries"], [
+            {"identity": identity, "url": SALE_URL} for identity in identities])
+
     def test_exploration_retains_unreached_and_verified_products_at_budget_limit(self):
         search_url = "https://www.ark-pc.co.jp/search/?q=MODEL-A"
         identity = offer().identity
@@ -64,7 +131,7 @@ class RunnerPhases(unittest.TestCase):
             result = collector.collect(3)
         verification = result["verification"]
         self.assertEqual(len(verification["verified_discoveries"]), 1)
-        verified = verification["verified_discoveries"][0]
+        verified = verification["verified_discoveries"][0]["url"]
         unverified = ({SALE_URL, PEER_URL} - {verified}).pop()
         self.assertEqual(verification["unverified_discoveries"], [{"identity": identity, "url": unverified, "reason": "not_reached"}])
         self.assertEqual(result["queue"], previous["queue"])
@@ -90,7 +157,7 @@ class RunnerPhases(unittest.TestCase):
         self.assertEqual(task["kind"], "comparison")
         with patch("sale_monitor.runner.parse_product", return_value=offer(condition="used")):
             result = collector.collect(3)
-        self.assertEqual(result["verification"]["verified_discoveries"], [SALE_URL])
+        self.assertEqual(result["verification"]["verified_discoveries"], [{"identity": identity, "url": SALE_URL}])
         self.assertEqual(result["verification"]["unverified_discoveries"], [])
 
     def setUp(self):
@@ -167,7 +234,8 @@ class RunnerPhases(unittest.TestCase):
         self.assertEqual(result["offers"][sale.key]["discovery_kind"], "sale")
         self.assertEqual(result["journal"][-1]["run_id"], "run1")
         receipt = next(iter(result["verification"]["results"].values()))
-        self.assertEqual(receipt, {"url": SALE_URL, "plan_identity": sale.identity, "type": "product", "result": "ok", "reason": None})
+        self.assertEqual(receipt, {"url": SALE_URL, "plan_identity": sale.identity, "plan_identities": [sale.identity],
+            "observed_offer_key": sale.key, "observed_url": SALE_URL, "type": "product", "result": "ok", "reason": None})
         self.assertEqual(result["verification_queue"], {})
         self.assertEqual(self.disk.load("stores/ark.json", {})["queue"], previous["queue"])
 

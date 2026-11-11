@@ -259,6 +259,11 @@ def aggregate(root: Path, public: Path, run_id: str, now=None, scope: dict | Non
     decisions = []
     reviews = []
     sale_candidates = [o for o in current if o.discovery_kind != "comparison"] if scope is not None else []
+
+    def event_candidate(offer):
+        return offer.discovery_kind != "comparison" or scope is not None and any(
+            same_product(candidate, offer) for candidate in sale_candidates)
+
     tracking = disk.load("comparison_tracking.json", {}) if scope is not None else {}
     for offer in current:
         identity = offer.identity
@@ -308,7 +313,7 @@ def aggregate(root: Path, public: Path, run_id: str, now=None, scope: dict | Non
                     if scope.get("routes", {}).get(route, {}).get("store", route.split(":", 1)[0]) == row["store"]), None)
                 unconfirmed.append({**row, "route": route, "category": "in_scope_not_confirmed",
                                     "reason": "discovered_url_not_verified"})
-        if offer.discovery_kind != "comparison" or scope is not None and any(same_product(candidate, offer) for candidate in sale_candidates):
+        if event_candidate(offer):
             events, state = update_events(offer, decision, registry["states"].get(offer.key), now)
             registry["states"][offer.key] = state
             for event in events:
@@ -360,10 +365,14 @@ def aggregate(root: Path, public: Path, run_id: str, now=None, scope: dict | Non
     events.sort(key=lambda e: (e["occurred_at"], e["event_id"]))
     # Every retained event is revalidated against current evidence before it is
     # offered for notification. Its fixed ID and prior delivery status survive.
-    accepted = {d["offer"]["store"] + ":" + Offer.from_dict(d["offer"]).key: d for d in decisions if d["payment"]["status"] == "accepted" or d["points"]["status"] == "accepted"}
+    accepted = {d["offer"]["store"] + ":" + Offer.from_dict(d["offer"]).key: d for d in decisions
+                if (scope is None or event_candidate(Offer.from_dict(d["offer"])))
+                and (d["payment"]["status"] == "accepted" or d["points"]["status"] == "accepted")}
     for event in events:
         key = event["offer"]["store"] + ":" + event["offer_key"]
-        event["currently_actionable"] = event["kind"] == "ended" and now - timestamp(event["occurred_at"]) <= timedelta(hours=8) or key in accepted
+        eligible = scope is None or event_candidate(current_by_key.get(
+            (event["offer"]["store"], event["offer_key"]), Offer.from_dict(event["offer"])))
+        event["currently_actionable"] = eligible and (event["kind"] == "ended" and now - timestamp(event["occurred_at"]) <= timedelta(hours=8) or key in accepted)
         event["current_evidence"] = accepted.get(key)
     notification = [e for e in events if e["currently_actionable"] and e["delivery_status"] != "delivered"]
     complete = sum(s["status"] == "complete" for s in statuses.values())

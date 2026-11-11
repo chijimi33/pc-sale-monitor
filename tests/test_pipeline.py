@@ -213,6 +213,38 @@ class StageTests(Fixture):
 
 
 class PipelineTests(Fixture):
+    def test_stage_D_expands_shared_receipts_and_passes_observed_keys_including_legacy(self):
+        first, second = item("ark"), item("dospara", model="OTHER")
+        peer = item("sofmap", discovery_kind="comparison")
+        requested = URLS["sofmap"] + "&requested=1"
+        identities = sorted([first.identity, second.identity])
+        for legacy in (False, True):
+            with self.subTest(legacy=legacy):
+                for current in (first, second, peer):
+                    self.save_offer(current, RUN)
+                receipt = {"type": "product", "result": "ok", "url": requested,
+                           "observed_offer_key": peer.key, "observed_url": peer.url,
+                           "plan_identity": identities[0]}
+                if not legacy:
+                    receipt["plan_identities"] = identities
+                state = self.disk.load("stores/sofmap.json", {})
+                state["verification"] = {"run_id": RUN, "results": {"shared": receipt}}
+                self.disk.save("stores/sofmap.json", state)
+                tracking = {identity: {"sofmap": {"unverified_urls": [requested]}} for identity in identities}
+                self.disk.save("comparison_tracking.json", tracking)
+                with patch("sale_monitor.pipeline.planner.update_tracking", wraps=pipeline.planner.update_tracking) as update:
+                    self.run_pipeline()
+                verified = update.call_args.kwargs["discoveries"]["sofmap"]["verified"]
+                expected_identities = identities[:1] if legacy else identities
+                self.assertEqual(verified, [{"identity": identity, "url": requested, "offer_key": peer.key}
+                                            for identity in expected_identities])
+                result = self.disk.load("comparison_tracking.json", {})
+                for identity in expected_identities:
+                    values = result[identity]["sofmap"]
+                    self.assertEqual(values["unverified_urls"], [])
+                    reason = "became_known_comparator" if identity == peer.identity else "identity_mismatch"
+                    self.assertEqual(values["settled_urls"][0]["reason"], reason)
+
     def test_planning_and_evaluation_include_unarchived_old_run_low(self):
         self.save_offer(item("ark", 10000), RUN)
         self.save_offer(item("dospara", 11000), RUN)
@@ -550,23 +582,60 @@ class VerticalPipeline(Fixture):
 
 class RealProcessTrees(unittest.TestCase):
     def test_real_child_group_is_killed_and_missing_group_is_ignored(self):
-        with subprocess.Popen([sys.executable, "-c", "raise SystemExit(0)"]) as process:
-            process.wait(timeout=5)
-            for error in (None, ProcessLookupError()):
-                with self.subTest(error=error), patch("sale_monitor.pipeline.os.name", "posix"), patch(
-                        "sale_monitor.pipeline.os.killpg", create=True, side_effect=error) as killpg, patch(
-                        "sale_monitor.pipeline.signal.SIGKILL", getattr(signal, "SIGKILL", 9), create=True):
+        for error in (None, ProcessLookupError()):
+            with self.subTest(error=error), subprocess.Popen([sys.executable, "-c", "raise SystemExit(0)"]) as process:
+                process._pipeline_owned_group = True
+                with patch("os.killpg", create=True, side_effect=error) as killpg, patch(
+                        "os.getpgrp", return_value=-1, create=True):
+                    process.wait(timeout=5)
                     pipeline._kill_remaining_process_group(process)
-                    killpg.assert_called_once_with(process.pid, signal.SIGKILL)
+                    pipeline._kill_remaining_process_group(process)
+                    killpg.assert_called_once_with(process.pid, getattr(signal, "SIGKILL", 9))
 
     def test_fake_spawn_never_signals_a_process_group(self):
-        with patch("sale_monitor.pipeline.os.name", "posix"), patch(
-                "sale_monitor.pipeline.os.killpg", create=True) as killpg:
+        with patch("os.killpg", create=True) as killpg:
             fake = SimpleNamespace(pid=os.getpid(), poll=lambda: 0)
             result = pipeline._run_children(["ark"], "discovery", 1, "unused", RUN, "unused", "unused",
                                             lambda *args, **kwargs: fake, time.monotonic)
         self.assertEqual(result["ark"]["status"], "completed")
         killpg.assert_not_called()
+
+    def test_posix_timeout_helpers_never_signal_fake_or_unowned_real_groups(self):
+        for marked in (False, True):
+            fake = Mock(pid=123, _pipeline_owned_group=marked, _pipeline_group_cleaned=False)
+            fake.wait.side_effect = [subprocess.TimeoutExpired("fixture", 1)]
+            with self.subTest(marked=marked), patch("os.killpg", create=True) as killpg:
+                pipeline._stop_posix_process_tree(fake)
+                killpg.assert_not_called()
+                fake.terminate.assert_called_once_with()
+                fake.kill.assert_called_once_with()
+        with subprocess.Popen([sys.executable, "-c", "import time; time.sleep(60)"]) as process, patch(
+                "os.killpg", create=True) as killpg:
+            pipeline._stop_posix_process_tree(process)
+            process.wait(timeout=5)
+            killpg.assert_not_called()
+
+    def test_own_group_is_never_signalled_even_with_ownership_marker(self):
+        with subprocess.Popen([sys.executable, "-c", "raise SystemExit(0)"]) as process:
+            process._pipeline_owned_group = True
+            with patch("os.getpgrp", return_value=process.pid, create=True), patch("os.killpg", create=True) as killpg:
+                self.assertFalse(pipeline._signal_owned_process_group(process, signal.SIGTERM))
+                process.wait(timeout=5)
+                pipeline._kill_remaining_process_group(process)
+                killpg.assert_not_called()
+
+    def test_owned_timeout_sends_final_group_signal_before_wait_and_only_once(self):
+        with subprocess.Popen([sys.executable, "-c", "raise SystemExit(0)"]) as process:
+            process._pipeline_owned_group = True
+            calls = []
+            with patch("os.getpgrp", return_value=-1, create=True), patch(
+                    "os.killpg", side_effect=lambda pid, sig: calls.append(sig), create=True), patch.object(
+                    process, "wait", wraps=process.wait) as wait:
+                pipeline._stop_posix_process_tree(process)
+                wait.assert_not_called()
+                process.wait(timeout=5)
+                pipeline._kill_remaining_process_group(process)
+            self.assertEqual(calls, [signal.SIGTERM, getattr(signal, "SIGKILL", 9)])
 
     @unittest.skipUnless(os.name == "posix", "POSIX orphaned process-group cleanup")
     def test_exited_worker_reaps_its_term_ignoring_grandchild(self):

@@ -103,35 +103,60 @@ def stage(state_root, store, phase, run_id, seconds, config_path, routes_path, p
     return collector.collect(seconds)
 
 
+def _signal_owned_process_group(process, sig):
+    """Signal a POSIX group only with explicit pipeline ownership."""
+    if (not isinstance(process, subprocess.Popen) or not getattr(process, "_pipeline_owned_group", False)
+            or process.pid == os.getpgrp()):
+        return False
+    try:
+        os.killpg(process.pid, sig)
+    except ProcessLookupError:
+        pass
+    return True
+
+
 def _kill_remaining_process_group(process):
-    """Reap descendants only for real children launched in an isolated session."""
-    if os.name == "posix" and isinstance(process, subprocess.Popen):
-        try:
-            os.killpg(process.pid, signal.SIGKILL)
-        except ProcessLookupError:
-            pass
+    """Consume group cleanup once, immediately after detecting child exit."""
+    if (not isinstance(process, subprocess.Popen) or not getattr(process, "_pipeline_owned_group", False)
+            or getattr(process, "_pipeline_group_cleaned", False)):
+        return
+    process._pipeline_group_cleaned = True
+    _signal_owned_process_group(process, getattr(signal, "SIGKILL", 9))
+
+
+def _stop_posix_process_tree(process):
+    """Stop an owned group before reaping its leader, or just the supplied child."""
+    if not getattr(process, "_pipeline_group_cleaned", False) and _signal_owned_process_group(process, signal.SIGTERM):
+        # Do not reap the leader before the final signal: its PID could be reused.
+        process._pipeline_group_cleaned = True
+        _signal_owned_process_group(process, getattr(signal, "SIGKILL", 9))
+    else:
+        terminate = getattr(process, "terminate", None)
+        kill = getattr(process, "kill", None)
+        if terminate is not None or kill is not None:
+            (terminate or kill)()
+        wait = getattr(process, "wait", None)
+        if wait is not None:
+            try:
+                wait(timeout=1)
+            except subprocess.TimeoutExpired:
+                if kill is not None:
+                    kill()
 
 
 def _stop_process_tree(process):
     """Stop only the isolated process tree owned by this pipeline."""
-    if os.name == "posix":
-        try:
-            os.killpg(process.pid, signal.SIGTERM)
-        except ProcessLookupError:
-            pass
-        try:
-            process.wait(timeout=1)
-        except subprocess.TimeoutExpired:
-            pass
-        # The leader can exit before a descendant which ignores TERM.
-        _kill_remaining_process_group(process)
+    if os.name == "posix" or not isinstance(process, subprocess.Popen):
+        _stop_posix_process_tree(process)
     else:
         result = subprocess.run(["taskkill", "/PID", str(process.pid), "/T", "/F"],
                                 capture_output=True, timeout=15)
         if result.returncode and getattr(process, "_pipeline_job", None) is None and process.poll() is None:
             raise RuntimeError("process_tree_stop_failed")
         _close_job(process)
-    process.wait(timeout=5)
+    wait = getattr(process, "wait", None)
+    if wait is not None:
+        wait(timeout=5)
 
 
 def _job_api():
@@ -217,6 +242,13 @@ def _run_children(stores, phase, seconds, root, run_id, config_path, routes_path
                 command.extend(["--plan", str(plan_path)])
             try:
                 processes[store] = spawn(command, **options)
+                process = processes[store]
+                if os.name == "posix" and isinstance(process, subprocess.Popen):
+                    # A replacement spawn may ignore start_new_session.
+                    try:
+                        process._pipeline_owned_group = os.getpgid(process.pid) == process.pid and process.pid != os.getpgrp()
+                    except ProcessLookupError:
+                        process._pipeline_owned_group = False
                 _attach_job(processes[store])
             except OSError as exc:
                 results[store] = {"status": "failed", "exit_code": None, "reason": type(exc).__name__}
@@ -328,10 +360,13 @@ def run(state_root: Path, public: Path, run_id: str, *, config_path=Path("config
             # Fetched pages are passed with their target identity: tracking
             # decides from the observation whether the obligation is settled.
             discoveries[store] = {"unverified": verification.get("unverified_discoveries", []),
-                                  "verified": [{"identity": row["plan_identity"], "url": row["url"]}
+                                  "verified": [{"identity": identity, "url": row["url"],
+                                                "offer_key": row.get("observed_offer_key")}
                                                for row in verification.get("results", {}).values()
                                                if row.get("type") == "product" and row.get("result") == "ok"
-                                               and row.get("plan_identity") and row.get("url")]}
+                                               and row.get("url")
+                                               for identity in sorted(set(row.get("plan_identities", [])) |
+                                                   ({row["plan_identity"]} if row.get("plan_identity") else set()))]}
     disk.save("comparison_tracking.json", planner.update_tracking(tracking, comparison_plan, current, failed, searched, now,
                                                                   discoveries=discoveries))
     summary = route_state.public_summary()

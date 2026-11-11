@@ -8,6 +8,7 @@ from unittest.mock import patch
 from sale_monitor.comparison_integrity import (known_comparators, missing_comparators,
                                                out_of_scope_comparators)
 from sale_monitor.models import STORES, Offer, iso
+from sale_monitor.engine import evaluate, update_events
 from sale_monitor.reporting import aggregate, historical_rows, validation
 from sale_monitor.storage import Store, read_json
 
@@ -42,6 +43,39 @@ def scope():
 
 
 class ScopeReporting(unittest.TestCase):
+    def test_prior_comparison_event_requires_current_promotion_only_in_scoped_mode(self):
+        for scoped in (False, True):
+            for promoted in (False, True):
+                for kind in ("qualified", "ended"):
+                    with self.subTest(scoped=scoped, promoted=promoted, kind=kind):
+                        root = self.root / f"{scoped}-{promoted}-{kind}"
+                        disk = Store(root)
+                        peer = offer("sofmap", 9000, discovery_kind="comparison")
+                        peers = [peer, offer("dospara", 10000, discovery_kind="comparison"),
+                                 offer("koubou", 11000, discovery_kind="comparison")]
+                        sale = offer("ark", 12000, model=peer.model if promoted else "OTHER")
+                        for item in [*peers, sale]:
+                            disk.save(f"stores/{item.store}.json", {"store": item.store, "run_id": RUN,
+                                "offers": {item.key: item.to_dict()}, "queue": {}, "journal": []})
+                        decision = evaluate(peer, peers, [], NOW)
+                        self.assertEqual(decision["status"], "accepted")
+                        events, state = update_events(peer, decision, None, NOW)
+                        event, = events
+                        event.update(kind=kind, event_id="prior-" + kind, occurred_at=iso(NOW - timedelta(hours=1)))
+                        disk.save("events/registry.json", {"states": {peer.key: state}, "events": {event["event_id"]: event}})
+                        with patch("sale_monitor.reporting.Store", return_value=disk), patch.object(disk, "save", wraps=disk.save) as save:
+                            aggregate(root, root / "public", RUN, NOW, self.scope if scoped else None)
+                        registry = next(call.args[1] for call in save.call_args_list if call.args[0] == "events/registry.json")
+                        current = next(d for d in read_json(root / "public/evidence.json", {})["decisions"]
+                                       if d["offer"]["store"] == "sofmap")
+                        self.assertEqual(current["payment"]["status"], "accepted")
+                        prior = registry["events"][event["event_id"]]
+                        actionable = promoted or not scoped
+                        self.assertEqual(prior["currently_actionable"], actionable)
+                        self.assertEqual(prior["current_evidence"], current if actionable else None)
+                        notices = read_json(root / "public/notifications.json", {})["events"]
+                        self.assertEqual(any(e["event_id"] == event["event_id"] for e in notices), actionable)
+
     def setUp(self):
         temporary = tempfile.TemporaryDirectory(prefix="scope-reporting-")
         self.addCleanup(temporary.cleanup)
