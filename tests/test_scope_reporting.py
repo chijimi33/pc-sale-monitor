@@ -196,7 +196,7 @@ class ScopeReporting(unittest.TestCase):
 
     def test_legacy_output_keys_remain_unchanged_on_repeated_aggregation(self):
         self.candidates()
-        expected = {"schema_version", "generated_at", "run_id", "run_provenance", "mode",
+        expected = {"schema_version", "decision_criteria_version", "generated_at", "run_id", "run_provenance", "mode",
                     "monitored_store_count", "excluded_stores", "complete_stores",
                     "collection_completion_rate", "stores", "notification_count", "review_count",
                     "comparison_planning", "files", "delivery_guarantee", "full_rescan_needed"}
@@ -241,6 +241,8 @@ class ScopeReporting(unittest.TestCase):
         old = offer("tsukumo", 11000, observed_run_id="old", observed_at=iso(NOW - timedelta(days=3)))
         self.save(old)
         self.disk.save("history/tsukumo/2026-11-08.json", [{"offer": old.to_dict(), "run_id": "old"}])
+        own = offer(price=10500, observed_run_id="old", observed_at=iso(NOW - timedelta(days=2)))
+        self.disk.save("history/ark/2026-11-09.json", [{"offer": own.to_dict(), "run_id": "old"}])
         self.aggregate()
         self.assertEqual(self.decision()["payment"]["rule"], "B_observed_year_low")
 

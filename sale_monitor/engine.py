@@ -7,6 +7,9 @@ from statistics import median
 from .models import JST, Offer, allowed_url, digest, fresh, iso, same_product, timestamp
 
 
+CRITERIA_VERSION = 2
+
+
 def amount(offer: Offer, points: bool) -> int | None:
     if offer.payment is None or points and (type(offer.points_yen) is not int or offer.points_yen < 0):
         return None
@@ -14,7 +17,7 @@ def amount(offer: Offer, points: bool) -> int | None:
 
 
 def evaluate(offer: Offer, others: list[Offer], history: list[dict], now: datetime, points: bool = False) -> dict:
-    decision = {"offer_key": offer.key, "status": "insufficient", "basis": "points" if points else "payment", "rule": None, "reasons": [], "comparisons": [], "history": {}}
+    decision = {"offer_key": offer.key, "status": "insufficient", "basis": "points" if points else "payment", "criteria_version": CRITERIA_VERSION, "rule": None, "reasons": [], "comparisons": [], "history": {}}
     errors = offer.errors(now)
     if errors:
         decision["reasons"] = errors
@@ -59,7 +62,7 @@ def evaluate(offer: Offer, others: list[Offer], history: list[dict], now: dateti
         decision.update(status="accepted", rule=basis["rule"], reasons=[])
         return decision
     decision["reasons"].extend(basis["reasons"])
-    if len(compared) >= 2 and "B_history_gap_below_threshold" in decision["reasons"]:
+    if len(compared) >= 2 and basis["status"] == "not_met":
         decision["status"] = "rejected"
     return decision
 
@@ -85,19 +88,31 @@ def history_basis(offer: Offer, history: list[dict], now: datetime, points: bool
                 continue
             value = amount(past, points)
             if value is not None and allowed_url(past.url):
-                records.append((checked, value, past.url))
+                records.append((checked, value, past.url, past.seller_id == offer.seller_id))
         except (KeyError, TypeError, ValueError):
             continue
+
+    def own_observations(rows):
+        return {"samples": len(rows), "from": iso(min(r[0] for r in rows)) if rows else None,
+                "to": iso(max(r[0] for r in rows)) if rows else None}
+
+    seller_history = {"seller_id": offer.seller_id}
+    year_missing = False
     year = [r for r in records if r[0].astimezone(JST).year == now.astimezone(JST).year]
     if year:
         minimum = min(r[1] for r in year)
         if minimum - price >= 500:
-            result.update(status="met", rule="B_observed_year_low", history={"minimum_yen": minimum, "from": iso(min(r[0] for r in year)), "to": iso(max(r[0] for r in year)), "samples": len(year), "scope": "observed_period_only", "sources": sorted(set(r[2] for r in year))})
-            return result
+            own_year = [r for r in year if r[3]]
+            seller_history["year"] = {"status": "present" if own_year else "missing", **own_observations(own_year)}
+            if own_year:
+                result.update(status="met", rule="B_observed_year_low", history={"minimum_yen": minimum, "from": iso(min(r[0] for r in year)), "to": iso(max(r[0] for r in year)), "samples": len(year), "scope": "observed_period_only", "sources": sorted(set(r[2] for r in year)), "seller_history": seller_history})
+                return result
+            year_missing = True
+            result["reasons"].append("B_seller_history_missing_in_period")
     # Use one market minimum per day, never count repeat observations as distinct days.
     recent = [r for r in records if now - timedelta(days=90) <= r[0] < now]
     daily = {}
-    for date, value, url in recent:
+    for date, value, url, own in recent:
         key = date.astimezone(JST).date().isoformat()
         daily[key] = min(daily.get(key, value), value)
     if len(daily) >= 3 and (now - min(r[0] for r in recent)).days >= 30:
@@ -105,11 +120,35 @@ def history_basis(offer: Offer, history: list[dict], now: datetime, points: bool
         delta = baseline - price
         result["history"] = {"median_yen": float(baseline), "minimum_yen": min(daily.values()), "from": min(daily), "to": max(daily), "days": len(daily), "samples": len(recent), "sources": sorted(set(r[2] for r in recent)), "scope": "observed_days_only"}
         if delta >= 500 and delta * 10 >= baseline and price <= min(daily.values()):
-            result.update(status="met", rule="B_recent_median")
-            return result
-        result.update(status="not_met", reasons=["B_history_gap_below_threshold"])
+            own_recent = [r for r in recent if r[3]]
+            own_days = {r[0].astimezone(JST).date().isoformat() for r in own_recent}
+            seller_days_market = [r for r in recent if r[0].astimezone(JST).date().isoformat() in own_days]
+            seller_baseline = Fraction(median([Fraction(daily[day]) for day in own_days])) if own_days else None
+            audit = {**own_observations(own_recent), "days": len(own_days),
+                     "market_samples_on_seller_days": len(seller_days_market),
+                     "market_median_on_seller_days_yen": float(seller_baseline) if seller_baseline is not None else None}
+            if not own_recent:
+                audit["status"] = "missing"
+                result["reasons"].append("B_seller_history_missing_in_period")
+            elif len(own_days) < 3 or (now - min(r[0] for r in own_recent)).days < 30:
+                audit["status"] = "insufficient"
+                result["reasons"].append("B_seller_history_insufficient")
+            elif not (seller_baseline - price >= 500 and (seller_baseline - price) * 10 >= seller_baseline):
+                audit["status"] = "gap_below_threshold"
+                result["status"] = "insufficient" if year_missing else "not_met"
+                result["reasons"].append("B_seller_history_gap_below_threshold")
+            else:
+                audit["status"] = "met"
+                result.update(status="met", rule="B_recent_median", reasons=[])
+            seller_history["recent"] = audit
+        else:
+            result["status"] = "insufficient" if year_missing else "not_met"
+            result["reasons"].append("B_history_gap_below_threshold")
     else:
         result["reasons"].append("B_history_insufficient")
+    if len(seller_history) > 1:
+        result["history"]["seller_history"] = seller_history
+    result["reasons"] = list(dict.fromkeys(result["reasons"]))
     return result
 
 

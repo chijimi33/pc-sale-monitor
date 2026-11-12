@@ -30,7 +30,11 @@ class HistoryBasisTests(unittest.TestCase):
         self.assertEqual(result, {"status": "met", "rule": "B_observed_year_low",
                                   "history": {"minimum_yen": 9500, "from": "2026-09-13T00:00:00+00:00",
                                               "to": "2026-09-13T00:00:00+00:00", "samples": 1,
-                                              "scope": "observed_period_only", "sources": [offer().url]}, "reasons": []})
+                                              "scope": "observed_period_only", "sources": [offer().url],
+                                              "seller_history": {"seller_id": "ark", "year": {
+                                                  "status": "present", "samples": 1,
+                                                  "from": "2026-09-13T00:00:00+00:00",
+                                                  "to": "2026-09-13T00:00:00+00:00"}}}, "reasons": []})
 
     def test_year_low_499_yen_is_insufficient(self):
         self.assertEqual(history_basis(offer(), history([(1, 9499)]), NOW)["status"], "insufficient")
@@ -110,12 +114,12 @@ class HistoryBasisTests(unittest.TestCase):
                     self.assertEqual(decision["status"] == "accepted", status == "met")
 
     def test_complete_evaluate_regression_including_key_order(self):
-        # These complete expected decisions were fixed against the original evaluator.
+        # Keep complete decisions and key order, including the v2 audit additions.
         candidate = offer()
         peer = offer("bic", 9500)
         comparison = {"seller_id": "bic", "price_yen": 9500, "url": peer.url,
                       "observed_at": peer.observed_at, "evidence": peer.evidence}
-        envelope = {"offer_key": candidate.key, "status": "insufficient", "basis": "payment", "rule": None,
+        envelope = {"offer_key": candidate.key, "status": "insufficient", "basis": "payment", "criteria_version": 2, "rule": None,
                     "reasons": ["A_independent_sellers_insufficient", "B_history_insufficient"],
                     "comparisons": [comparison], "history": {}}
         cases = [([], [peer], envelope)]
@@ -125,7 +129,9 @@ class HistoryBasisTests(unittest.TestCase):
         year = deepcopy(envelope)
         year.update(status="accepted", rule="B_observed_year_low", reasons=[],
                     history={"minimum_yen": 9500, "from": "2026-09-13T00:00:00+00:00", "to": "2026-09-13T00:00:00+00:00",
-                             "samples": 1, "scope": "observed_period_only", "sources": [candidate.url]})
+                             "samples": 1, "scope": "observed_period_only", "sources": [candidate.url],
+                             "seller_history": {"seller_id": "ark", "year": {"status": "present", "samples": 1,
+                                 "from": "2026-09-13T00:00:00+00:00", "to": "2026-09-13T00:00:00+00:00"}}})
         cases.append((history([(1, 9500)]), [peer], year))
         cheaper = deepcopy(envelope)
         cheaper.update(status="rejected", reasons=["cheaper_current_offer"])
@@ -146,6 +152,11 @@ class HistoryBasisTests(unittest.TestCase):
                             history={"median_yen": 10000.0, "minimum_yen": low, "from": "2026-08-14", "to": "2026-09-04",
                                      "days": 3, "samples": 3, "sources": [candidate.url], "scope": "observed_days_only"})
             rows = history([(31, 10000), (20, 10000), (10, low)])
+            if low == 9000:
+                expected["history"]["seller_history"] = {"seller_id": "ark", "recent": {
+                    "samples": 3, "from": "2026-08-14T00:00:00+00:00", "to": "2026-09-04T00:00:00+00:00",
+                    "days": 3, "market_samples_on_seller_days": 3,
+                    "market_median_on_seller_days_yen": 10000.0, "status": "met"}}
             cases.append((rows, [peer], expected))
             if low == 8999:
                 rejected = deepcopy(expected)

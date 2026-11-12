@@ -6,7 +6,7 @@ from pathlib import Path
 from statistics import median
 import shutil
 
-from .engine import evaluate, update_events
+from .engine import CRITERIA_VERSION, evaluate, update_events
 from .models import STORES, Offer, digest, fresh, iso, same_product, timestamp, utcnow
 from .storage import Store, atomic_json, read_json
 from .scheduling import plan_comparisons
@@ -377,7 +377,7 @@ def aggregate(root: Path, public: Path, run_id: str, now=None, scope: dict | Non
     notification = [e for e in events if e["currently_actionable"] and e["delivery_status"] != "delivered"]
     complete = sum(s["status"] == "complete" for s in statuses.values())
     provenance = verified_provenance(run_id, disk.load("validation/run_provenance.json", {}))
-    index = {"schema_version": 1, "generated_at": iso(now), "run_id": run_id, "run_provenance": provenance, "mode": "parallel_validation", "monitored_store_count": 10,
+    index = {"schema_version": 1, "decision_criteria_version": CRITERIA_VERSION, "generated_at": iso(now), "run_id": run_id, "run_provenance": provenance, "mode": "parallel_validation", "monitored_store_count": 10,
              "excluded_stores": ["rakuten"], "complete_stores": complete, "collection_completion_rate": complete/10,
              "stores": statuses, "notification_count": len(notification), "review_count": len(reviews),
              "comparison_planning": comparison_plan.get("summary", comparison_plan),

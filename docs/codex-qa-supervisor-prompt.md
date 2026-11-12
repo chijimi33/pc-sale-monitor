@@ -13,6 +13,7 @@ https://raw.githubusercontent.com/chijimi33/pc-sale-monitor/monitor-data/public/
 - routesを経路×機能で前回と比較し、停止・再開・拒否などの状態変化を確認します。無応答を拒否と断定せず、取得失敗を在庫切れや販売終了に変換しません。変化の比較元がなければ、その不足を報告します。
 - comparison_plan.json の当該runの候補数、状態別件数、予約リクエスト数を確認します。plannedや予約だけを達成とせず、選抜候補の一式確認が完了したかを今回の観測・判定証拠と照合します。要約だけで達成率を確定できない部分は未実証とします。
 - 通知候補は notifications.json の current_evidence と evidence.json、必要な review_queue.json・flyer_review.json・collection_errors.json を照合します。A/B数値、同一性、独立販売者、当該runの価格、送料・在庫・期限、履歴範囲、comparison_scopeのlabel・confirmed・unconfirmedを確認します。範囲内の既知比較先の未確認を隠して採用していないか点検します。
+- B判定は `criteria_version`（現行2）と `history.seller_history` を照合し、自店履歴条件を確認します。年内最安Bを「値下げされた」と説明せず、「今年の観測済み最低を更新」までにとどめているか点検します。
 - validation.json の新方式のbaseline・cutover_blockersと正式監査の証拠を確認します。7日間計測後に決めるサービス水準、監査20件以上・誤通知0・未解決0、古いJSON・期限切れの扱いと比較範囲表示の実確認が揃うまで、正式切替成立とは報告しません。
 
 コード変更、GitHubへの反映、スケジュール変更、経路状態の変更、比較範囲の変更は行いません。必要と判断した場合は、理由・対象・根拠・未確認事項を報告し、人の判断を待ちます。公開監査や配信状態の書き換え、通知タスクの切替も行いません。
