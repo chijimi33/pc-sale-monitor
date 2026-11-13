@@ -187,6 +187,17 @@ class ValidationTests(unittest.TestCase):
             with self.subTest(extra=extra), self.assertRaisesRegex(ValidationError, "foreign_url"):
                 self.validate(after={**self.after, **extra})
 
+    def test_availability_vocabulary_and_url_field_shapes_inside_evidence(self):
+        bad = ({"errors": [{"evidence": [{"fields": {"schema_availability": "https://example.com/InStock"}}]}]},
+               {"errors": [{"evidence": {"source_urls": {"a": "https://example.com/a"}}}]},
+               {"errors": [{"evidence": {"source_urls": [{"a": "https://example.com/a"}]}}]},
+               {"errors": [{"evidence": {"source_url": 5}}]})
+        for extra in bad:
+            with self.subTest(extra=extra), self.assertRaisesRegex(ValidationError, "foreign_url|invalid_url_field"):
+                self.validate(after={**self.after, **extra})
+        self.validate(after={**self.after, "errors": [{"evidence": {"fields": {
+            "schema_availability": "https://schema.org/InStock"}, "source_url": None}}]})
+
     def test_page_text_that_mentions_another_site_is_not_a_fetch_target(self):
         # Real specification text says things like "see https://www.asus.com/support/".
         for extra in ({"errors": [{"nested": ["see https://example.com/a"]}]},

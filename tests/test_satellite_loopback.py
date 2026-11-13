@@ -103,8 +103,9 @@ class LoopbackTests(CoordinatorFixture):
         if self.result_delay:
             self.clock.sleep(self.result_delay)
             self.remote_stages.service()  # expire while the result is still on the PC
-        process = FakeProcess()
-        process.returncode = code
+        process = FakeProcess(running=self.stage_reason == "killed")
+        if self.stage_reason != "killed":
+            process.returncode = code
         return process
 
     def finish_stage(self, handle, expected="completed", step=True):

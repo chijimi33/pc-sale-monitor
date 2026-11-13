@@ -121,10 +121,35 @@ class GuardTests(unittest.TestCase):
                     self.guard.after_response(URL, status, {}, body)
                 self.assertEqual(len(ControlState(root).active_refusals), 1)
 
-    def test_marker_body_boundary_is_in_bytes(self):
-        self.guard.before_request(URL)
-        self.guard.after_response(URL, 200, {}, b'captcha' + b'x' * (8192 - 7))
-        self.assertFalse(self.control.active_refusals)
+    def test_size_never_hides_a_refusal_shown_to_people(self):
+        # A large page titled like the shop that tells the visitor access was refused.
+        page = ('<html><title>ツクモ</title><style>' + 'a{}' * 3000 + '</style><body>'
+                + '<div>' + '商品' * 4000 + '</div><p>アクセスが拒否されました</p></body></html>').encode()
+        entity = '<p>&#x30A2;&#x30AF;&#x30BB;&#x30B9;が拒否されました</p>'.encode() + b'x' * 20000
+        spaced = b'<h1>Access \n   Denied</h1>' + b'x' * 20000
+        widget = b'<html><body><form><div class="g-recaptcha" data-sitekey="k"></div></form>' + b'x' * 20000 + b'</body></html>'
+        field = b'<html><body><textarea name="g-recaptcha-response"></textarea>' + b'x' * 20000 + b'</body></html>'
+        for body in (page, entity, spaced, widget, field, b'captcha' + b'x' * 9000):
+            with self.subTest(body=body[:40]), tempfile.TemporaryDirectory() as root:
+                self.control = ControlState(root)
+                self.guard = self.make_guard()
+                self.guard.before_request(URL)
+                with self.assertRaisesRegex(CommunicationForbidden, 'refused'):
+                    self.guard.after_response(URL, 200, {}, body)
+                self.assertEqual(len(ControlState(root).active_refusals), 1)
+
+    def test_words_only_in_comments_scripts_and_styles_do_not_refuse(self):
+        body = ('<html><head><title>Tsukumo</title><!-- access denied captcha -->'
+                '<script src="https://www.google.com/recaptcha/enterprise.js"></script>'
+                '<script>var message = "Access Denied"; grecaptcha.ready();</script>'
+                '<style>.grecaptcha-badge { visibility: hidden; } .captcha {}</style></head>'
+                '<body><p>GeForce RTX 5070</p></body></html>').encode()
+        for padding in (b'', b'x' * 120000):
+            with self.subTest(size=len(padding)):
+                self.guard.before_request(URL)
+                self.guard.after_response(URL, 200, {}, body + padding)
+                self.assertFalse(self.control.active_refusals)
+                self.assertFalse(self.guard.communication_forbidden)
 
     def test_refusal_written_before_forbid(self):
         snapshots = []
@@ -183,7 +208,11 @@ class GuardTests(unittest.TestCase):
                 with self.assertRaises(CommunicationForbidden):
                     client.get(url)
                 self.assertFalse(transport.calls)
-                self.assertTrue(self.guard.communication_forbidden)
+                self.assertFalse(self.guard.communication_forbidden)
+                self.assertIsNone(self.guard.reason)
+                client, transport = self.client([(200, {}, b"ok")])
+                self.assertEqual(client.get(URL).body, b"ok")
+                self.assertEqual(transport.calls, [URL])
 
     def test_redirect_foreign_host_blocked_before_hop(self):
         client, transport = self.client([(302, {"Location": "https://example.com/"}, b""), (200, {}, b"unused")])

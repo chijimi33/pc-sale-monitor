@@ -299,6 +299,27 @@ class AgentTests(unittest.TestCase):
         self.assertEqual(self.mailbox.manifests()[-1]["status"], wire_status("stopped", "killed"))
         self.assertEqual(self.mailbox.posts[-1]["stores/tsukumo.json"], self.output)
 
+    def test_child_exiting_during_kill_check_is_not_killed(self):
+        self.mailbox.add(collect_until=time_string(NOW + 2))
+        self.running = True
+        original = Handshake.must_kill
+        def must_kill(handshake, until):
+            expired = original(handshake, until)
+            if expired:
+                self.process.returncode = 0
+            return expired
+        with patch.object(Handshake, "must_kill", must_kill):
+            self.agent.step()
+        self.assertFalse(self.process.killed)
+        self.assertEqual(self.mailbox.manifests()[-1]["status"], "completed")
+
+    def test_child_cannot_report_killed_without_parent_killing_it(self):
+        self.mailbox.add()
+        self.stage_reason = "killed"
+        self.agent.step()
+        self.assertFalse(self.process.killed)
+        self.assertEqual(self.mailbox.manifests()[-1]["status"], "stopped:error")
+
     def test_new_ticket_during_collection_is_queued(self):
         self.mailbox.add(collect_until=time_string(NOW + 2))
         self.running = True

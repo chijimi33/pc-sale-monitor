@@ -6,14 +6,16 @@ from pathlib import Path
 import time
 from urllib.parse import urlsplit
 
+from lxml.etree import ParserError
+
 from ..budget import HostBudget, Robots
-from ..http import Client
+from ..http import Client, FetchError
 from ..pipeline import saved_budget_use
 from ..runner import Collector
 from ..storage import atomic_json, read_json
 from .control import ControlState
 from .deadline import Handshake, deadline_clock as system_deadline_clock
-from .guard import Guard
+from .guard import CommunicationForbidden, Guard
 from . import protocol, validation
 
 
@@ -39,7 +41,7 @@ def route_active(routes, store, phase):
 
 
 def check_inputs(ticket, inputs):
-    """Preflight all carried URLs before even fetching robots."""
+    """Preflight configuration and state; queued URLs are checked per request."""
     store = ticket["store"]
     config = json.loads(inputs["input/config.json"])
     interval = validation.validate_effective_config(config, store)
@@ -51,7 +53,8 @@ def check_inputs(ticket, inputs):
     protocol.require(config["route"]["functions"].get(function, {}).get("status") == "active", "route_inactive")
     saved = validation._load_state(inputs[f"input/stores/{store}.json"])
     protocol.require(saved["store"] == store, "foreign_store")
-    validation._walk_urls(saved, store)
+    validation._walk_urls({key: value for key, value in saved.items()
+                           if key not in {"queue", "verification_queue"}}, store)
     for name in ("queue", "verification_queue"):
         for task in saved.get(name, {}).values():
             protocol.require(task.get("type") in {"list", "product"}, "unsupported_task")
@@ -73,7 +76,58 @@ def check_inputs(ticket, inputs):
     return config, saved, plan, interval
 
 
+class _StageStop(BaseException):
+    """Escape Collector and robots' ordinary fetch-error handlers."""
+
+
+class _StageCollector(Collector):
+    def collect(self, *args, **kwargs):
+        self._collecting = True
+        try:
+            return super().collect(*args, **kwargs)
+        finally:
+            self._collecting = False
+
+    def process(self, task):
+        guard = self.client.guard
+        original = deepcopy(task)
+        try:
+            return super().process(task)
+        except _StageStop:
+            # No failure receipt for work interrupted before a request.
+            task.clear()
+            task.update(original)
+            raise
+        except (FetchError, ParserError) as exc:
+            if guard.communication_forbidden:
+                # Robots may have swallowed the guard's real request outcome.
+                raise CommunicationForbidden(guard.reason) from exc
+            raise
+        except Exception as exc:
+            raise _StageStop("error") from exc
+
+    def save(self):
+        super().save()
+        if getattr(self, "_collecting", False) and self.client.guard.communication_forbidden:
+            # Save the actual failed request first, then stop before selecting
+            # another task. Final run_stage saving happens outside collect().
+            raise _StageStop(self.client.guard.reason)
+
+
 class _PolicyGuard(Guard):
+    def check_url(self, url):
+        if self.communication_forbidden:
+            raise _StageStop(self.reason)
+        super().check_url(url)
+
+    def before_request(self, url):
+        try:
+            super().before_request(url)
+        except CommunicationForbidden:
+            if self.communication_forbidden:
+                raise _StageStop(self.reason)
+            raise
+
     def fetch_robots(self, url):
         host = urlsplit(url).hostname
         try:
@@ -133,11 +187,14 @@ def run_stage(work_dir, *, deadline_clock=None, wall_clock=time.time,
         robots.responses = responses
         client = client_factory(browser=False, budget=budget, robots=robots, guard=guard)
         collector_config = {key: deepcopy(config[key]) for key in ("schema_version", "stores", "seller_aliases")}
-        collector = Collector(state_root, store, collector_config, run_id, client=client, phase=phase, plan=plan)
-        collector.collect(ticket["seconds"])
-        reason = guard.reason or "completed"
+        collector = _StageCollector(state_root, store, collector_config, run_id, client=client, phase=phase, plan=plan)
+        seconds = max(0, protocol.epoch(ticket["collect_until"]) - handshake.actions_now_upper())
+        collector.collect(seconds)
+        reason = "completed"
+    except _StageStop as exc:
+        reason = str(exc)
     except Exception:
-        reason = guard.reason if guard is not None and guard.reason else "error"
+        reason = "error"
     finally:
         if collector is not None:
             try:
@@ -146,8 +203,11 @@ def run_stage(work_dir, *, deadline_clock=None, wall_clock=time.time,
                 reason = "error"
         if guard is not None:
             counters = guard.counters
+        if reason in {"clock_unverified", "clock_skew"}:
+            reason = "deadline"
         if reason != "completed" and reason not in STOP_REASONS:
             reason = "error"
-        atomic_json(work / "stage_result.json", {"reason": reason, "counters": counters,
+        status = "completed" if reason == "completed" else "stopped:" + reason
+        atomic_json(work / "stage_result.json", {"reason": reason, "status": status, "counters": counters,
                     "guard_reason": guard.reason if guard is not None else None})
     return 0 if reason == "completed" else 1

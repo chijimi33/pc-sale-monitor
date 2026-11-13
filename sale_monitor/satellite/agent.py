@@ -564,6 +564,9 @@ class Agent:
             process = self.stage_runner(work)
             while process.poll() is None:
                 if handshake.must_kill(ticket["collect_until"]):
+                    # Reap a child that exited while the deadline was checked.
+                    if process.poll() is not None:
+                        break
                     _stop_process_tree(process)
                     killed = True
                     break
@@ -574,7 +577,7 @@ class Agent:
             _close_parent_job(process)
             reason, counters = stage_outcome(work)
             reason = "killed" if killed else reason
-            if reason != "completed" and reason not in STOP_REASONS:
+            if reason != "completed" and (reason not in STOP_REASONS or (reason == "killed" and not killed)):
                 reason = "error"
             if not killed and process.returncode and reason == "completed":
                 reason = "error"

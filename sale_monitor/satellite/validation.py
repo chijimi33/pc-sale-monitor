@@ -45,18 +45,26 @@ def _walk_urls(value, store, url_field=False, text=False):
     sites; it is never a fetch target, and the guard checks each request anyway.
     """
     if type(value) is dict:
+        # A URL-named field holds a URL, a list of URLs or nothing.
+        require(not url_field, "invalid_url_field")
         for key, item in value.items():
             if _URL_START.match(key):
                 require(allowed_satellite_url(key, store), "foreign_url")
-            if key == "schema_availability" and type(item) is str and item in SCHEMA_AVAILABILITY:
+            if key == "schema_availability":
+                # Decided here, before any "page text" leniency can apply.
+                require(item in (None, "") or type(item) is str and
+                        (item in SCHEMA_AVAILABILITY or not _URL_START.match(item)), "foreign_url")
                 continue
             _walk_urls(item, store, key == "url" or key.endswith(("_url", "_urls")), text or key == "evidence")
     elif type(value) is list:
         for item in value:
+            require(not url_field or type(item) is str, "invalid_url_field")
             _walk_urls(item, store, url_field, text)
     elif type(value) is str:
         if url_field or (not text and _URL_START.match(value)):
             require(allowed_satellite_url(value, store), "foreign_url")
+    else:
+        require(not url_field or value is None, "invalid_url_field")
 
 
 def _typed(mapping, schema, required=()):

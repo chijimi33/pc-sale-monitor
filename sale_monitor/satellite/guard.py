@@ -10,10 +10,43 @@ from ..http import Client, FetchError, Page
 from .protocol import (ALLOWED_HOSTS, MIN_INTERVAL_FLOOR_SECONDS, NO_RESPONSE_LIMIT,
                        require, sha256_bytes, time_string)
 
-# On 2xx/404, inspect titles or bodies below 8192 bytes. Other errors inspect
-# the whole body. Normal large pages may contain reCAPTCHA telemetry.
+# A refusal or a challenge is recognised by what the page says to a person
+# (title and visible text) or by a challenge widget in the document. Words in
+# comments, scripts and styles do not count: ordinary pages load a reCAPTCHA
+# library everywhere. Body size is never a reason to skip the inspection.
 REFUSAL_MARKERS = ("access denied", "captcha", "are you a robot", "unusual traffic",
                    "アクセスが拒否", "アクセスを拒否", "不正なアクセス", "ロボットではありません")
+_CHALLENGE_CLASSES = ("g-recaptcha", "h-captcha", "cf-turnstile")
+_CHALLENGE_FIELDS = ("g-recaptcha-response", "h-captcha-response", "cf-turnstile-response")
+_CHALLENGE_XPATH = " | ".join(
+    [f'//*[contains(concat(" ", normalize-space(@class), " "), " {name} ")]' for name in _CHALLENGE_CLASSES]
+    + [f'//*[@name="{name}"]' for name in _CHALLENGE_FIELDS]
+    + ['//iframe[contains(translate(@src, "CAPTCHA", "captcha"), "captcha")]'])
+_INVISIBLE = re.compile(r"(?is)<!--.*?-->|<(script|style|template)\b.*?</\1\s*>|<[^>]+>")
+
+
+def _normalise(text):
+    return " ".join(text.casefold().split())
+
+
+def refusal_feature(text):
+    """Return the marker or widget that makes this response a refusal, else None."""
+    visible, widget = text, False
+    if "<" in text:
+        try:
+            from lxml import html
+            tree = html.document_fromstring(text.encode("utf-8"), parser=html.HTMLParser(
+                remove_comments=True, remove_pis=True, encoding="utf-8"))
+            widget = bool(tree.xpath(_CHALLENGE_XPATH))
+            for element in tree.xpath("//script | //style | //template"):
+                element.drop_tree()
+            visible = tree.text_content()
+        except Exception:
+            # Unparseable markup: inspect the text without its invisible parts.
+            visible = _INVISIBLE.sub(" ", text)
+    visible = _normalise(visible)
+    marker = next((marker for marker in REFUSAL_MARKERS if _normalise(marker) in visible), None)
+    return marker or ("challenge_widget" if widget else None)
 
 
 class CommunicationForbidden(FetchError):
@@ -69,7 +102,8 @@ class Guard:
         if self.communication_forbidden:
             self.forbid(self.reason)
         if not allowed_satellite_url(url, self.store):
-            self.forbid("excluded_source")
+            # A bad task/link is a local policy failure, not a store refusal.
+            raise CommunicationForbidden("excluded_source")
 
     def _check(self, url):
         self.check_url(url)
@@ -109,10 +143,8 @@ class Guard:
 
     def after_response(self, url, status, headers, body, *, parseable=True):
         self.consecutive_no_response = 0
-        text = Page(url, body, "", content_type=next((v for k, v in headers.items() if k.lower() == "content-type"), "")).text.casefold()
-        titles = " ".join(re.findall(r"<title\b[^>]*>(.*?)</title\s*>", text, re.S))
-        inspected = text if len(body) < 8192 or not (200 <= status < 300 or status == 404) else titles
-        marker = next((marker for marker in REFUSAL_MARKERS if marker in inspected), None)
+        marker = refusal_feature(Page(url, body, "", content_type=next(
+            (v for k, v in headers.items() if k.lower() == "content-type"), "")).text)
         if status in (401, 403) or marker:
             row = {"refusal_id": self.refusal_id(), "at": time_string(self.wall_clock()),
                    "kind": "http_" + str(status) if status in (401, 403) else "body_marker",
