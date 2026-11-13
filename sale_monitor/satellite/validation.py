@@ -20,7 +20,7 @@ STATE_TYPES = {
     **dict.fromkeys(("schema_version", "pending_count", "request_count", "list_pages", "listed_candidates"), int),
     **dict.fromkeys(("store", "run_id", "phase", "status", "started_at", "checkpoint_at", "cycle_started_at", "completed_at"), str),
     "cycle_complete": bool,
-    **dict.fromkeys(("queue", "offers", "verification_queue", "verification", "scheduler", "retry_activity", "changes", "deferred_failures", "request_counts", "budget", "robots", "rate_limit_spacing_seconds", "http_evidence", "retry_after", "transport_retry_after", "access_retry_after", "access_block", "comparison_refresh", "comparison_routing", "comparison_searches", "discovery_replacements", "source_metadata", "flyer"), dict),
+    **dict.fromkeys(("queue", "offers", "verification_queue", "verification", "scheduler", "retry_activity", "changes", "deferred_failures", "request_counts", "budget", "robots", "rate_limit_spacing_seconds", "http_evidence", "retry_after", "transport_retry_after", "access_retry_after", "access_block", "comparison_refresh", "comparison_routing", "comparison_searches", "discovery_replacements", "source_metadata", "flyer", "transport_diagnostic"), dict),
     **dict.fromkeys(("done", "journal", "verification_done", "errors", "recovered_errors", "waiting_dependencies", "discovery_gaps", "discovery_gap_resolutions", "robots_disallowed"), list),
 }
 ALLOWED_STATE_KEYS = frozenset(STATE_TYPES)

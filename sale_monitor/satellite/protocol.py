@@ -19,6 +19,10 @@ UNREACHABLE_RUN_LIMIT = 3
 SKEW_LIMIT_SECONDS = 30
 DRIFT_LIMIT_SECONDS = 5
 ALLOWED_HOSTS = {"tsukumo": "shop.tsukumo.co.jp"}
+# The coordinator writes the relay branch; the owner's PC writes the satellite branch.
+RELAY_BRANCH = "monitor-relay"
+SATELLITE_BRANCH = "monitor-satellite"
+REMOTE_URL = "https://github.com/chijimi33/pc-sale-monitor.git"
 MAX_DOCUMENT_BYTES = 1_048_576
 MAX_ITEMS = 10_000
 MAX_STRING = 8192
