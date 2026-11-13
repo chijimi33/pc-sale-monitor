@@ -10,6 +10,8 @@ from ..http import Client, FetchError, Page
 from .protocol import (ALLOWED_HOSTS, MIN_INTERVAL_FLOOR_SECONDS, NO_RESPONSE_LIMIT,
                        require, sha256_bytes, time_string)
 
+# On 2xx/404, inspect titles or bodies below 8192 bytes. Other errors inspect
+# the whole body. Normal large pages may contain reCAPTCHA telemetry.
 REFUSAL_MARKERS = ("access denied", "captcha", "are you a robot", "unusual traffic",
                    "アクセスが拒否", "アクセスを拒否", "不正なアクセス", "ロボットではありません")
 
@@ -34,7 +36,7 @@ def allowed_satellite_url(url, store):
 class Guard:
     def __init__(self, store, control, deadline, collect_until, *, min_interval_seconds=5,
                  ticket=None, input_retry_after=None, wall_clock=time.time, sleep=time.sleep,
-                 refusal_id=lambda: uuid.uuid4().hex, robots_transport=None):
+                 refusal_id=lambda: uuid.uuid4().hex, robots_transport=None, progress=None):
         require(store in ALLOWED_HOSTS, "invalid_store")
         require(type(min_interval_seconds) in (int, float) and math.isfinite(min_interval_seconds)
                 and min_interval_seconds >= 0, "invalid_interval")
@@ -43,6 +45,7 @@ class Guard:
         self.interval = max(MIN_INTERVAL_FLOOR_SECONDS, min_interval_seconds)
         self.wall_clock, self.sleep, self.refusal_id = wall_clock, sleep, refusal_id
         self.robots_transport = robots_transport
+        self.progress = progress
         self.input_retry_after = input_retry_after or {}
         self.communication_forbidden = False
         self.reason = None
@@ -54,7 +57,12 @@ class Guard:
 
     def forbid(self, reason):
         self.communication_forbidden, self.reason = True, reason
+        self._checkpoint()
         raise CommunicationForbidden(reason)
+
+    def _checkpoint(self):
+        if self.progress is not None:
+            self.progress(self)
 
     def check_url(self, url):
         """Preflight before robots or other request-producing policy checks."""
@@ -91,6 +99,9 @@ class Guard:
         self.counters["requests"] += 1
         if not self._robots(url):
             self.counters["ordinary_attempted"] += 1
+        self._checkpoint()
+        # Persistence can block or span a suspend.
+        self._check(url)
 
     @staticmethod
     def _robots(url):
@@ -99,7 +110,9 @@ class Guard:
     def after_response(self, url, status, headers, body, *, parseable=True):
         self.consecutive_no_response = 0
         text = Page(url, body, "", content_type=next((v for k, v in headers.items() if k.lower() == "content-type"), "")).text.casefold()
-        marker = next((marker for marker in REFUSAL_MARKERS if marker in text), None)
+        titles = " ".join(re.findall(r"<title\b[^>]*>(.*?)</title\s*>", text, re.S))
+        inspected = text if len(body) < 8192 or not (200 <= status < 300 or status == 404) else titles
+        marker = next((marker for marker in REFUSAL_MARKERS if marker in inspected), None)
         if status in (401, 403) or marker:
             row = {"refusal_id": self.refusal_id(), "at": time_string(self.wall_clock()),
                    "kind": "http_" + str(status) if status in (401, 403) else "body_marker",
@@ -135,12 +148,14 @@ class Guard:
         # 404 bodies reach the collector's missing-product classifier.
         if parseable and not self._robots(url) and (200 <= status < 300 or status == 404):
             self.counters["ordinary_succeeded"] += 1
+        self._checkpoint()
 
     def after_no_response(self, url, exc):
         if not isinstance(exc, (OSError, TimeoutError)):
             return
         self.consecutive_no_response += 1
         self.counters["no_response"] += 1
+        self._checkpoint()
         if self.consecutive_no_response >= NO_RESPONSE_LIMIT:
             self.forbid("no_response")
 
