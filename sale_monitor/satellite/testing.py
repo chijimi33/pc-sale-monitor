@@ -24,7 +24,8 @@ class MemoryMailbox:
         if not self._initialized:
             self._initialized = True
             self._seen = history[-1] if history else ""
-            return []
+            self._position = self._seen or None
+            return [self._seen] if self._seen else []
         if self._seen:
             if self._seen not in history:
                 raise TransportError("mailbox history diverged")

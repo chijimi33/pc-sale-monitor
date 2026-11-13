@@ -140,7 +140,9 @@ def validate_ticket(value):
     require(epoch(value["issued_at"]) < epoch(value["collect_until"]) < epoch(value["accept_until"]), "invalid_deadlines")
     for key in ("seconds", "fingerprint_version", "state_schema_version", "config_revision"):
         integer(value[key], 1)
-    require(value["fingerprint_version"] == 1 and value["state_schema_version"] == 1, "unsupported_version")
+    # A positive unknown fingerprint version must reach the agent's code
+    # compatibility check so the coordinator receives an explicit decline.
+    require(value["state_schema_version"] == 1, "unsupported_version")
     hash_value(value["code_fingerprint"])
     if value["state_sha"] not in (None, ""):
         hash_value(value["state_sha"], commit=True)
@@ -169,8 +171,9 @@ def validate_manifest(value):
         string(value.get("nonce"), r"[A-Za-z0-9_-]{16,128}")
     else:
         require("nonce" not in value, "unexpected_nonce")
-    for key in ("ticket_commit", "code_sha"):
-        hash_value(value[key], commit=True)
+    hash_value(value["ticket_commit"], commit=True)
+    if value["code_sha"] is not None:
+        hash_value(value["code_sha"], commit=True)
     for key in ("code_fingerprint", "config_sha256"):
         hash_value(value[key])
     if value["kind"] == "ack":

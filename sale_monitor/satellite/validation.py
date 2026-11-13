@@ -26,12 +26,22 @@ STATE_TYPES = {
 }
 ALLOWED_STATE_KEYS = frozenset(STATE_TYPES)
 
+# JSON-LD availability values are vocabulary identifiers, never fetch targets.
+# Keep this finite and field-specific; arbitrary URLs in evidence still fail.
+SCHEMA_AVAILABILITY = frozenset(
+    scheme + "://schema.org/" + term
+    for scheme in ("http", "https")
+    for term in ("BackOrder", "Discontinued", "InStock", "InStoreOnly", "LimitedAvailability",
+                 "OnlineOnly", "OutOfStock", "PreOrder", "PreSale", "SoldOut"))
+
 
 def _walk_urls(value, store, url_field=False):
     """Inspect values and mapping keys, including URLs embedded in evidence."""
     if type(value) is dict:
         for key, item in value.items():
             _walk_urls(key, store)
+            if key == "schema_availability" and type(item) is str and item in SCHEMA_AVAILABILITY:
+                continue
             _walk_urls(item, store, key == "url" or key.endswith(("_url", "_urls")))
     elif type(value) is list:
         for item in value:

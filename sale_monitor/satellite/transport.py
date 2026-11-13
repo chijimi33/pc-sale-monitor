@@ -106,8 +106,11 @@ class GitMailbox:
             self._initialized = True
             return []
         if not self._initialized:
-            self._initialized, self._seen = True, head
-            return []
+            # Inspect the current head once on a fresh installation. A ticket
+            # posted during a short outage can still be live; the agent checks
+            # its collect_until rather than treating startup time as a cutoff.
+            self._initialized, self._seen, self._position = True, head, head
+            return [head]
         history = self._git("rev-list", "--first-parent", head).stdout.decode().splitlines()
         if self._seen:
             if self._seen not in history:

@@ -96,7 +96,9 @@ class RemoteStages:
             effective = validation.build_effective_config(self.sources_config,
                 {**self.route_state.config, "routes": self.route_state.routes}, store)
             files = {"input/stores/" + store + ".json": input_state_bytes,
-                     "input/routes.json": encode(self.route_state.routes[route_id]),
+                     "input/routes.json": encode({"schema_version": 1,
+                         "config_revision": self.route_state.config["config_revision"],
+                         "routes": {route_id: self.route_state.routes[route_id]}}),
                      "input/config.json": encode(effective)}
             if plan_bytes is not None:
                 files["input/plan.json"] = plan_bytes

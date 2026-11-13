@@ -89,7 +89,9 @@ class CoordinatorTests(CoordinatorFixture):
         self.assertEqual(self.pc.read(commit, "input/stores/tsukumo.json"), self.input)
         for path, hashed in h.ticket["input_sha256"].items():
             self.assertEqual(protocol.sha256_bytes(self.pc.read(commit, path)), hashed)
-        self.assertEqual(json.loads(self.pc.read(commit, "input/routes.json")), self.routes.routes["tsukumo:direct"])
+        self.assertEqual(json.loads(self.pc.read(commit, "input/routes.json")), {
+            "schema_version": 1, "config_revision": 1,
+            "routes": {"tsukumo:direct": self.routes.routes["tsukumo:direct"]}})
 
     def test_absent_uses_issue_window_not_finish_start(self):
         remote = self.remote()
