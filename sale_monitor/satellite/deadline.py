@@ -1,6 +1,7 @@
 """Suspend-aware deadline bounds established by an ack/echo exchange."""
 import sys
 import time
+import ctypes
 
 from .protocol import (DRIFT_LIMIT_SECONDS, ECHO_WAIT_SECONDS, KILL_AFTER_SECONDS,
                        SKEW_LIMIT_SECONDS, ValidationError, epoch, validate_echo)
@@ -8,7 +9,22 @@ from .protocol import (DRIFT_LIMIT_SECONDS, ECHO_WAIT_SECONDS, KILL_AFTER_SECOND
 
 def deadline_clock():
     if sys.platform == "win32":
-        return time.perf_counter
+        kernel = ctypes.WinDLL("kernel32", use_last_error=True)
+        frequency = ctypes.c_longlong()
+        for name in ("QueryPerformanceCounter", "QueryPerformanceFrequency"):
+            function = getattr(kernel, name)
+            function.argtypes = [ctypes.POINTER(ctypes.c_longlong)]
+            function.restype = ctypes.c_int
+        if not kernel.QueryPerformanceFrequency(ctypes.byref(frequency)) or frequency.value <= 0:
+            raise RuntimeError("QueryPerformanceFrequency failed")
+
+        def qpc():
+            counter = ctypes.c_longlong()
+            if not kernel.QueryPerformanceCounter(ctypes.byref(counter)):
+                raise RuntimeError("QueryPerformanceCounter failed")
+            return counter.value / frequency.value
+
+        return qpc
     if sys.platform.startswith("linux") and hasattr(time, "CLOCK_BOOTTIME"):
         return lambda: time.clock_gettime(time.CLOCK_BOOTTIME)
     raise RuntimeError("Satellite requires a suspend-aware clock: Windows QPC or Linux CLOCK_BOOTTIME")
@@ -23,6 +39,18 @@ class Handshake:
         self.m1 = self.w1 = self.m2 = self.w2 = self.actions_time = None
         self.reason = "clock_unverified"
         self.failed = False
+
+    def to_dict(self):
+        return {name: getattr(self, name) for name in (
+            "ticket_commit", "nonce", "m1", "w1", "m2", "w2", "actions_time", "reason", "failed")}
+
+    @classmethod
+    def from_dict(cls, value, *, deadline_clock, wall_clock):
+        handshake = cls(value["ticket_commit"], value["nonce"],
+                        deadline_clock=deadline_clock, wall_clock=wall_clock)
+        for name in ("m1", "w1", "m2", "w2", "actions_time", "reason", "failed"):
+            setattr(handshake, name, value[name])
+        return handshake
 
     def begin_ack(self):
         if self.m1 is not None:

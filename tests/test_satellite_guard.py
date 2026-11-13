@@ -98,6 +98,34 @@ class GuardTests(unittest.TestCase):
             client.get(URL)
         self.assertEqual(len(transport.calls), 1)
 
+    def test_large_normal_telemetry_page_is_not_refused(self):
+        telemetry = '<!-- recaptcha enterprise telemetry (全ページ読込・スコア取得はログイン時のみ) --><style>.grecaptcha-badge { visibility: hidden; }</style>'
+        body = ('<html><title>Tsukumo</title>' + telemetry + 'x' * 120000 + '</html>').encode()
+        for status in (200, 404):
+            with self.subTest(status=status):
+                self.guard.before_request(URL)
+                self.guard.after_response(URL, status, {}, body)
+                self.assertFalse(self.control.active_refusals)
+                self.assertFalse(self.guard.communication_forbidden)
+
+    def test_title_small_challenge_and_error_marker_refuse(self):
+        for status, body in ((200, b'<title>Access Denied</title>' + b'x' * 9000),
+                             (200, b'<p>CAPTCHA</p>'), (503, b'x' * 9000 + b'captcha'),
+                             (404, b'<title>Access Denied</title>' + b'x' * 9000),
+                             (200, b'captcha' + b'x' * (8191 - 7))):
+            with self.subTest(status=status), tempfile.TemporaryDirectory() as root:
+                self.control = ControlState(root)
+                self.guard = self.make_guard()
+                self.guard.before_request(URL)
+                with self.assertRaisesRegex(CommunicationForbidden, 'refused'):
+                    self.guard.after_response(URL, status, {}, body)
+                self.assertEqual(len(ControlState(root).active_refusals), 1)
+
+    def test_marker_body_boundary_is_in_bytes(self):
+        self.guard.before_request(URL)
+        self.guard.after_response(URL, 200, {}, b'captcha' + b'x' * (8192 - 7))
+        self.assertFalse(self.control.active_refusals)
+
     def test_refusal_written_before_forbid(self):
         snapshots = []
         original = self.control.write
@@ -240,6 +268,19 @@ class GuardTests(unittest.TestCase):
         with self.assertRaises(CommunicationForbidden):
             self.guard.before_request(URL)
         self.assertEqual(self.guard.counters["requests"], 1)
+
+    def test_checkpoint_delay_cannot_start_late_request(self):
+        client, transport = self.client([])
+        advanced = False
+        def checkpoint(guard):
+            nonlocal advanced
+            if not advanced:
+                advanced = True
+                self.clock.advance(501)
+        self.guard.progress = checkpoint
+        with self.assertRaisesRegex(CommunicationForbidden, "deadline"):
+            client.get(URL)
+        self.assertFalse(transport.calls)
 
     def test_unverified_late_wrong_or_skewed_echo_zero_requests(self):
         for kind in ("missing", "late", "nonce", "ticket", "skew"):

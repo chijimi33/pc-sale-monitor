@@ -1,5 +1,5 @@
 import unittest
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 from sale_monitor.satellite.deadline import Handshake, deadline_clock
 from sale_monitor.satellite.protocol import time_string
@@ -92,11 +92,50 @@ class DeadlineTests(unittest.TestCase):
         self.assertIsNone(handshake.reason)
 
     def test_platform_selection(self):
-        with patch("sale_monitor.satellite.deadline.sys.platform", "win32"):
-            import time
-            self.assertIs(deadline_clock(), time.perf_counter)
+        kernel = Mock()
+        def frequency(pointer):
+            pointer._obj.value = 1000
+            return 1
+        def counter(pointer):
+            pointer._obj.value = 1234567000
+            return 1
+        kernel.QueryPerformanceFrequency.side_effect = frequency
+        kernel.QueryPerformanceCounter.side_effect = counter
+        with patch("sale_monitor.satellite.deadline.sys.platform", "win32"), \
+                patch("sale_monitor.satellite.deadline.ctypes.WinDLL", return_value=kernel, create=True), \
+                patch("sale_monitor.satellite.deadline.time.perf_counter", side_effect=AssertionError):
+            self.assertEqual(deadline_clock()(), 1234567)
+            kernel.QueryPerformanceCounter.assert_called_once()
         with patch("sale_monitor.satellite.deadline.sys.platform", "darwin"):
             with self.assertRaisesRegex(RuntimeError, "suspend-aware"):
+                deadline_clock()
+
+    def test_serialized_clock_has_same_system_reference(self):
+        clock = FakeClock()
+        clock.m = 1234567
+        clock.w += clock.m
+        handshake = clock.handshake(1, 2, 3)
+        self.assertIsNone(handshake.reason)
+        import json
+        value = json.loads(json.dumps(handshake.to_dict()))
+        restored = Handshake.from_dict(value, deadline_clock=lambda: clock.m, wall_clock=lambda: clock.w)
+        self.assertEqual(restored.to_dict(), handshake.to_dict())
+        clock.advance(20)
+        self.assertEqual(restored.actions_now_upper(), handshake.actions_now_upper())
+        collect_until = clock.w + 500
+        self.assertTrue(restored.may_request(collect_until))
+        clock.w += 5
+        self.assertFalse(restored.may_request(collect_until))
+        failed = Handshake.from_dict(restored.to_dict(), deadline_clock=lambda: clock.m, wall_clock=lambda: clock.w)
+        clock.w -= 5
+        self.assertFalse(failed.may_request(collect_until))
+
+    def test_qpc_failures_fail_closed(self):
+        kernel = Mock()
+        kernel.QueryPerformanceFrequency.return_value = 0
+        with patch("sale_monitor.satellite.deadline.sys.platform", "win32"), \
+                patch("sale_monitor.satellite.deadline.ctypes.WinDLL", return_value=kernel, create=True):
+            with self.assertRaisesRegex(RuntimeError, "Frequency"):
                 deadline_clock()
 
     def test_linux_boottime_and_missing_clock(self):
