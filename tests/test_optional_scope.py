@@ -44,7 +44,7 @@ def build(candidates=None, peers=(), **updates):
 
 class OptionalConfigTests(unittest.TestCase):
     def test_validation_and_scope_membership(self):
-        config = load_config("config/routes.json")
+        config = load_config(Path(__file__).resolve().parent / "fixtures/routes_v1.json")
         with tempfile.TemporaryDirectory() as temp:
             path = Path(temp) / "routes.json"
             for optional, error in ((["unknown:direct"], "unknown_scope_route"),

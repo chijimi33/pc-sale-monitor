@@ -1,0 +1,157 @@
+{
+  "schema_version": 1,
+  "config_revision": 1,
+  "scope": {
+    "version": 1,
+    "in_scope": ["dospara:direct", "ark:direct", "koubou:direct", "sofmap:direct"]
+  },
+  "run": {
+    "max_minutes": 90,
+    "discovery_minutes": 40,
+    "verification_minutes": 30,
+    "exploration_share": 0.2
+  },
+  "hosts": {
+    "default": {"min_interval_seconds": 2},
+    "www.pc-koubou.jp": {"min_interval_seconds": 15}
+  },
+  "routes": {
+    "dospara:direct": {
+      "store": "dospara",
+      "channel": "direct",
+      "functions": {
+        "sale_discovery": {"status": "active"},
+        "product_verify": {"status": "active"},
+        "comparison_lookup": {"status": "not_implemented"}
+      }
+    },
+    "ark:direct": {
+      "store": "ark",
+      "channel": "direct",
+      "functions": {
+        "sale_discovery": {"status": "active"},
+        "product_verify": {"status": "active"},
+        "comparison_lookup": {"status": "active"}
+      }
+    },
+    "koubou:direct": {
+      "store": "koubou",
+      "channel": "direct",
+      "functions": {
+        "sale_discovery": {"status": "active"},
+        "product_verify": {"status": "active"},
+        "comparison_lookup": {"status": "active"}
+      }
+    },
+    "sofmap:direct": {
+      "store": "sofmap",
+      "channel": "direct",
+      "functions": {
+        "sale_discovery": {"status": "active"},
+        "product_verify": {"status": "active"},
+        "comparison_lookup": {"status": "active"}
+      }
+    },
+    "tsukumo:direct": {
+      "store": "tsukumo",
+      "channel": "direct",
+      "functions": {
+        "sale_discovery": {"status": "paused_maintenance"},
+        "product_verify": {"status": "paused_maintenance"},
+        "comparison_lookup": {"status": "paused_maintenance"}
+      },
+      "reason": "ネットショップ全体がメンテナンス表示で停止中",
+      "evidence": {
+        "observed_at": "2026-11-11T04:20:00+00:00",
+        "summary": "トップ・商品ページ・robots.txt がすべて HTTP 503。本文は「セキュリティレベルの引き上げのため、メンテナンス中です」"
+      },
+      "probe": {
+        "url": "https://shop.tsukumo.co.jp/",
+        "interval_hours": 24,
+        "successes_to_resume": 2,
+        "must_not_contain": ["メンテナンス中"]
+      }
+    },
+    "joshin:direct": {
+      "store": "joshin",
+      "channel": "direct",
+      "functions": {
+        "sale_discovery": {"status": "paused_refused"},
+        "product_verify": {"status": "paused_refused"},
+        "comparison_lookup": {"status": "paused_refused"}
+      },
+      "reason": "自動取得を明示的に拒否された",
+      "evidence": {
+        "observed_at": "2026-11-11T04:20:00+00:00",
+        "summary": "トップと robots.txt が HTTP 403、本文は Access Denied。GitHub Actions と住宅回線の両方で同じ"
+      }
+    },
+    "bic:direct": {
+      "store": "bic",
+      "channel": "direct",
+      "functions": {
+        "sale_discovery": {"status": "paused_unreachable"},
+        "product_verify": {"status": "paused_unreachable"},
+        "comparison_lookup": {"status": "paused_unreachable"}
+      },
+      "reason": "無応答。原因は未確定",
+      "evidence": {
+        "observed_at": "2026-11-11T04:20:00+00:00",
+        "summary": "トップと robots.txt が25秒無応答。GitHub Actions でも TimeoutError が継続"
+      },
+      "probe": {
+        "url": "https://www.biccamera.com/robots.txt",
+        "interval_hours": 168,
+        "successes_to_resume": 2
+      }
+    },
+    "yodobashi:direct": {
+      "store": "yodobashi",
+      "channel": "direct",
+      "functions": {
+        "sale_discovery": {"status": "paused_unreachable"},
+        "product_verify": {"status": "paused_unreachable"},
+        "comparison_lookup": {"status": "paused_unreachable"}
+      },
+      "reason": "無応答。原因は未確定",
+      "evidence": {
+        "observed_at": "2026-11-11T04:20:00+00:00",
+        "summary": "トップと robots.txt が25秒無応答。GitHub Actions でも TimeoutError が継続"
+      },
+      "probe": {
+        "url": "https://www.yodobashi.com/robots.txt",
+        "interval_hours": 168,
+        "successes_to_resume": 2
+      }
+    },
+    "yahoo:api": {
+      "store": "yahoo",
+      "channel": "api",
+      "functions": {
+        "sale_discovery": {"status": "paused_configuration"},
+        "comparison_lookup": {"status": "paused_configuration"}
+      },
+      "reason": "YAHOO_CLIENT_ID が未設定。設定後も docs/architecture.md 7章の検証が済むまで比較範囲に入れない"
+    },
+    "amazon:direct": {
+      "store": "amazon",
+      "channel": "direct",
+      "functions": {
+        "product_verify": {"status": "paused_refused"}
+      },
+      "reason": "商品ページがアクセス確認画面になる",
+      "evidence": {
+        "observed_at": "2026-11-10T21:49:30+00:00",
+        "summary": "run 42908375227-1 で amazon_access_challenge を検出"
+      }
+    },
+    "amazon:chimolog": {
+      "store": "amazon",
+      "channel": "chimolog",
+      "functions": {
+        "sale_discovery": {"status": "paused_configuration"}
+      },
+      "reason": "転記元の価格だけでは購入条件を確認できないため、商品確認の経路が使えるまで収集しない"
+    }
+  }
+}

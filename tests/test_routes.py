@@ -12,7 +12,8 @@ from sale_monitor.storage import Store
 from urllib.request import Request
 
 
-CONFIG = Path(__file__).resolve().parents[1] / "config/routes.json"
+# Frozen maintenance/probe scenarios, independent of operational route changes.
+CONFIG = Path(__file__).resolve().parent / "fixtures/routes_v1.json"
 OK = {"ok": True, "explicit_refusal": False, "http_status": 200, "summary": "ok", "retry_after_until": None}
 
 

@@ -1,9 +1,10 @@
 {
   "schema_version": 1,
-  "config_revision": 1,
+  "config_revision": 2,
   "scope": {
-    "version": 1,
-    "in_scope": ["dospara:direct", "ark:direct", "koubou:direct", "sofmap:direct"]
+    "version": 2,
+    "in_scope": ["dospara:direct", "ark:direct", "koubou:direct", "sofmap:direct"],
+    "optional": ["tsukumo:direct"]
   },
   "run": {
     "max_minutes": 90,
@@ -13,7 +14,8 @@
   },
   "hosts": {
     "default": {"min_interval_seconds": 2},
-    "www.pc-koubou.jp": {"min_interval_seconds": 15}
+    "www.pc-koubou.jp": {"min_interval_seconds": 15},
+    "shop.tsukumo.co.jp": {"min_interval_seconds": 5}
   },
   "routes": {
     "dospara:direct": {
@@ -55,22 +57,18 @@
     "tsukumo:direct": {
       "store": "tsukumo",
       "channel": "direct",
+      "executor": "satellite",
       "functions": {
-        "sale_discovery": {"status": "paused_maintenance"},
-        "product_verify": {"status": "paused_maintenance"},
-        "comparison_lookup": {"status": "paused_maintenance"}
+        "sale_discovery": {"status": "active"},
+        "product_verify": {"status": "active"},
+        "comparison_lookup": {"status": "paused_configuration"}
       },
-      "reason": "ネットショップ全体がメンテナンス表示で停止中",
+      "reason": "所有者の PC（satellite）から取得する。GitHub Actions からの接続は応答なしで切断されるため、Actions からは通信しない。比較探索（検索）は v1 では行わない",
       "evidence": {
-        "observed_at": "2026-11-11T04:20:00+00:00",
-        "summary": "トップ・商品ページ・robots.txt がすべて HTTP 503。本文は「セキュリティレベルの引き上げのため、メンテナンス中です」"
+        "observed_at": "2026-11-13T07:42:43+00:00",
+        "summary": "同時刻に、家庭回線からはトップ・商品ページ・robots.txt が HTTP 200、GitHub Actions からは RemoteDisconnected。明示的な拒否（403、確認画面）は観測していない"
       },
-      "probe": {
-        "url": "https://shop.tsukumo.co.jp/",
-        "interval_hours": 24,
-        "successes_to_resume": 2,
-        "must_not_contain": ["メンテナンス中"]
-      }
+      "cleared_refusals": []
     },
     "joshin:direct": {
       "store": "joshin",

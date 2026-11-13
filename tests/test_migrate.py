@@ -10,7 +10,8 @@ from sale_monitor.routes import RouteState, load_config
 from sale_monitor.storage import Store
 
 
-CONFIG = Path(__file__).resolve().parents[1] / "config/routes.json"
+# Keep legacy queue migration scenarios independent of the live route status.
+CONFIG = Path(__file__).resolve().parent / "fixtures/routes_v1.json"
 
 
 class MigrationTests(TestCase):

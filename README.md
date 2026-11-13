@@ -14,7 +14,7 @@
 | ark | `ark:direct`（直販） | 全3機能 `active` | 停止理由の設定はありません。 |
 | パソコン工房 | `koubou:direct`（直販） | 全3機能 `active` | 停止理由の設定はありません。 |
 | ソフマップ | `sofmap:direct`（直販） | 全3機能 `active` | 停止理由の設定はありません。 |
-| ツクモ | `tsukumo:direct`（直販） | 全3機能 `paused_maintenance` | ネットショップ全体がメンテナンス表示で停止中です。 |
+| ツクモ | `tsukumo:direct`（直販、実行場所は所有者の PC） | 発見・商品確認は `active`（`executor: "satellite"`）、比較探索は `paused_configuration` | GitHub Actions からは接続を切られるため、所有者の PC が同じ run の一部として取得します。比較範囲では任意の比較先です（取得できた場合のみ比較に使い、未確認でも保留にしません）。詳細は `docs/satellite.md`。 |
 | Joshin | `joshin:direct`（直販） | 全3機能 `paused_refused` | 自動取得の明示拒否の記録があります。 |
 | ビックカメラ | `bic:direct`（直販） | 全3機能 `paused_unreachable` | 無応答で、原因は未確定です。 |
 | ヨドバシ | `yodobashi:direct`（直販） | 全3機能 `paused_unreachable` | 無応答で、原因は未確定です。 |
@@ -42,11 +42,11 @@ route の `executor` は既定 `runner`、`satellite` は同じ run の遠隔の
 
 ## 比較範囲と通知の表示
 
-scope v1 は **ドスパラ・ark・パソコン工房・ソフマップの直販**です。`config/routes.json` の `scope.in_scope` で価格を見る前に固定し、実行途中の障害を理由に縮めません。変更時は `scope.version` を上げて公開JSONに記録します。
+scope v2 は、必須が **ドスパラ・ark・パソコン工房・ソフマップの直販**、任意が **ツクモの直販**です（`scope.optional`）。任意の比較先は、その run で取得できた価格だけを通常の比較先として使い（安ければ棄却し、独立比較先の数にも数えます）、未確認でも保留にしません。そのため、ツクモを取得する所有者の PC が動いているかどうかで、同じ商品の判定が変わることがあります。`config/routes.json` の `scope.in_scope`・`scope.optional` で価格を見る前に固定し、実行途中の障害を理由に縮めません。変更時は `scope.version` を上げて公開JSONに記録します。
 
 A/Bの数値基準は不変ですが、比較範囲を「10店すべて」から「事前に固定した販売経路」へ変えた仕様変更です。同一runで確認した有効な比較価格は、安いものも含めてすべて評価します。
 
-判定と通知には「A・比較範囲 v1」のように範囲を付け、「確認した販売者・チャネル」と「未確認の販売経路と理由」を必ず示します。範囲外・停止中・予算不足・取得失敗・条件不明を区別し、「10店で最安」とは表現しません。判定ごとの `comparison_scope.label`、`confirmed`、`unconfirmed` を使います。
+判定と通知には「A・比較範囲 v2（必須4店＋任意: ツクモ）」のように範囲を付け、「確認した販売者・チャネル」と「未確認の販売経路と理由」を必ず示します。範囲外・停止中・予算不足・取得失敗・条件不明を区別し、「10店で最安」とは表現しません。判定ごとの `comparison_scope.label`、`confirmed`、`unconfirmed` を使います。
 
 ## A/B判定
 
@@ -164,7 +164,7 @@ python -m sale_monitor.cli migrate --state <状態の保存先> --revert
 | `active_store_count` | 停止扱いの店を除いた店舗数です。 |
 | `active_complete_stores` | そのうち取得完了した店舗数です。 |
 
-判定ごとの `comparison_scope` は `version`・`label`・`confirmed`・`unconfirmed` を持ちます。通知はイベントの `current_evidence` にある現在の判定を使います。公開は配信確認ではなく、厳密な一度だけの配信保証はありません。明示的な配信確認がある場合だけ既存の `ack --event-id ...` で記録します。
+判定ごとの `comparison_scope` は `version`・`label`・`confirmed`・`unconfirmed` を持ちます。任意の比較先は、確認できた行に `scope: "optional"`、確認できなかった URL ごとに `category: "optional_not_confirmed"` と `reason`、`last_verified`（直近の有効な確認）、`newer_evidence`（それより新しい在庫切れ・取得失敗）、`used_in_comparison: false` が付きます。通知はイベントの `current_evidence` にある現在の判定を使います。公開は配信確認ではなく、厳密な一度だけの配信保証はありません。明示的な配信確認がある場合だけ既存の `ack --event-id ...` で記録します。
 
 公開先として使う索引URLは [latest.json](https://raw.githubusercontent.com/chijimi33/pc-sale-monitor/monitor-data/public/latest.json) です。この文書更新では公開先の稼働状態を確認していません。
 
