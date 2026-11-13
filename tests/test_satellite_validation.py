@@ -178,11 +178,20 @@ class ValidationTests(unittest.TestCase):
             with self.assertRaises(ValidationError):
                 self.validate(after=after)
 
-    def test_foreign_urls_in_keys_nested_evidence_or_queue_rejected(self):
+    def test_foreign_urls_in_keys_url_fields_or_url_values_rejected(self):
         for extra in ({"queue": {"x": {"url": "https://example.com/"}}},
                       {"comparison_searches": {"https://example.com/": {}}},
-                      {"errors": [{"nested": ["see https://example.com/a"]}]}):
+                      {"queue": {"x": {"source": "https://example.com/list"}}},
+                      {"errors": [{"nested": ["//example.com/a"]}]},
+                      {"errors": [{"evidence": {"source_url": "https://example.com/a"}}]}):
             with self.subTest(extra=extra), self.assertRaisesRegex(ValidationError, "foreign_url"):
+                self.validate(after={**self.after, **extra})
+
+    def test_page_text_that_mentions_another_site_is_not_a_fetch_target(self):
+        # Real specification text says things like "see https://www.asus.com/support/".
+        for extra in ({"errors": [{"nested": ["see https://example.com/a"]}]},
+                      {"errors": [{"evidence": {"fields": {"specifications": {"Memory": "https://example.com/support/"}}}}]}):
+            with self.subTest(extra=extra):
                 self.validate(after={**self.after, **extra})
 
     def test_unknown_top_level_type_schema_and_size(self):

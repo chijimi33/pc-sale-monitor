@@ -515,7 +515,10 @@ class Agent:
                 host = protocol.ALLOWED_HOSTS[ticket["store"]]
                 if self.control.retry_until(host, saved.get("retry_after", {}).get(host, 0)) > self.wall_clock():
                     reason = "retry_after"
-            except (ValueError, TypeError, KeyError, AttributeError, RecursionError):
+            except (ValueError, TypeError, KeyError, AttributeError, RecursionError) as exc:
+                # The wire status stays coarse; the local log says which check failed.
+                self.log.info("Declining %s: inputs invalid (%s: %s)", commit, type(exc).__name__,
+                              getattr(exc, "reason", ""))
                 reason = "config_invalid"
         if reason:
             self._finish(commit, "declined:" + reason)

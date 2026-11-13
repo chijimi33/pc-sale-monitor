@@ -35,22 +35,28 @@ SCHEMA_AVAILABILITY = frozenset(
                  "OnlineOnly", "OutOfStock", "PreOrder", "PreSale", "SoldOut"))
 
 
-def _walk_urls(value, store, url_field=False):
-    """Inspect values and mapping keys, including URLs embedded in evidence."""
+_URL_START = re.compile(r"\s*(?:[A-Za-z][A-Za-z0-9+.-]*:)?//")
+
+
+def _walk_urls(value, store, url_field=False, text=False):
+    """Check every value that is a URL, every URL-named field and every URL key.
+
+    Page text kept as evidence (specifications, descriptions) may mention other
+    sites; it is never a fetch target, and the guard checks each request anyway.
+    """
     if type(value) is dict:
         for key, item in value.items():
-            _walk_urls(key, store)
+            if _URL_START.match(key):
+                require(allowed_satellite_url(key, store), "foreign_url")
             if key == "schema_availability" and type(item) is str and item in SCHEMA_AVAILABILITY:
                 continue
-            _walk_urls(item, store, key == "url" or key.endswith(("_url", "_urls")))
+            _walk_urls(item, store, key == "url" or key.endswith(("_url", "_urls")), text or key == "evidence")
     elif type(value) is list:
         for item in value:
-            _walk_urls(item, store, url_field)
+            _walk_urls(item, store, url_field, text)
     elif type(value) is str:
-        if url_field:
+        if url_field or (not text and _URL_START.match(value)):
             require(allowed_satellite_url(value, store), "foreign_url")
-        for match in re.finditer(r"(?:[A-Za-z][A-Za-z0-9+.-]*://|//)[^\s<>\"']+", value):
-            require(allowed_satellite_url(match.group().rstrip(",;)"), store), "foreign_url")
 
 
 def _typed(mapping, schema, required=()):
