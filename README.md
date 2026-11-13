@@ -32,7 +32,9 @@
 | `paused_configuration` | 設定待ちです。疎通確認はしません。 |
 | `not_implemented` | その機能は未実装です。 |
 
-active でない機能には通常収集の通信もタスク作成もしません。疎通確認は別記録とし、Retry-After を守ります。トップページや robots.txt の成功だけで別機能を復旧扱いにせず、実行場所を変えて拒否を解除しません。`active` へ戻すのは `config_revision` を上げる人の設定変更だけで、自動の遷移は、疎通確認で明示拒否を受けた `paused_maintenance`・`paused_unreachable` を `paused_refused` にするものだけです。同じ設定版の間だけ、この自動遷移と疎通確認の記録を引き継ぎ、旧実装による自動の `active` 遷移は採用しません。
+active でない機能には通常収集の通信もタスク作成もしません。疎通確認は別記録とし、Retry-After を守ります。トップページや robots.txt の成功だけで別機能を復旧扱いにせず、実行場所を変えて拒否を解除しません。通常の自動遷移は、疎通確認で明示拒否を受けた `paused_maintenance`・`paused_unreachable` を `paused_refused` にするものです。同じ設定版の間だけ、この自動遷移と疎通確認の記録を引き継ぎ、旧実装による自動の `active` 遷移は採用しません。satellite が報告した拒否は設定版が変わっても保持し、当該 route の `cleared_refusals` に拒否 ID を列挙した時だけ解除します。
+
+route の `executor` は既定 `runner`、`satellite` は同じ run の遠隔の子です。調整役はその店の子を起動せず、定期疎通確認もしません。詳細は [satellite 仕様](docs/satellite.md) を参照。ツクモの停止状態・比較範囲は、この実装追加では有効化していません。
 
 `successes_to_resume` は復旧候補を表示するまでの連続成功回数です（初期値2回）。閾値に達した時に公開 JSON の route ごとの `recovery_candidate` に、候補になった日時（`since`）・連続成功回数（`consecutive_successes`）・最終成功日時（`last_ok_at`）・直近の結果（`evidence`）を出します。成功が続く間は `since` を保ち、1回でも失敗すれば候補を消します。候補がなければ `null` です。
 

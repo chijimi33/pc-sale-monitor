@@ -187,7 +187,7 @@ class ValidationTests(unittest.TestCase):
 
     def test_unknown_top_level_type_schema_and_size(self):
         for extra in ({"mystery": 1}, {"offers": []}, {"request_count": True},
-                      {"schema_version": 2}, {"done": ["x"] * 10001}):
+                      {"schema_version": 2}, {"done": ["x"] * 100001}):
             with self.subTest(extra=list(extra)), self.assertRaises(ValidationError):
                 self.validate(after={**self.after, **extra})
         args = list(self.artifacts())

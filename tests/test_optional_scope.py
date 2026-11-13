@@ -477,7 +477,7 @@ class OptionalPipelineTests(Fixture):
         self.save_offer(peer)
         stages = []
 
-        def children(stores, phase, *args):
+        def children(stores, phase, *args, **kwargs):
             stages.append((phase, list(stores)))
             if phase == "verification":
                 peer.observed_run_id = candidate.observed_run_id
@@ -505,7 +505,7 @@ class OptionalPipelineTests(Fixture):
         self.save_offer(peer)
         verified = item("tsukumo", 8000, discovery_kind="comparison")
 
-        def children(stores, phase, seconds, root, run_id, config_path, routes_path, spawn, clock, plan_path=None):
+        def children(stores, phase, seconds, root, run_id, config_path, routes_path, spawn, clock, plan_path=None, **kwargs):
             if phase == "verification":
                 for store in stores:
                     pipeline.stage(root, store, phase, run_id, seconds, config_path, routes_path, plan_path)

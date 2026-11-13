@@ -10,6 +10,7 @@ from .http import Client, FetchError
 from .http_evidence import retry_after_evidence
 from .models import iso, timestamp
 from .storage import Store
+from .satellite.protocol import ALLOWED_HOSTS
 
 
 STATUSES = {"active", "paused_maintenance", "paused_refused", "paused_unreachable",
@@ -47,6 +48,13 @@ def load_config(path) -> dict:
                 raise ValueError("invalid_route")
             if not isinstance(route["functions"], dict):
                 raise ValueError("invalid_functions")
+            executor = route.get("executor", "runner")
+            if executor not in ("runner", "satellite") or (executor == "satellite" and
+                    (route["store"] not in ALLOWED_HOSTS or route["channel"] != "direct")):
+                raise ValueError("invalid_executor")
+            cleared = route.get("cleared_refusals", [])
+            if not isinstance(cleared, list) or any(not isinstance(item, str) for item in cleared):
+                raise ValueError("invalid_cleared_refusals")
             for function in route["functions"].values():
                 if function["status"] not in STATUSES:
                     raise ValueError("invalid_route_status")
@@ -64,6 +72,8 @@ class RouteState:
         self.routes = {}
         for route_id, configured in self.config["routes"].items():
             route = deepcopy(configured)
+            durable = saved.get("routes", {}).get(route_id, {})
+            route_refusal = next((f for f in durable.get("functions", {}).values() if f.get("refusal_ids")), {})
             previous = saved.get("routes", {}).get(route_id, {}) if reuse else {}
             for name, function in route["functions"].items():
                 function.setdefault("since", iso(_now(now)))
@@ -71,7 +81,13 @@ class RouteState:
                 base = function["status"]
                 target = old.get("status")
                 valid_transition = base in RECOVERABLE and target == "paused_refused"
-                if old.get("automatic") and old.get("config_status") == base and valid_transition:
+                refusal = durable.get("functions", {}).get(name, route_refusal)
+                ids = refusal.get("refusal_ids", [])
+                if ids and not set(ids) <= set(route.get("cleared_refusals", [])):
+                    function.update(deepcopy(refusal))
+                elif old.get("refusal_ids"):
+                    pass
+                elif old.get("automatic") and old.get("config_status") == base and valid_transition:
                     function.update(deepcopy(old))
                 elif target == base:
                     function["since"] = old.get("since", function["since"])
@@ -87,9 +103,30 @@ class RouteState:
         return any(route["store"] == store and route["channel"] == channel and
                    self.status(route_id, function) == "active" for route_id, route in self.routes.items())
 
-    def active_stores(self, function) -> list[str]:
+    def executor(self, route_id):
+        return self.routes[route_id].get("executor", "runner")
+
+    def active_stores(self, function, executor=None) -> list[str]:
         return list(dict.fromkeys(route["store"] for route_id, route in self.routes.items()
-                                 if route["channel"] == "direct" and self.status(route_id, function) == "active"))
+                                 if route["channel"] == "direct" and self.status(route_id, function) == "active"
+                                 and (executor is None or self.executor(route_id) == executor)))
+
+    def apply_refusals(self, route_id, refusals, now):
+        route = self.routes[route_id]
+        cleared = set(self.config["routes"][route_id].get("cleared_refusals", []))
+        records = {row["refusal_id"]: deepcopy(row) for row in refusals
+                   if row["refusal_id"] not in cleared and row["store"] == route["store"]}
+        if not records:
+            return
+        for name, function in route["functions"].items():
+            previous = function.get("evidence", {}).get("refusals", []) if function.get("refusal_ids") else []
+            evidence = {row["refusal_id"]: row for row in previous if row["refusal_id"] not in cleared}
+            evidence.update(records)
+            since = function.get("since") if function.get("refusal_ids") else iso(_now(now))
+            function.update(status="paused_refused", automatic=True, since=since,
+                            config_status=self.config["routes"][route_id]["functions"][name]["status"],
+                            refusal_ids=sorted(evidence), reason="satellite_refused",
+                            evidence={"refusals": list(evidence.values())})
 
     def scope(self) -> dict:
         scope = deepcopy(self.config["scope"])
@@ -110,6 +147,8 @@ class RouteState:
         epoch = _now(now).timestamp()
         due = []
         for route_id, route in self.routes.items():
+            if self.executor(route_id) == "satellite":
+                continue
             states = {function["status"] for function in route["functions"].values()}
             if not route.get("probe") or not states & RECOVERABLE or states & {"paused_refused", "paused_configuration"}:
                 continue
@@ -154,6 +193,10 @@ class RouteState:
 
     def public_summary(self) -> dict:
         return {route_id: {
+            "executor": self.executor(route_id),
+            "refusal_ids": sorted({item for function in route["functions"].values() for item in function.get("refusal_ids", [])}),
+            "refusal_evidence": next((deepcopy(function["evidence"]) for function in route["functions"].values()
+                                       if function.get("refusal_ids")), None),
             "functions": {name: {**deepcopy(function), "reason": function.get("reason", route.get("reason", "")),
                                  "evidence": deepcopy(function.get("evidence", route.get("evidence", {})))}
                           for name, function in route["functions"].items()},

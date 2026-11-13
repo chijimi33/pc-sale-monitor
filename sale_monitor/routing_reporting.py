@@ -242,14 +242,21 @@ def plan_summary(disk, run_id: str, now, scope: dict) -> dict:
 def run_outcome(states: dict, current: list, run_id: str, scope: dict) -> dict:
     """Count current collection evidence, including confirmed empty lists."""
     paused = scope.get("paused_stores", {})
-    results = {name: state for name, state in states.items()
-               if name not in paused and state.get("run_id") == run_id and state.get("status") != "job_missing"}
-    observations = [o for o in current if o.store in results]
     stages = scope.get("run", {}).get("stage_results", {})
+
+    def status(name):
+        stage = stages.get(name, {}).get("discovery", "completed")
+        return stage.get("status") if isinstance(stage, dict) else stage
+
+    unavailable = {name for name in stages if status(name).startswith(("satellite_", "relay_failed", "skipped:"))}
+    results = {name: state for name, state in states.items()
+               if name not in paused and name not in unavailable
+               and state.get("run_id") == run_id and state.get("status") != "job_missing"}
+    observations = [o for o in current if o.store in results]
     empty = sum(state.get("list_pages", 0) > 0 and state.get("listed_candidates") == 0
                 and not state.get("errors") and not state.get("discovery_gaps")
                 and state.get("status") not in ("failed", "error", "interrupted")
-                and stages.get(name, {}).get("discovery", "completed") == "completed"
+                and status(name) == "completed"
                 for name, state in results.items())
     successful = bool(results and (observations or empty))
     reasons = [] if successful else ["no_current_store_results" if not results else "no_current_observations_or_confirmed_empty_results"]
