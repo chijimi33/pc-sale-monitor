@@ -213,6 +213,14 @@ class AgentTests(unittest.TestCase):
         self.mailbox.add(inputs=inputs_fixture(config))
         self.assert_declined("config_invalid")
 
+    def test_foreign_queue_declined_before_stage_or_communication(self):
+        state = json.loads(inputs_fixture()["input/stores/tsukumo.json"])
+        state["queue"] = {"foreign": {"type": "product", "url": "https://example.com/item"}}
+        self.mailbox.add(inputs=inputs_fixture(state=state))
+        with patch("socket.create_connection", side_effect=AssertionError("Network forbidden")):
+            self.assert_declined("config_invalid")
+        self.assertFalse(self.mailbox.manifests("ack"))
+
     def test_route_inactive(self):
         inputs = inputs_fixture()
         routes = json.loads(inputs["input/routes.json"])

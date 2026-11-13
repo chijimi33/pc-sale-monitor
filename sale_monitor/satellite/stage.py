@@ -4,18 +4,19 @@ import json
 import os
 from pathlib import Path
 import time
-from urllib.parse import urlsplit
+from urllib.parse import urljoin, urlsplit
 
 from lxml.etree import ParserError
 
 from ..budget import HostBudget, Robots
 from ..http import Client, FetchError
 from ..pipeline import saved_budget_use
+from ..parsing import canonical, document
 from ..runner import Collector
 from ..storage import atomic_json, read_json
 from .control import ControlState
 from .deadline import Handshake, deadline_clock as system_deadline_clock
-from .guard import CommunicationForbidden, Guard
+from .guard import CommunicationForbidden, Guard, allowed_satellite_url
 from . import protocol, validation
 
 
@@ -41,7 +42,7 @@ def route_active(routes, store, phase):
 
 
 def check_inputs(ticket, inputs):
-    """Preflight configuration and state; queued URLs are checked per request."""
+    """Preflight using the coordinator's URL rule, including queued work."""
     store = ticket["store"]
     config = json.loads(inputs["input/config.json"])
     interval = validation.validate_effective_config(config, store)
@@ -53,8 +54,7 @@ def check_inputs(ticket, inputs):
     protocol.require(config["route"]["functions"].get(function, {}).get("status") == "active", "route_inactive")
     saved = validation._load_state(inputs[f"input/stores/{store}.json"])
     protocol.require(saved["store"] == store, "foreign_store")
-    validation._walk_urls({key: value for key, value in saved.items()
-                           if key not in {"queue", "verification_queue"}}, store)
+    validation._walk_urls(saved, store)
     for name in ("queue", "verification_queue"):
         for task in saved.get(name, {}).values():
             protocol.require(task.get("type") in {"list", "product"}, "unsupported_task")
@@ -81,6 +81,51 @@ class _StageStop(BaseException):
 
 
 class _StageCollector(Collector):
+    def __init__(self, *args, **kwargs):
+        self.foreign_links_skipped = 0
+        super().__init__(*args, **kwargs)
+
+    def _allowed_link(self, url):
+        if allowed_satellite_url(url, self.store):
+            return True
+        self.foreign_links_skipped += 1
+        try:
+            host = urlsplit(url).hostname
+        except ValueError:
+            host = None
+        # Local only: never persist a rejected URL, query or credentials.
+        with (self.disk.root.parent / "stage.log").open("a", encoding="utf-8") as log:
+            log.write("foreign_links_skipped host=" + (host or "invalid") + "\n")
+        return False
+
+    def enqueue(self, task, relisted=False):
+        if not self._allowed_link(task.get("url")):
+            return None
+        return super().enqueue(task, relisted=relisted)
+
+    def _discover(self, page, *args, **kwargs):
+        rejected = set()
+
+        def allowed(url):
+            if url in rejected:
+                return False
+            if self._allowed_link(url):
+                return True
+            rejected.add(url)
+            return False
+
+        # The generic parser already excludes off-host anchors. Count those
+        # here too, before they disappear from its returned discovery lists.
+        for href in document(page).xpath("//a[@href]/@href"):
+            url = canonical(urljoin(page.url, href))
+            if urlsplit(url).scheme in {"http", "https"}:
+                allowed(url)
+        products, pagination, campaigns = super()._discover(page, *args, **kwargs)
+        # Filter before Collector can retain these arrays in replacement receipts.
+        return ([row for row in products if allowed(row["url"])],
+                [url for url in pagination if allowed(url)],
+                [url for url in campaigns if allowed(url)])
+
     def collect(self, *args, **kwargs):
         self._collecting = True
         try:
@@ -100,7 +145,11 @@ class _StageCollector(Collector):
             raise
         except (FetchError, ParserError) as exc:
             if guard.communication_forbidden:
-                # Robots may have swallowed the guard's real request outcome.
+                if guard.stop_request is not None and guard.stop_request["robots"]:
+                    # Robots swallowed its own stop, not a product failure.
+                    task.clear()
+                    task.update(original)
+                    raise _StageStop(guard.reason) from exc
                 raise CommunicationForbidden(guard.reason) from exc
             raise
         except Exception as exc:
@@ -165,7 +214,8 @@ def run_stage(work_dir, *, deadline_clock=None, wall_clock=time.time,
 
         def progress(current):
             atomic_json(work / "stage_result.json", {"reason": current.reason,
-                        "counters": current.counters})
+                        "counters": current.counters,
+                        "foreign_links_skipped": collector.foreign_links_skipped if collector else 0})
 
         guard = _PolicyGuard(store, control, handshake, ticket["collect_until"],
             min_interval_seconds=interval, ticket=ticket, input_retry_after=saved.get("retry_after"),
@@ -209,5 +259,6 @@ def run_stage(work_dir, *, deadline_clock=None, wall_clock=time.time,
             reason = "error"
         status = "completed" if reason == "completed" else "stopped:" + reason
         atomic_json(work / "stage_result.json", {"reason": reason, "status": status, "counters": counters,
+                    "foreign_links_skipped": collector.foreign_links_skipped if collector else 0,
                     "guard_reason": guard.reason if guard is not None else None})
     return 0 if reason == "completed" else 1

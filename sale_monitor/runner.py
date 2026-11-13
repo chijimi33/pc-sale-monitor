@@ -482,6 +482,10 @@ class Collector:
         self.state["list_pages"] += 1
         self.state["listed_candidates"] += len(products)
 
+    def _discover(self, *args, **kwargs):
+        """Let guarded subclasses filter links before discovery receipts are saved."""
+        return discover(*args, **kwargs)
+
     def process(self, task: dict):
         kind = task["type"]
         if self.store == "koubou" and task.get("kind") == "comparison":
@@ -553,10 +557,10 @@ class Collector:
                     "observed_at": page.observed_at, "observed_run_id": self.run_id, "http_status": page.status, "content_hash": digest(page.text)}
                 self.state["list_pages"] += 1
                 return
-            products, pagination, campaigns = discover(page, self.cfg, sale_page=task.get("sale_page", False), comparison=task.get("kind") == "comparison")
+            products, pagination, campaigns = self._discover(page, self.cfg, sale_page=task.get("sale_page", False), comparison=task.get("kind") == "comparison")
             if not products and task.get("sale_page") and self.cfg.get("browser_fallback") and page.method != "browser":
                 page = self._rendered_page(fetch_url)
-                products, pagination, campaigns = discover(page, self.cfg, sale_page=True, comparison=task.get("kind") == "comparison")
+                products, pagination, campaigns = self._discover(page, self.cfg, sale_page=True, comparison=task.get("kind") == "comparison")
             if replacement and not products:
                 raise FetchError("discovery_replacement_unverified")
             if not products and not campaigns and task.get("kind") != "comparison":

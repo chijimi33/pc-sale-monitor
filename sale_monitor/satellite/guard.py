@@ -82,13 +82,19 @@ class Guard:
         self.input_retry_after = input_retry_after or {}
         self.communication_forbidden = False
         self.reason = None
+        # None for preflight stops; otherwise the request outcome that stopped
+        # the stage. Keep only its hash and kind, never the raw URL.
+        self.stop_request = None
         self.consecutive_no_response = 0
         self.counters = dict.fromkeys(("requests", "ordinary_attempted", "ordinary_succeeded", "no_response", "refusal"), 0)
         reason = control.decline_reason(ticket or {})
         if reason:
             self.communication_forbidden, self.reason = True, reason
 
-    def forbid(self, reason):
+    def forbid(self, reason, *, request_url=None):
+        if self.stop_request is None and request_url is not None:
+            self.stop_request = {"url_sha256": sha256_bytes(request_url.encode()),
+                                 "robots": self._robots(request_url)}
         self.communication_forbidden, self.reason = True, reason
         self._checkpoint()
         raise CommunicationForbidden(reason)
@@ -155,7 +161,7 @@ class Guard:
             finally:
                 self.communication_forbidden, self.reason = True, "refused"
             self.counters["refusal"] += 1
-            self.forbid("refused")
+            self.forbid("refused", request_url=url)
         retry = next((v for k, v in headers.items() if k.lower() == "retry-after"), None)
         if status == 429 or retry is not None:
             now = self.wall_clock()
@@ -176,7 +182,7 @@ class Guard:
                 self.control.set_retry_after(ALLOWED_HOSTS[self.store], until)
             finally:
                 self.communication_forbidden, self.reason = True, "retry_after"
-            self.forbid("retry_after")
+            self.forbid("retry_after", request_url=url)
         # 404 bodies reach the collector's missing-product classifier.
         if parseable and not self._robots(url) and (200 <= status < 300 or status == 404):
             self.counters["ordinary_succeeded"] += 1
@@ -189,7 +195,7 @@ class Guard:
         self.counters["no_response"] += 1
         self._checkpoint()
         if self.consecutive_no_response >= NO_RESPONSE_LIMIT:
-            self.forbid("no_response")
+            self.forbid("no_response", request_url=url)
 
     def fetch_robots(self, url):
         """Single attempt, no redirect navigation, suitable for Robots(fetch=)."""

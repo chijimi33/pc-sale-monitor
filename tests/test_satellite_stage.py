@@ -1,4 +1,5 @@
 from copy import deepcopy
+from contextlib import nullcontext
 import json
 from pathlib import Path
 import tempfile
@@ -10,9 +11,9 @@ from sale_monitor.http import Client, SafeRedirect
 from sale_monitor.satellite.agent import encode
 from sale_monitor.satellite.control import ControlState
 from sale_monitor.satellite.deadline import Handshake
-from sale_monitor.satellite.protocol import sha256_bytes, time_string
+from sale_monitor.satellite.protocol import ValidationError, sha256_bytes, time_string
 from sale_monitor.satellite.validation import validate_result
-from sale_monitor.satellite.stage import _StageCollector, run_stage
+from sale_monitor.satellite.stage import _StageCollector, check_inputs, run_stage
 from sale_monitor.storage import atomic_json, read_json
 from test_satellite_agent import inputs_fixture
 from test_satellite_deadline import FakeClock
@@ -81,7 +82,8 @@ class StageTests(unittest.TestCase):
             destination.write_bytes(data)
         self.input_bytes = inputs["input/stores/tsukumo.json"]
 
-    def run_stage(self, replies=None, robots=(200, {}, b"User-agent: *\nAllow: /"), discover=None):
+    def run_stage(self, replies=None, robots=(200, {}, b"User-agent: *\nAllow: /"), discover=None,
+                  real_discovery=False):
         self.write_work()
         replies = replies if replies is not None else [(200, {}, b"<html>list</html>"), (200, {}, PRODUCT.body)]
         def timed_replies():
@@ -97,6 +99,8 @@ class StageTests(unittest.TestCase):
             return self.client
         def robots_transport(url):
             self.robots_calls.append(url)
+            if callable(robots):
+                return robots(url)
             return robots
         def collector(*args, **kwargs):
             instance = _StageCollector(*args, **kwargs)
@@ -109,7 +113,7 @@ class StageTests(unittest.TestCase):
             return instance
         discovered = discover if discover is not None else ([{"url": PRODUCT.url, "kind": "sale"}], [], [])
         with patch("sale_monitor.satellite.stage._StageCollector", side_effect=collector), \
-                patch("sale_monitor.runner.discover", return_value=discovered):
+                (nullcontext() if real_discovery else patch("sale_monitor.runner.discover", return_value=discovered)):
             result = run_stage(self.work, deadline_clock=lambda: self.clock.m, wall_clock=lambda: self.clock.w,
                 sleep=self.clock.advance, client_factory=client_factory, robots_transport=robots_transport)
         self.result = read_json(self.work / "stage_result.json", None)
@@ -185,6 +189,8 @@ class StageTests(unittest.TestCase):
         self.assert_untouched("3", "4", "5")
         self.assertTrue(self.client.guard.communication_forbidden)
         self.assertEqual(len(ControlState(self.home).active_refusals), 1)
+        self.assertEqual(self.client.guard.stop_request, {"robots": False,
+            "url_sha256": sha256_bytes(self.transport.calls[-1].encode())})
         self.assert_valid_result()
 
     def test_429_preserves_real_failure_and_later_queue(self):
@@ -283,15 +289,32 @@ class StageTests(unittest.TestCase):
         self.assertEqual(self.output["phase"], "verification")
         self.assertEqual(len(self.output["verification"]["results"]), 1)
 
-    def test_foreign_queue_failure_does_not_poison_legitimate_tasks(self):
+    def test_foreign_queue_declines_before_any_request_using_coordinator_rule(self):
         self.queued_products(3)
         self.state["queue"]["1"]["url"] = "https://example.com/item"
-        self.assertEqual(self.run_stage(replies=[(200, {}, PRODUCT.body)] * 2), 0)
-        self.assertEqual(self.transport.calls, [self.state["queue"][key]["url"] for key in ("0", "2")])
-        self.assertEqual(self.output["queue"]["1"]["last_error"], "excluded_source")
-        self.assertEqual(self.output["queue"]["1"]["attempts"], 1)
-        self.assertFalse(self.client.guard.communication_forbidden)
-        self.assertEqual(self.result["status"], "completed")
+        self.assertEqual(self.run_stage(replies=[]), 1)
+        self.assertEqual(self.transport.calls, [])
+        self.assertEqual(self.robots_calls, [])
+        self.assertIsNone(self.client)
+        self.assertEqual(self.output_bytes, self.input_bytes)
+        inputs = inputs_fixture(self.config, self.state)
+        with self.assertRaisesRegex(ValidationError, "^foreign_url$"):
+            check_inputs(self.ticket, inputs)
+        # The exact same input bytes fail coordinator validation as well.
+        after = {**self.state, "run_id": self.ticket["run_id"], "phase": "discovery"}
+        output = encode(after)
+        manifest = manifest_fixture(self.ticket, output_sha256=sha256_bytes(output))
+        with self.assertRaisesRegex(ValidationError, "^foreign_url$"):
+            validate_result(self.input_bytes, output, self.ticket, manifest,
+                received_at=self.clock.w, ticket_commit=COMMIT)
+
+    def test_foreign_verification_queue_is_checked_even_during_discovery(self):
+        self.state["verification_queue"] = {"foreign": dict(type="product", url="https://example.com/")}
+        self.assertEqual(self.run_stage(replies=[]), 1)
+        with self.assertRaisesRegex(ValidationError, "^foreign_url$"):
+            check_inputs(self.ticket, inputs_fixture(self.config, self.state))
+        self.assertEqual(self.transport.calls, [])
+        self.assertEqual(self.robots_calls, [])
 
     def test_foreign_plan_blocks_every_request_including_robots(self):
         self.plan = {"run_id": "run-1", "confirm": {"tsukumo": [dict(url="https://example.com/item",
@@ -307,15 +330,58 @@ class StageTests(unittest.TestCase):
         self.assertFalse(self.robots_calls)
 
     def test_foreign_redirect_blocked_before_hop(self):
-        self.assertEqual(self.run_stage(replies=[(302, {"Location": "https://example.com/"}, b"")]), 0)
-        self.assertEqual(self.transport.calls, [LIST])
+        self.queued_products(2)
+        foreign = "https://example.com/private?token=secret"
+        self.assertEqual(self.run_stage(replies=[(302, {"Location": foreign}, b""),
+                                                (200, {}, PRODUCT.body)]), 0)
+        self.assertEqual(self.transport.calls, [self.state["queue"][key]["url"] for key in ("0", "1")])
         self.assertEqual(self.result["reason"], "completed")
-        self.assertEqual(self.output["errors"][0]["reason"], "excluded_source")
+        task = self.output["queue"]["0"]
+        self.assertEqual(task["attempts"], 1)
+        self.assertEqual(task["last_error"], "excluded_source")
+        self.assertEqual(self.output["errors"], [{"task_id": "0", "reason": "excluded_source",
+                                                "url": self.state["queue"]["0"]["url"]}])
+        self.assertIn("1", self.output["done"])
+        self.assertEqual(len(self.output["journal"]), len(self.state["journal"]) + 1)
+        self.assertNotIn(b"example.com", self.output_bytes)
+        self.assertFalse(self.client.guard.communication_forbidden)
+        self.assertIsNone(self.client.guard.stop_request)
+        self.assert_valid_result()
 
     def test_foreign_derived_link_is_never_requested(self):
-        self.assertEqual(self.run_stage(replies=[(200, {}, b"list")],
-            discover=([{"url": "https://example.com/product", "kind": "sale"}], [], [])), 0)
-        self.assertEqual(self.transport.calls, [LIST])
+        body = ('<html><a href="https://example.com/goods/1?secret=value">sale</a>'
+                f'<a href="{PRODUCT.url}">sale</a></html>').encode()
+        self.assertEqual(self.run_stage(replies=[(200, {}, body), (200, {}, PRODUCT.body)],
+                                       real_discovery=True), 0)
+        self.assertEqual(self.transport.calls, [LIST, PRODUCT.url])
+        self.assertEqual(self.result["foreign_links_skipped"], 1)
+        self.assertNotIn("foreign_links_skipped", self.result["counters"])
+        self.assertNotIn(b"example.com", self.output_bytes)
+        self.assertEqual((self.work / "stage.log").read_text(), "foreign_links_skipped host=example.com\n")
+        self.assert_valid_result()
+
+    def test_foreign_discovery_arrays_are_filtered_before_replacement_receipt(self):
+        replacement = LIST + "new/"
+        self.config["stores"]["tsukumo"]["list_url_replacements"] = {LIST: replacement}
+        foreign = "https://example.com/private"
+        self.assertEqual(self.run_stage(discover=([
+            {"url": PRODUCT.url, "kind": "sale"}, {"url": foreign, "kind": "sale"}],
+            [foreign + "/next"], [foreign + "/sale"])), 0)
+        self.assertEqual(self.transport.calls, [replacement, PRODUCT.url])
+        self.assertEqual(self.result["foreign_links_skipped"], 3)
+        self.assertNotIn(b"example.com", self.output_bytes)
+        receipt = self.output["discovery_replacements"][LIST]
+        self.assertEqual(receipt["pagination"], [])
+        self.assertEqual(receipt["campaigns"], [])
+        self.assert_valid_result()
+
+    def test_enqueue_filters_foreign_links_in_satellite_subclass(self):
+        self.run_stage()
+        collector = self.collectors[0]
+        before = deepcopy(collector.state)
+        self.assertIsNone(collector.enqueue({"type": "product", "url": "https://example.com/item"}))
+        self.assertEqual(collector.state, before)
+        self.assertEqual(collector.foreign_links_skipped, 1)
 
     def test_refusal_saved_and_no_request_after_refusal(self):
         self.assertEqual(self.run_stage(replies=[(403, {}, b"refused")]), 1)
@@ -330,6 +396,64 @@ class StageTests(unittest.TestCase):
         self.assertEqual(self.result["reason"], "refused")
         self.assertEqual(self.result["counters"]["requests"], 1)
         self.assertTrue(ControlState(self.home).active_refusals)
+
+    def assert_robots_stop_leaves_product_untried(self, robots, reason, *, no_response=0):
+        self.queued_products(2)
+        self.state["queue"]["0"]["url"] = next(iter(self.state["offers"].values()))["url"]
+        offers = deepcopy(self.state["offers"])
+        self.assertEqual(self.run_stage(replies=[], robots=robots), 1)
+        self.assertEqual(self.result["status"], "stopped:" + reason)
+        self.assertEqual(self.transport.calls, [])
+        self.assertEqual(self.robots_calls, ["https://shop.tsukumo.co.jp/robots.txt"])
+        self.assert_untouched("0", "1")
+        self.assertEqual(self.output["errors"], [])
+        self.assertEqual(self.output["done"], [])
+        self.assertEqual(self.output["offers"], offers)
+        self.assertTrue(all("latest_fetch_failed" not in offer.get("issues", []) for offer in offers.values()))
+        self.assertEqual(self.output["journal"], self.state["journal"])
+        self.assertEqual(self.result["counters"], dict(requests=1, ordinary_attempted=0,
+            ordinary_succeeded=0, no_response=no_response, refusal=int(reason == "refused")))
+        self.assertEqual(self.output["budget"]["used"], {"shop.tsukumo.co.jp": 1})
+        self.assertEqual(bool(ControlState(self.home).active_refusals), reason == "refused")
+        self.assertEqual(self.client.guard.stop_request, {"robots": True,
+            "url_sha256": sha256_bytes(self.robots_calls[0].encode())})
+        self.assert_valid_result()
+
+    def test_first_product_robots_403_leaves_task_and_offer_untouched(self):
+        self.assert_robots_stop_leaves_product_untried((403, {}, b"no"), "refused")
+
+    def test_first_product_robots_401_leaves_task_and_offer_untouched(self):
+        self.assert_robots_stop_leaves_product_untried((401, {}, b"no"), "refused")
+
+    def test_deadline_before_first_product_keeps_task_untried(self):
+        self.queued_products(2)
+        self.state["queue"]["0"]["url"] = next(iter(self.state["offers"].values()))["url"]
+        self.collect_until = NOW + 1
+        self.assertEqual(self.run_stage(replies=[]), 1)
+        self.assertEqual(self.result["status"], "stopped:deadline")
+        self.assertEqual(self.transport.calls, [])
+        self.assert_untouched("0", "1")
+        self.assertEqual(self.output["offers"], self.state["offers"])
+        self.assertIsNone(self.client.guard.stop_request)
+        self.assert_valid_result()
+
+    def test_first_product_robots_marker_leaves_task_and_offer_untouched(self):
+        self.assert_robots_stop_leaves_product_untried((200, {}, b"<title>Access Denied</title>"), "refused")
+
+    def test_first_product_robots_429_leaves_task_and_offer_untouched(self):
+        self.assert_robots_stop_leaves_product_untried((429, {"Retry-After": "300"}, b""), "retry_after")
+        self.assertGreater(ControlState(self.home).retry_until("shop.tsukumo.co.jp"), NOW)
+
+    def test_first_product_robots_retry_header_leaves_task_and_offer_untouched(self):
+        self.assert_robots_stop_leaves_product_untried((503, {"Retry-After": "300"}, b""), "retry_after")
+
+    def test_robots_no_response_limit_leaves_product_untried(self):
+        def robots(url):
+            # Four preceding no-response attempts; this real robots request
+            # reaches the consecutive limit before any product request.
+            self.client.guard.consecutive_no_response = 4
+            raise TimeoutError()
+        self.assert_robots_stop_leaves_product_untried(robots, "no_response", no_response=1)
 
     def test_retry_after_and_deadline_stop_before_next_request(self):
         self.assertEqual(self.run_stage(replies=[(429, {"Retry-After": "300"}, b"")]), 1)
