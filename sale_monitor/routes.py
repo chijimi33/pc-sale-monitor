@@ -35,6 +35,13 @@ def load_config(path) -> dict:
         routes = config["routes"]
         if not isinstance(routes, dict) or any(route not in routes for route in config["scope"]["in_scope"]):
             raise ValueError("unknown_scope_route")
+        optional = config["scope"].get("optional", [])
+        if not isinstance(optional, list):
+            raise ValueError("invalid_scope")
+        if any(route not in routes for route in optional):
+            raise ValueError("unknown_scope_route")
+        if any(route in config["scope"]["in_scope"] for route in optional):
+            raise ValueError("overlapping_scope_route")
         for route in routes.values():
             if not isinstance(route["store"], str) or not isinstance(route["channel"], str):
                 raise ValueError("invalid_route")
@@ -89,10 +96,14 @@ class RouteState:
         scope["in_scope_stores"] = list(dict.fromkeys(self.routes[route_id]["store"] for route_id in scope["in_scope"]))
         scope["verifiable_stores"] = list(dict.fromkeys(self.routes[route_id]["store"] for route_id in scope["in_scope"]
                                                      if self.status(route_id, "product_verify") == "active"))
+        scope.setdefault("optional", [])
+        scope["optional_stores"] = list(dict.fromkeys(self.routes[r]["store"] for r in scope["optional"]))
+        scope["optional_verifiable_stores"] = list(dict.fromkeys(self.routes[r]["store"] for r in scope["optional"]
+                                                               if self.status(r, "product_verify") == "active"))
         scope["out_of_scope"] = {route_id: {
             "status": {name: function["status"] for name, function in route["functions"].items()},
             "reason": route.get("reason", "outside_comparison_scope"),
-        } for route_id, route in self.routes.items() if route_id not in scope["in_scope"]}
+        } for route_id, route in self.routes.items() if route_id not in scope["in_scope"] + scope["optional"]}
         return scope
 
     def probes_due(self, now) -> list[dict]:

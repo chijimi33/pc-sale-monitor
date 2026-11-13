@@ -343,15 +343,18 @@ def run(state_root: Path, public: Path, run_id: str, *, config_path=Path("config
     scope = route_state.scope()
     scope_stores = scope["in_scope_stores"]
     verifiable_stores = scope["verifiable_stores"]
+    optional_stores = scope["optional_stores"]
     lookup_stores = [store for store in scope_stores if route_state.is_active(store, "comparison_lookup", _channel(store))]
     budget = HostBudget(routes_config["hosts"], verification_seconds)
     budgets = {store: budget.limit("www.dospara.co.jp" if store == "dospara" else
-               urlsplit(config["stores"][store]["seed_urls"][0]).hostname) for store in verifiable_stores}
+               urlsplit(config["stores"][store]["seed_urls"][0]).hostname)
+               for store in verifiable_stores + scope["optional_verifiable_stores"]}
     tracking = disk.load("comparison_tracking.json", {})
     comparison_plan = planner.plan([o for o in current if o.discovery_kind != "comparison" and o.channel == "online"],
         current, known, history_by_identity, scope_stores, lookup_stores, budgets, tracking, changes, now,
         run_id=run_id, scope_version=scope["version"], exploration_share=run_config.get("exploration_share", 0.2),
-        verifiable_stores=verifiable_stores)
+        verifiable_stores=verifiable_stores, optional_stores=optional_stores,
+        optional_verifiable_stores=scope["optional_verifiable_stores"])
     plan_path = root / "plans" / f"{run_id}.json"
     disk.save(f"plans/{run_id}.json", comparison_plan)
 

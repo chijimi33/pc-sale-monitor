@@ -2,9 +2,12 @@
 from __future__ import annotations
 
 from collections import Counter
+from pathlib import Path
 
 from .comparison_integrity import missing_comparators, out_of_scope_comparators
-from .models import iso, same_product
+from .engine import amount
+from .models import Offer, allowed_url, iso, same_product, timestamp
+from .storage import read_json
 
 
 REQUEST_REASONS = frozenset(("known_urls_first", "candidate_scope_unverified",
@@ -57,18 +60,35 @@ def scope_summary(scope: dict) -> dict:
     """Publish the fixed scope without copying the full route evidence."""
     return {"version": scope["version"], "in_scope": scope["in_scope"],
             "out_of_scope": {route: {"reason": row.get("reason")}
-                             for route, row in scope.get("out_of_scope", {}).items()}}
+                             for route, row in scope.get("out_of_scope", {}).items()},
+            **({"optional": scope["optional"], "label": scope_label(scope)} if scope.get("optional") else {})}
 
 
-def decision_scope(offer, payment: dict, peers: list, known: dict, current: dict, now, scope: dict) -> dict:
+def scope_label(scope: dict) -> str:
+    label = f"比較範囲 v{scope['version']}"
+    if scope.get("optional"):
+        sources = read_json(Path(__file__).resolve().parents[1] / "config/sources.json", {})["stores"]
+        stores = list(dict.fromkeys(_route_store(scope, route) for route in scope["optional"]))
+        names = "、".join(sources.get(store, {}).get("name", store) for store in stores)
+        label += f"（必須{len(set(scope['in_scope_stores']))}店＋任意: {names}）"
+    return label
+
+
+def _route_store(scope, route):
+    return scope.get("routes", {}).get(route, {}).get("store", route.split(":", 1)[0])
+
+
+def decision_scope(offer, payment: dict, peers: list, known: dict, current: dict, now, scope: dict, *,
+                   plan_row=None, tracking=None, states=None, history=()) -> dict:
     """Attach comparison provenance without changing the evaluator's inputs."""
     confirmed = []
     for row in payment["comparisons"]:
         other = next(o for o in peers if o.seller_id == row["seller_id"] and o.url == row["url"]
-                     and o.observed_at == row["observed_at"] and o.payment == row["price_yen"]
+                     and o.observed_at == row["observed_at"] and amount(o, payment["basis"] == "points") == row["price_yen"]
                      and same_product(offer, o) and not o.errors(now))
         confirmed.append({"store": other.store, "seller_id": other.seller_id, "channel": other.channel,
-                          "url": row["url"], "observed_at": row["observed_at"], "price_yen": row["price_yen"]})
+                          "url": row["url"], "observed_at": row["observed_at"], "price_yen": row["price_yen"],
+                          **({"scope": "optional"} if other.store in scope.get("optional_stores", []) else {})})
     stores = scope["in_scope_stores"]
     excluded = out_of_scope_comparators(offer, known, stores)
     unconfirmed = []
@@ -103,8 +123,107 @@ def decision_scope(offer, payment: dict, peers: list, known: dict, current: dict
         if issues:
             item["current_issues"] = issues
         unconfirmed.append(item)
+    if scope.get("optional"):
+        unconfirmed.extend(_optional_unconfirmed(offer, payment, peers, known, now, scope,
+            plan_row or {}, tracking or {}, states or {}, history))
     return {"version": scope["version"], "confirmed": confirmed, "unconfirmed": unconfirmed,
-            "label": f"比較範囲 v{scope['version']}"}
+            "label": scope_label(scope)}
+
+
+def _optional_unconfirmed(offer, basis, peers, known, now, scope, plan_row, tracking, states, history):
+    points = basis["basis"] == "points"
+    planned = {(item["store"], item["url"]): item for item in plan_row.get("optional", [])}
+    result = []
+    for route in scope["optional"]:
+        store = _route_store(scope, route)
+        if store == offer.store:
+            continue
+        entry = tracking.get(offer.identity, {}).get(store, {})
+        urls = {o.url for o in known.get(offer.identity, []) if o.store == store
+                and o.seller_id != offer.seller_id and same_product(offer, o)}
+        urls.update(entry.get("unverified_urls", []))
+        urls.update(url for s, url in planned if s == store)
+        state = states.get(store, {})
+        verification = state.get("verification", {})
+        if verification.get("run_id") != offer.observed_run_id:
+            verification = {}
+        stage_reason = None
+        stages = scope.get("run", {}).get("stage_results", {}).get(store, {})
+        for phase in ("discovery", "verification"):
+            status = stages.get(phase, {})
+            status = status.get("status") if isinstance(status, dict) else status
+            if status and status != "completed":
+                stage_reason = status
+                break
+        if not urls:
+            result.append({"route": route, "store": store, "category": "optional_not_confirmed",
+                           "reason": "not_searched", "last_verified": None, "used_in_comparison": False})
+        for url in sorted(urls):
+            item = planned.get((store, url), {})
+            keys = set()
+            for receipt in verification.get("results", {}).values():
+                if receipt.get("url") == url and receipt.get("observed_offer_key"):
+                    keys.add(receipt["observed_offer_key"])
+            observed = [o for o in peers if o.store == store and (o.url == url or o.key in keys)
+                        and o.seller_id != offer.seller_id and same_product(offer, o)]
+            if any(not o.errors(now) and amount(o, points) is not None for o in observed):
+                continue
+            reason = stage_reason
+            if reason is None and item.get("state") in ("mandatory_not_ready", "backoff", "skipped_budget"):
+                reason = item["state"]
+            if reason is None and item.get("state") == "unverifiable":
+                function = scope.get("routes", {}).get(route, {}).get("functions", {}).get("product_verify", "unverifiable")
+                reason = function.get("status", "unverifiable") if isinstance(function, dict) else function
+            if reason is None:
+                issues = [issue for other in observed for issue in other.errors(now)]
+                reason = ("fetch_failed" if url in verification.get("failed_urls", []) else
+                          issues[0] if issues else "points_unknown" if observed and points else "not_reached")
+            past, newer = _optional_evidence(offer, store, url, keys, points, now, history, state, entry, verification)
+            row = {"route": route, "store": store, "url": url, "offer_key": item.get("offer_key"),
+                   "category": "optional_not_confirmed", "reason": reason,
+                   "last_verified": past, "used_in_comparison": False}
+            if newer:
+                row["newer_evidence"] = newer
+            result.append(row)
+    return result
+
+
+def _optional_evidence(candidate, store, url, keys, points, now, history, state, entry, verification):
+    observations = []
+    failed_snapshot = False
+    for row in [*(r.get("offer", {}) for r in history), *state.get("offers", {}).values(),
+                *(r.get("offer", {}) for r in state.get("journal", []))]:
+        try:
+            other = Offer.from_dict(row)
+        except (TypeError, ValueError):
+            continue
+        checked = timestamp(other.observed_at)
+        if (other.store == store and (other.url == url or other.key in keys) and checked and checked <= now
+                and other.seller_id != candidate.seller_id and same_product(candidate, other) and allowed_url(other.url)):
+            failed_snapshot |= "latest_fetch_failed" in other.issues
+            other.issues = [issue for issue in other.issues if issue != "latest_fetch_failed"]
+            observations.append(other)
+    valid = [o for o in observations if not o.errors(timestamp(o.observed_at)) and amount(o, points) is not None]
+    latest = max(valid, key=lambda o: timestamp(o.observed_at), default=None)
+    past = {"observed_at": latest.observed_at, "yen": amount(latest, points), "stock": latest.stock} if latest else None
+    newer = []
+    ended = [o for o in observations if o.stock == "out_of_stock" and o.verified and o.evidence and not o.issues
+             and (latest is None or timestamp(o.observed_at) > timestamp(latest.observed_at))]
+    if ended:
+        other = max(ended, key=lambda o: timestamp(o.observed_at))
+        newer.append({"observed_at": other.observed_at, "yen": amount(other, points), "stock": other.stock})
+    attempts = [task for queue in ("queue", "verification_queue") for task in state.get(queue, {}).values()
+                if task.get("url") == url and task.get("last_error")]
+    failed_at = [timestamp(task.get("last_attempt_at")) for task in attempts]
+    if failed_snapshot:
+        failed_at.append(timestamp(entry.get("last_attempt_at")) or timestamp(state.get("checkpoint_at")))
+    if url in verification.get("failed_urls", []):
+        failed_at.append(timestamp(state.get("checkpoint_at")) or timestamp(entry.get("last_attempt_at")))
+    failed_at = [date for date in failed_at if date and date <= now and
+                 (latest is None or date > timestamp(latest.observed_at))]
+    if failed_at or url in verification.get("failed_urls", []):
+        newer.append({"observed_at": iso(max(failed_at)) if failed_at else None, "reason": "fetch_failed"})
+    return past, newer
 
 
 def plan_summary(disk, run_id: str, now, scope: dict) -> dict:
