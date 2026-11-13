@@ -265,6 +265,8 @@ def aggregate(root: Path, public: Path, run_id: str, now=None, scope: dict | Non
             same_product(candidate, offer) for candidate in sale_candidates)
 
     tracking = disk.load("comparison_tracking.json", {}) if scope is not None else {}
+    optional_plan = disk.load(f"plans/{run_id}.json", {}) if scope is not None and scope.get("optional") else {}
+    optional_rows = {row["offer_key"]: row for row in optional_plan.get("candidates", [])}
     for offer in current:
         identity = offer.identity
         peers = current_by_identity.get(identity, [])
@@ -298,7 +300,9 @@ def aggregate(root: Path, public: Path, run_id: str, now=None, scope: dict | Non
         decision = payment if payment["status"] == "accepted" or points["status"] != "accepted" else points
         decisions.append({"offer": offer.to_dict(), "payment": payment, "points": points})
         if scope is not None:
-            decisions[-1]["comparison_scope"] = decision_scope(offer, payment, peers, known, current_by_key, now, scope)
+            decisions[-1]["comparison_scope"] = decision_scope(offer, decision if scope.get("optional") else payment,
+                peers, known, current_by_key, now, scope, plan_row=optional_rows.get(offer.key),
+                tracking=tracking, states=states, history=past)
             unconfirmed = decisions[-1]["comparison_scope"]["unconfirmed"]
             for row in unconfirmed:
                 if row["category"] != "in_scope_not_confirmed":

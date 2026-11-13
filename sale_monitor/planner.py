@@ -23,7 +23,8 @@ def plan(candidates: list[Offer], current: list[Offer], known: dict[str, list[Of
          history_by_identity: dict[str, list[dict]], scope_stores: list[str],
          lookup_stores: list[str], budgets: dict[str, int], tracking: dict,
          changes: dict[str, str], now: datetime, *, run_id: str, scope_version: int,
-         exploration_share: float = 0.2, verifiable_stores: list[str] | None = None) -> dict:
+         exploration_share: float = 0.2, verifiable_stores: list[str] | None = None,
+         optional_stores: list[str] | None = None, optional_verifiable_stores: list[str] | None = None) -> dict:
     """Reserve complete comparison bundles and bounded searches for this run."""
     if not 0 <= exploration_share <= 1:
         raise ValueError("exploration_share must be between zero and one")
@@ -145,11 +146,60 @@ def plan(candidates: list[Offer], current: list[Offer], known: dict[str, list[Of
             if candidate.key not in searches[key]["for_candidates"]:
                 searches[key]["for_candidates"].append(candidate.key)
     candidate_rows = [row for candidate, row in rows]
+    optional_summary = {}
+    if optional_stores:
+        optional_summary["optional"] = _reserve_optional(rows, current, known, tracking, now, run_id,
+            set(optional_stores) - scope, optional_verifiable_stores, budgets, confirm)
     return {"run_id": run_id, "scope_version": scope_version, "generated_at": iso(now),
             "confirm": confirm, "explore": explore, "candidates": candidate_rows,
             "summary": {"candidates": len(candidate_rows), "by_status": dict(sorted(Counter(row["status"] for row in candidate_rows).items())),
                         "reserved_requests": reserved, "confirm_budget": confirm_budget,
-                        "explore_budget": explore_budget, "explore_requests": explore_requests}}
+                        "explore_budget": explore_budget, "explore_requests": explore_requests, **optional_summary}}
+
+
+def _reserve_optional(rows, current, known, tracking, now, run_id, stores, verifiable_stores, budgets, confirm):
+    """Append optional work only after the mandatory plan is fixed."""
+    verifiable = stores if verifiable_stores is None else stores & set(verifiable_stores)
+    reserved = {store: 0 for store in sorted(verifiable)}
+    requests = {}
+    confirmed = {(o.store, o.key) for o in current if o.observed_run_id == run_id}
+    confirmed_urls = {(o.store, o.url) for o in current if o.observed_run_id == run_id}
+    for candidate, row in rows:
+        items = {}
+        for other in sorted(known.get(candidate.identity, []),
+                            key=lambda o: (iso(timestamp(o.observed_at)) if timestamp(o.observed_at) else "", o.url)):
+            if (other.store in stores and other.store != candidate.store and other.channel == "online"
+                    and other.seller_id != candidate.seller_id and same_product(candidate, other)):
+                items[(other.store, other.url)] = other.key
+        for store in sorted(stores - {candidate.store}):
+            for url in tracking.get(candidate.identity, {}).get(store, {}).get("unverified_urls", []):
+                items.setdefault((store, url), None)
+        row["optional"] = []
+        for (store, url), offer_key in sorted(items.items()):
+            key = (store, url)
+            entry = tracking.get(candidate.identity, {}).get(store, {})
+            if row["status"] not in ("planned", "already_confirmed", "no_known_comparator"):
+                state = "mandatory_not_ready"
+            elif (store, offer_key) in confirmed or key in confirmed_urls:
+                state = "confirmed_this_run"
+            elif store not in verifiable:
+                state = "unverifiable"
+            elif _backoff(entry, now):
+                state = "backoff"
+            elif key not in requests and reserved[store] >= budgets.get(store, 0):
+                state = "skipped_budget"
+            else:
+                state = "to_verify"
+                if key not in requests:
+                    requests[key] = {"url": url, "offer_key": offer_key, "identity": candidate.identity,
+                                     "for_candidates": []}
+                    confirm.setdefault(store, []).append(requests[key])
+                    reserved[store] += 1
+                if candidate.key not in requests[key]["for_candidates"]:
+                    requests[key]["for_candidates"].append(candidate.key)
+            row["optional"].append({"store": store, "offer_key": offer_key, "url": url, "state": state})
+    return {"by_state": dict(sorted(Counter(item["state"] for _, row in rows for item in row["optional"]).items())),
+            "reserved_requests": reserved, "confirm_budget": {s: budgets.get(s, 0) for s in sorted(verifiable)}}
 
 
 def update_tracking(tracking: dict, plan: dict, current: list[Offer], failed: dict[str, set[str]],
@@ -172,9 +222,15 @@ def update_tracking(tracking: dict, plan: dict, current: list[Offer], failed: di
                        (store, request.get("offer_key")) in observed_keys)
             failure = request["url"] in failed.get(store, set())
             if success or failure:
-                values = outcomes.setdefault((request["identity"], store), [False, 0])
-                values[0] |= success
-                values[1] += int(failure and not success)
+                identities = {request["identity"]}
+                identities.update(row["identity"] for row in plan.get("candidates", [])
+                    if row["offer_key"] in request.get("for_candidates", [])
+                    and any(item["store"] == store and item["url"] == request["url"] and item["state"] == "to_verify"
+                            for item in row.get("optional", [])))
+                for identity in identities:
+                    values = outcomes.setdefault((identity, store), [False, 0])
+                    values[0] |= success
+                    values[1] += int(failure and not success)
     for (identity, store), (success, failures) in sorted(outcomes.items()):
         values = entry(identity, store)
         values["last_attempt_at"] = updated_at
