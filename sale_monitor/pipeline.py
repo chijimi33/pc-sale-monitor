@@ -19,9 +19,12 @@ from .http import Client
 from .models import STORES, Offer, fresh, iso, utcnow
 from .runner import Collector, record_unverified_discoveries
 from .storage import Store, read_json
+from .satellite import protocol
+from .satellite.coordinator import encode
 
 
 DEADLINE_GRACE = 120
+DECISION_RESERVE = 300
 TERM_GRACE = 5
 USER_AGENT = "PCSaleMonitor/0.1 (+https://github.com/chijimi33/pc-sale-monitor)"
 
@@ -244,16 +247,19 @@ def _finish_interrupted_verification(disk, store, run_id):
         disk.save(f"stores/{store}.json", state)
 
 
-def _run_children(stores, phase, seconds, root, run_id, config_path, routes_path, spawn, clock, plan_path=None):
+def _run_children(stores, phase, seconds, root, run_id, config_path, routes_path, spawn, clock, plan_path=None,
+                  callback=None, deadline=None):
     processes, results = {}, {}
-    deadline = clock() + seconds + DEADLINE_GRACE
+    fixed_deadline = deadline is not None
+    deadline = clock() + seconds + DEADLINE_GRACE if deadline is None else deadline
     options = {"start_new_session": True} if os.name == "posix" else {
         "creationflags": subprocess.CREATE_NEW_PROCESS_GROUP | 0x00000004}  # CREATE_SUSPENDED
     try:
         for store in stores:
+            child_seconds = min(seconds, max(0, int(deadline - DEADLINE_GRACE - clock()))) if fixed_deadline else seconds
             command = [sys.executable, "-m", "sale_monitor.cli", "stage", "--phase", phase,
                        "--store", store, "--state", str(root), "--run-id", run_id,
-                       "--seconds", str(seconds), "--config", str(config_path), "--routes", str(routes_path)]
+                       "--seconds", str(child_seconds), "--config", str(config_path), "--routes", str(routes_path)]
             if plan_path is not None:
                 command.extend(["--plan", str(plan_path)])
             try:
@@ -270,6 +276,8 @@ def _run_children(stores, phase, seconds, root, run_id, config_path, routes_path
                 results[store] = {"status": "failed", "exit_code": None, "reason": type(exc).__name__}
         pending = dict(processes)
         while pending:
+            if callback is not None:
+                callback()
             for store, process in list(pending.items()):
                 code = process.poll()
                 if code is not None:
@@ -308,7 +316,7 @@ def _observations(disk, run_id, now):
 
 
 def run(state_root: Path, public: Path, run_id: str, *, config_path=Path("config/sources.json"),
-        routes_path=Path("config/routes.json"), now=None, spawn=None, clock=time.monotonic) -> dict:
+        routes_path=Path("config/routes.json"), now=None, spawn=None, clock=time.monotonic, remote=None) -> dict:
     """Execute A through D, retaining all durable work if publication fails."""
     _validate_run_id(run_id)
     started = clock()
@@ -321,7 +329,7 @@ def run(state_root: Path, public: Path, run_id: str, *, config_path=Path("config
     routes_config = routes.load_config(routes_path)
     if disk.load("schema.json", {}).get("state_schema_version") != migrate.STATE_SCHEMA_VERSION:
         raise RuntimeError("state_migration_required")
-    route_state = routes.RouteState(disk, routes_config, now)
+    route_state = remote.route_state if remote is not None else routes.RouteState(disk, routes_config, now)
     for route in route_state.probes_due(now):
         result = routes.probe(Client(browser=False), route["route_id"], route)
         route_state.record_probe(route["route_id"], result, now)
@@ -331,9 +339,49 @@ def run(state_root: Path, public: Path, run_id: str, *, config_path=Path("config
     discovery_seconds = run_config["discovery_minutes"] * 60
     verification_seconds = run_config["verification_minutes"] * 60
     stage_results = {}
-    for store, result in _run_children(route_state.active_stores("sale_discovery"), "discovery", discovery_seconds,
-                                      root, run_id, config_path, routes_path, spawn, clock).items():
-        stage_results.setdefault(store, {})["discovery"] = result
+    accepted_discovery = {}
+    run_epoch = now.timestamp()
+    run_deadline = run_epoch + run_config["max_minutes"] * 60
+
+    def phase_deadlines(seconds):
+        stage_start = run_epoch + clock() - started
+        result = protocol.stage_deadlines(run_deadline, stage_start, seconds, DEADLINE_GRACE, DECISION_RESERVE)
+        end = min(stage_start + seconds, run_deadline - DECISION_RESERVE - DEADLINE_GRACE)
+        return stage_start, end, result
+
+    def remote_result(store, phase, handle):
+        status, body = remote.finish(handle, time.sleep)
+        stage_results.setdefault(store, {})[phase] = {"status": status, "executor": "satellite", **handle.audit}
+        if phase == "discovery" and body is not None:
+            accepted_discovery[store] = (body, {"satellite_commit": handle.audit["result_commit"],
+                                               "state_sha256": protocol.sha256_bytes(body)})
+        return body
+
+    stage_start, end, deadlines = phase_deadlines(discovery_seconds)
+    handles = {}
+    satellite_stores = route_state.active_stores("sale_discovery", executor="satellite")
+    for store in satellite_stores:
+        if remote is None:
+            stage_results.setdefault(store, {})["discovery"] = {"status": "relay_failed", "executor": "satellite"}
+        elif deadlines is None:
+            stage_results.setdefault(store, {})["discovery"] = {"status": "skipped:insufficient_time", "executor": "satellite"}
+        else:
+            path = root / "stores" / (store + ".json")
+            body = path.read_bytes() if path.exists() else encode({"schema_version": 1, "store": store,
+                "queue": {}, "done": [], "offers": {}, "journal": [], "cycle_complete": False})
+            handles[store] = remote.begin(store, "discovery", body, deadlines)
+    if end > stage_start:
+        for store, result in _run_children(route_state.active_stores("sale_discovery", executor="runner"),
+                "discovery", int(end - stage_start), root, run_id, config_path, routes_path, spawn, clock,
+                callback=remote.service if remote else None,
+                deadline=started + end + DEADLINE_GRACE - run_epoch).items():
+            stage_results.setdefault(store, {})["discovery"] = result
+    else:
+        for store in route_state.active_stores("sale_discovery", executor="runner"):
+            stage_results.setdefault(store, {})["discovery"] = {"status": "skipped", "reason": "run_time_remaining_under_five_minutes"}
+    for store, handle in handles.items():
+        remote_result(store, "discovery", handle)
+    _save_remote_phase(disk, run_id, stage_results, "discovery")
 
     now = fixed_now or utcnow()
     states, current, changes = _observations(disk, run_id, now)
@@ -360,13 +408,50 @@ def run(state_root: Path, public: Path, run_id: str, *, config_path=Path("config
 
     verification_stores = [store for store in route_state.active_stores("product_verify") if
         comparison_plan["confirm"].get(store) or comparison_plan["explore"].get(store)]
-    if run_config["max_minutes"] * 60 - (clock() - started) < 300:
+    stage_start, end, deadlines = phase_deadlines(verification_seconds)
+    verification_satellites = list(dict.fromkeys(satellite_stores +
+        route_state.active_stores("product_verify", executor="satellite")))
+    handles = {}
+    for store in verification_satellites:
+        reason = None
+        if remote is None:
+            status = "relay_failed"
+        else:
+            if store not in accepted_discovery:
+                reason = "discovery_not_accepted"
+            elif not route_state.is_active(store, "product_verify"):
+                reason = "route_inactive"
+            elif not comparison_plan["confirm"].get(store):
+                reason = "no_confirm_entries"
+            elif deadlines is None or run_config["max_minutes"] * 60 - (clock() - started) < 300:
+                reason = "insufficient_time"
+            if reason is None:
+                body, discovery = accepted_discovery[store]
+                plan_bytes = encode({"run_id": run_id, "confirm": {store: comparison_plan["confirm"][store]}})
+                handles[store] = remote.begin(store, "verification", body, deadlines, plan_bytes, discovery)
+                continue
+            status = "skipped:" + reason
+        stage_results.setdefault(store, {})["verification"] = {"status": status, "executor": "satellite"}
+
+    verification_stores = [store for store in verification_stores
+                           if route_state.executor(store + ":direct") == "runner"]
+    if run_config["max_minutes"] * 60 - (clock() - started) < 300 or end <= stage_start:
         for store in verification_stores:
             stage_results.setdefault(store, {})["verification"] = {"status": "skipped", "reason": "run_time_remaining_under_five_minutes"}
     else:
-        for store, result in _run_children(verification_stores, "verification", verification_seconds,
-                root, run_id, config_path, routes_path, spawn, clock, plan_path).items():
+        for store, result in _run_children(verification_stores, "verification", int(end - stage_start),
+                root, run_id, config_path, routes_path, spawn, clock, plan_path,
+                callback=remote.service if remote else None,
+                deadline=started + end + DEADLINE_GRACE - run_epoch).items():
             stage_results.setdefault(store, {})["verification"] = result
+    for store, handle in handles.items():
+        body = remote_result(store, "verification", handle)
+        if body is not None and handle.status.startswith("stopped:"):
+            _finish_interrupted_verification(disk, store, run_id)
+    for store in verification_satellites:
+        if store in accepted_discovery and (store not in handles or handles[store].accepted is None):
+            _unreached_satellite_verification(disk, store, run_id, comparison_plan)
+    _save_remote_phase(disk, run_id, stage_results, "verification")
 
     now = fixed_now or utcnow()
     states, current, _ = _observations(disk, run_id, now)
@@ -398,3 +483,27 @@ def run(state_root: Path, public: Path, run_id: str, *, config_path=Path("config
     scope["run"] = {"stage_results": stage_results, "plan_summary": comparison_plan["summary"],
                     "started_at": started_at, "elapsed_seconds": clock() - started}
     return reporting.aggregate(root, Path(public), run_id, now, scope=scope)
+
+
+def _unreached_satellite_verification(disk, store, run_id, plan):
+    requests = plan["confirm"].get(store, [])
+    if not requests:
+        return
+    state = disk.load(f"stores/{store}.json", {})
+    state["verification"] = {"run_id": run_id, "results": {}, "not_reached": len(requests),
+                             "failed_urls": [], "searched_identities": [],
+                             "unverified_discoveries": [{"identity": row["identity"], "url": row["url"],
+                                 "reason": "not_reached"} for row in requests if not row.get("offer_key")]}
+    state["verification_queue"] = {}
+    disk.save(f"stores/{store}.json", state)
+
+
+def _save_remote_phase(disk, run_id, stage_results, phase):
+    for stages in stage_results.values():
+        row = stages.get(phase, {})
+        if row.get("executor") == "satellite":
+            audit = disk.load(f"satellite/{run_id}.json", {"run_id": run_id, "phases": {}})
+            status = row["status"]
+            audit["phases"].setdefault(phase, {"outcome": status,
+                "reason": status.split(":", 1)[1] if ":" in status else None})
+            disk.save(f"satellite/{run_id}.json", audit)

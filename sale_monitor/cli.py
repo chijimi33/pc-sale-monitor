@@ -2,13 +2,50 @@ from __future__ import annotations
 
 import argparse
 import json
+import logging
+import os
 from pathlib import Path
 import re
+import subprocess
 
 from .models import STORES, iso, utcnow
 from .reporting import aggregate, checkpoint, merge_incoming, validation
 from .runner import Collector
 from .storage import Store, read_json
+
+
+def _remote(args):
+    from . import routes
+    from .satellite import protocol
+    from .satellite.coordinator import RemoteStages
+    from .satellite.transport import GitMailbox
+    try:
+        disk = Store(args.state)
+        config = routes.load_config(args.routes)
+        state = routes.RouteState(disk, config)
+        configured = any(route.get("executor") == "satellite" for route in config["routes"].values())
+        # Late safety metadata still matters after pausing or changing executors.
+        if not configured and not (args.state / "satellite").exists():
+            return None
+        position = disk.load("satellite/position.json", {}).get("commit", "")
+        mailbox = GitMailbox(protocol.REMOTE_URL or "https://github.com/" + os.environ["GITHUB_REPOSITORY"] + ".git",
+            write_branch=protocol.RELAY_BRANCH, read_branch=protocol.SATELLITE_BRANCH,
+            workdir=args.state.resolve().parent.parent / "relay-repo", env=dict(os.environ), start_after=position)
+        state_sha = None
+        # The monitor-data head is provenance, never the application checkout.
+        try:
+            branch = subprocess.run(["git", "-C", str(args.state.parent), "symbolic-ref", "--short", "HEAD"],
+                capture_output=True, check=True, timeout=10).stdout.decode().strip()
+            if branch == "monitor-data":
+                state_sha = subprocess.run(["git", "-C", str(args.state.parent), "rev-parse", "HEAD"],
+                    capture_output=True, check=True, timeout=10).stdout.decode().strip()
+        except (OSError, subprocess.SubprocessError):
+            state_sha = None
+        return RemoteStages(mailbox, disk, state, args.run_id,
+                            sources_config=read_json(args.config, None), state_sha=state_sha)
+    except Exception as exc:
+        logging.getLogger(__name__).warning("Satellite relay unavailable (%s)", type(exc).__name__)
+        return None
 
 
 def main(argv=None):
@@ -48,7 +85,8 @@ def main(argv=None):
         print(json.dumps({"store": args.store, "status": result["status"], "offers": len(result["offers"]), "pending": len(result["queue"]), "errors": result["errors"]}, ensure_ascii=False))
     elif args.command == "run":
         from . import pipeline
-        result = pipeline.run(args.state, args.public, args.run_id, config_path=args.config, routes_path=args.routes)
+        result = pipeline.run(args.state, args.public, args.run_id, config_path=args.config,
+                              routes_path=args.routes, remote=_remote(args))
         print(json.dumps({"run_id": args.run_id, "run_outcome": result["run_outcome"],
                           "notification_count": result["notification_count"],
                           "stage_results": result["run"]["stage_results"]}, ensure_ascii=False))

@@ -13,7 +13,8 @@ from .protocol import (ALLOWED_HOSTS, ValidationError, bounded, epoch, hash_valu
                        validate_manifest, validate_refusals, validate_ticket)
 
 MAX_STATE_BYTES = 32 * 1024 * 1024
-MAX_STATE_ITEMS = 10_000
+MAX_STATE_ITEMS = 100_000
+MAX_STATE_STRING = 65_536
 
 # These are the fields written by Collector, including carried checkpoints.
 STATE_TYPES = {
@@ -105,7 +106,7 @@ def validate_effective_config(config, store):
     keys(route["functions"], (), {"sale_discovery", "product_verify", "comparison_lookup", "shipping_policy"})
     for name, function in route["functions"].items():
         _typed(function, {"status": str, "since": str, "automatic": bool, "config_status": str,
-                          "reason": str, "evidence": dict, "refusal_id": str}, {"status"})
+                          "reason": str, "evidence": dict, "refusal_id": str, "refusal_ids": list}, {"status"})
         require(function["status"] in {"active", "paused_maintenance", "paused_refused", "paused_unreachable", "paused_configuration", "not_implemented"}, "route_status")
         if name == "comparison_lookup":
             require(function["status"] != "active", "satellite_search_disabled")
@@ -145,7 +146,9 @@ def validate_effective_config(config, store):
 def _validate_route_evidence(value):
     _typed(value, {"observed_at": str, "summary": str, "checked_at": str, "ok": bool,
                    "explicit_refusal": bool, "http_status": (int, type(None)),
-                   "retry_after_until": (int, float, type(None))})
+                   "retry_after_until": (int, float, type(None)), "refusals": list})
+    if "refusals" in value:
+        validate_refusals(value["refusals"])
 
 
 def _load_state(data):
@@ -162,7 +165,7 @@ def _load_state(data):
         if isinstance(exc, ValidationError):
             raise
         raise ValidationError("invalid_json") from exc
-    bounded(value, limit=MAX_STATE_BYTES)
+    bounded(value, limit=MAX_STATE_BYTES, max_items=MAX_STATE_ITEMS, max_string=MAX_STATE_STRING)
     _typed(value, STATE_TYPES, {"schema_version", "store", "queue", "done", "offers", "journal", "cycle_complete"})
     require(value["schema_version"] == 1, "state_schema_version")
     for key in ("pending_count", "request_count", "list_pages", "listed_candidates"):
@@ -185,7 +188,7 @@ def _offer(row, store):
     keys(row, {"store", "seller_id", "product_id", "url", "observed_at", "observed_run_id"}, Offer.__dataclass_fields__)
     require(row["store"] == store and row["seller_id"] == store, "foreign_offer")
     for key in ("product_id", "url", "observed_at", "observed_run_id"):
-        string(row[key])
+        string(row[key], max_string=MAX_STATE_STRING)
     for key in ("title", "stock", "channel", "discovery_kind"):
         if key in row:
             require(type(row[key]) is str, "invalid_offer_type:" + key)
@@ -230,6 +233,7 @@ def validate_result(input_bytes, output_bytes, ticket, manifest, received_at, *,
     validate_ticket(ticket)
     validate_manifest(manifest)
     require(manifest["kind"] == "result", "not_result")
+    require(manifest["status"] == "completed" or manifest["status"].startswith("stopped:"), "result_status")
     require(ticket_commit is not None, "ticket_commit_required")
     hash_value(ticket_commit, commit=True)
     require(manifest["ticket_commit"] == ticket_commit, "ticket_commit")

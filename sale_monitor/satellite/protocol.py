@@ -45,21 +45,21 @@ def sha256_bytes(data: bytes) -> str:
     return hashlib.sha256(data).hexdigest()
 
 
-def bounded(value, *, limit=MAX_DOCUMENT_BYTES):
+def bounded(value, *, limit=MAX_DOCUMENT_BYTES, max_items=MAX_ITEMS, max_string=MAX_STRING):
     """Reject non-JSON values, deep nesting and oversized documents."""
     def visit(item, depth):
         require(depth <= 32, "too_deep")
         if type(item) is dict:
-            require(len(item) <= MAX_ITEMS, "too_many_items")
+            require(len(item) <= max_items, "too_many_items")
             for key, child in item.items():
-                require(type(key) is str and len(key) <= MAX_STRING, "invalid_key")
+                require(type(key) is str and len(key) <= max_string, "invalid_key")
                 visit(child, depth + 1)
         elif type(item) is list:
-            require(len(item) <= MAX_ITEMS, "too_many_items")
+            require(len(item) <= max_items, "too_many_items")
             for child in item:
                 visit(child, depth + 1)
         elif type(item) is str:
-            require(len(item) <= MAX_STRING, "string_too_long")
+            require(len(item) <= max_string, "string_too_long")
         elif type(item) is int:
             require(abs(item) <= 2**53, "invalid_number")
         elif type(item) is float:
@@ -80,8 +80,8 @@ def keys(value, required, optional=()):
     require(value.keys() <= set(required) | set(optional), "unknown_keys")
 
 
-def string(value, pattern=None):
-    require(type(value) is str and 0 < len(value) <= MAX_STRING, "invalid_string")
+def string(value, pattern=None, *, max_string=MAX_STRING):
+    require(type(value) is str and 0 < len(value) <= max_string, "invalid_string")
     if pattern:
         require(re.fullmatch(pattern, value) is not None, "invalid_string")
 
@@ -142,7 +142,8 @@ def validate_ticket(value):
         integer(value[key], 1)
     require(value["fingerprint_version"] == 1 and value["state_schema_version"] == 1, "unsupported_version")
     hash_value(value["code_fingerprint"])
-    hash_value(value["state_sha"], commit=True)
+    if value["state_sha"] not in (None, ""):
+        hash_value(value["state_sha"], commit=True)
     hashes(value["input_sha256"])
     paths = {"input/stores/" + value["store"] + ".json", "input/routes.json", "input/config.json"}
     if value["phase"] == "verification":
@@ -174,12 +175,14 @@ def validate_manifest(value):
         hash_value(value[key])
     if value["kind"] == "ack":
         require(value["output_sha256"] is None, "ack_output")
-    else:
+    elif not str(value.get("status", "")).startswith("declined:"):
         hash_value(value["output_sha256"])
+    else:
+        require(value["output_sha256"] is None, "declined_output")
     string(value["run_id"], r"[A-Za-z0-9_-]{1,100}")
     require(value["phase"] in ("discovery", "verification"), "invalid_phase")
     require(type(value["store"]) is str and value["store"] in ALLOWED_HOSTS, "invalid_store")
-    string(value["status"], r"(?:acknowledged|completed|deadline|declined:[a-z_]+|failed:[a-z_]+)")
+    string(value["status"], r"(?:acknowledged|completed|deadline|stopped:[a-z_]+|declined:[a-z_]+|failed:[a-z_]+)")
     epoch(value["started_at"])
     if value["finished_at"] is not None:
         require(epoch(value["finished_at"]) >= epoch(value["started_at"]), "invalid_finished_at")
@@ -250,5 +253,7 @@ def stage_status(status, reason=None):
     if status in ("satellite_declined", "satellite_rejected"):
         string(reason, r"[a-z_][a-z0-9_:.-]{0,127}")
         return status + ":" + reason
+    if re.fullmatch(r"stopped:[a-z_]+", status) and reason is None:
+        return status
     require(status in STAGE_STATUSES and reason is None, "invalid_stage_status")
     return status

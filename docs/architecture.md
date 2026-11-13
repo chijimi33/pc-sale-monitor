@@ -17,6 +17,8 @@
 
 route は「販売者 × チャネル」を ID（例 `ark:direct`、`yahoo:api`、`amazon:chimolog`）とし、
 機能ごとに状態を持つ。設定は `config/routes.json`、実行時の状態は `state/routes.json`。
+route 単位の `executor` は既定 `runner`、遠隔の子は `satellite`（v1 はツクモのみ）。
+詳しい契約は [satellite 仕様](satellite.md) を参照。現行設定の停止状態と scope は変更しない。
 
 機能: `sale_discovery`（セール一覧・セール商品）、`product_verify`（既知URLの商品確認）、
 `comparison_lookup`（検索による比較先探索）、`shipping_policy`（送料規定の取得）。
@@ -42,6 +44,9 @@ route は「販売者 × チャネル」を ID（例 `ark:direct`、`yahoo:api`�
   自動の遷移は、疎通確認で明示拒否を受けた `paused_maintenance`・`paused_unreachable` を `paused_refused` にするものだけです。
 - 同じ `config_revision` の間だけ、`state/routes.json` の上記の自動遷移と疎通確認の記録を引き継ぎます。
   旧実装が保存した自動の `active` 遷移は採用しません。版が変わったら設定の値を使います。
+- 例外として satellite が報告した拒否は全機能を `paused_refused` にし、`refusal_ids` と根拠を保存します。
+  設定版や executor を変えても残り、当該 route の `cleared_refusals` に全 ID を列挙した時だけ解除します。
+  列挙済みの ID を遅れて受信しても再停止しません。公開 JSON に executor・拒否 ID・根拠を出します。
 - `successes_to_resume` は、復旧候補として表示するまでの連続成功回数です（初期値2回）。
   閾値に達した時に route の `recovery_candidate` に候補になった日時（`since`）、連続成功回数
   （`consecutive_successes`）、最終成功日時（`last_ok_at`）、直近の結果（`evidence`）を記録します。
@@ -84,7 +89,15 @@ route は「販売者 × チャネル」を ID（例 `ark:direct`、`yahoo:api`�
 - run ID で今回の観測と過去のチェックポイントを区別する。scope 版・設定版・状態スキーマ版が
   一致しない状態は使わない。
 - 段階 D が失敗しても、収集済みの状態は保存する。GitHub Actions では異常終了後にも状態保存ステップを実行する。
-- 実行場所は GitHub Actions と自宅PCのどちらでも動く。有効にするのは常に一方だけ（書き手は1つ）。
+- `monitor-data` の書き手は Actions の1ジョブだけ。satellite は同じ run の遠隔の子で、
+  `monitor-satellite` だけへ書く。調整役は `monitor-relay` で依頼し、検証した当該店の状態だけを受理する。
+  satellite 店のローカル子・調整役からの通常通信・定期疎通確認は行わない。
+- 両段階の期限は `R = run開始 + max_minutes`、`D = 300秒`、`G = DEADLINE_GRACE` として
+  `S = min(段階開始 + 設定秒数, R - D - G)`。ローカル子も `S + G` までに回収する。
+  遠隔は `collect_until = S - 90秒`、`accept_until = S + G`、ack は発行後180秒以内（受理期限まで）。
+  本文の読了時刻で受理し、不在・辞退・期限超過・検証落ち・受け渡し障害でも他店の公開を続ける。
+  受理済み発見結果がある店にだけ、そのバイト列と当該店の確認計画を次の ticket で渡す。
+  詳細と信頼境界は [satellite 仕様の1〜6章](satellite.md) を参照。
 
 ## 4. 比較の計画
 
@@ -188,6 +201,8 @@ route は「販売者 × チャネル」を ID（例 `ark:direct`、`yahoo:api`�
 
 `config/routes.json` の `scope` で版管理する。価格を見る前に固定し、run の途中で障害を理由に縮めない。
 変更するときは `scope.version` を上げ、公開 JSON に記録する。
+任意比較先の `scope.optional`（v2）は [satellite 仕様7章](satellite.md) に従う。
+任意の未確認価格は保留理由にせず、必須予約を先に確定する。現行設定への追加は別途有効化する。
 
 - 範囲内の既知比較先が今回未確認（一時失敗・予算不足・条件不明）なら、従来どおり保留する。
 - 範囲は `scope.in_scope` に列挙した全店で固定し、`product_verify` の稼働状態には依存しない。
@@ -258,9 +273,16 @@ Client ID があっても、次を満たすまで比較範囲に入れない: JA
 | `state/plans/<run_id>.json` | 段階 B の計画（候補、予約、探索、見送り理由） |
 | `state/comparison_tracking.json` | identity×店の確認履歴、`unverified_urls`（探索で発見した未確認商品 URL）、`settled_urls`（取り除いた URL と理由、直近20件） |
 | `state/schema.json` | 状態スキーマ版、適用済みの移行 |
+| `state/satellite/position.json` | satellite ブランチの処理済みコミット（`commit`） |
+| `state/satellite/<run_id>.json` | 段階別 ticket・ack・echo・result SHA、受信時刻、結果・理由、カウンター・コード指紋 |
+| `state/satellite/late/<run_id>-<phase>.json` | 遅延・無関係 manifest と satellite SHA の `records`。状態へ合流しない |
 
 ## 11. 試験の契約
 
+- [satellite 仕様11章](satellite.md) の調整役契約を、メモリ mailbox・偽 PC・ローカル bare git で検証する。
+  生バイトと履歴順序、ack/echo と受信境界、遅延記録、拒否の持越し・解除、通信障害の分離を含む。
+  satellite 不在時の価格判定・イベントは任意店を範囲外に置いた場合と同じで、当該店へのローカル通信はゼロ。
+  実チェックポイントと同じキーの小さな状態から、偽通信の実 Collector・計画・公開 JSON まで通す。
 - 停止中の経路への通常収集の通信がゼロである。
 - 再開しても予算が復活しない。再試行・描画の追加通信はすべて予算を消費する。
 - 同じ成功応答を複数候補が必要としても重複取得しない。同じ URL でも条件の違うリクエストは統合しない。

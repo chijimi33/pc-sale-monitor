@@ -389,13 +389,8 @@ def aggregate(root: Path, public: Path, run_id: str, now=None, scope: dict | Non
              "delivery_guarantee": "at_least_once_best_effort; publication_and_delivery_are_distinct", "full_rescan_needed": False}
     if scope is not None:
         active = [name for name in STORES if name not in scope.get("paused_stores", {})]
-        # Older scopes use status strings; the pipeline also records exit codes.
-        outcome_scope = {**scope, "run": {**scope.get("run", {}), "stage_results": {
-            store: {phase: result.get("status") if isinstance(result, dict) else result
-                    for phase, result in stages.items()}
-            for store, stages in scope.get("run", {}).get("stage_results", {}).items()}}}
         index.update(schema_version=2, comparison_scope=scope_summary(scope), routes=scope.get("routes", {}),
-                     route_counts=route_counts(scope), run_outcome=run_outcome(states, current, run_id, outcome_scope),
+                     route_counts=route_counts(scope), run_outcome=run_outcome(states, current, run_id, scope),
                      active_store_count=len(active),
                      active_complete_stores=sum(statuses[name]["status"] == "complete" for name in active))
         if "run" in scope:
