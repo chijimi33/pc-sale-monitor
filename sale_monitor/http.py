@@ -27,10 +27,19 @@ class FetchError(RuntimeError):
 
 
 class SafeRedirect(HTTPRedirectHandler):
-    def __init__(self, before_redirect=None):
+    def __init__(self, before_redirect=None, guard=None):
         self.before_redirect = before_redirect
+        self.guard = guard
 
     def redirect_request(self, req, fp, code, msg, headers, newurl):
+        if self.guard is not None:
+            try:
+                body = fp.read()
+            except (OSError, IncompleteRead) as exc:
+                self.guard.after_response(req.full_url, code, dict(headers or {}), b"", parseable=False)
+                raise FetchError(type(exc).__name__) from exc
+            self.guard.after_response(req.full_url, code, dict(headers or {}), body)
+            self.guard.check_url(newurl)
         if not allowed_url(newurl):
             raise FetchError("excluded_redirect_host")
         if getattr(req, "single_request", False):
@@ -75,13 +84,16 @@ def _denial_body(response) -> bytes:
 class Client:
     def __init__(self, browser: bool = False, delay: float = 1.0, timeout: int = 25,
                  budget: HostBudget | None = None, robots: Robots | None = None,
-                 page_denial: Callable[[str, Page], bool] | None = None):
+                 page_denial: Callable[[str, Page], bool] | None = None, guard=None):
         self.browser = browser
         self.delay = delay
         self.timeout = timeout
         self.budget = budget
         self.robots = robots
         self.page_denial = page_denial
+        self.guard = guard
+        if guard is not None and robots is not None and robots.fetch != guard.fetch_robots:
+            raise ValueError("guarded_robots_fetch_required")
         if robots is not None and budget is not None:
             if robots.budget is not None and robots.budget is not budget:
                 raise ValueError("robots_budget_mismatch")
@@ -97,15 +109,20 @@ class Client:
         self.count = 0
         self.errors = []
         self.evidence = ResponseEvidence()
-        self.opener = build_opener(SafeRedirect(self._before_redirect))
+        self.opener = build_opener(SafeRedirect(self._before_redirect, guard))
 
     def _before_redirect(self, url: str):
+        if self.guard is not None:
+            self.guard.check_url(url)
         # Redirect hops are additional requests under the same host budgets.
         if self.budget is not None or self.robots is not None:
             self._check_robots(url)
             self.wait_for_host(urlsplit(url).hostname)
             self.space_request(urlsplit(url).hostname)
             self.count += 1
+        if self.guard is not None:
+            self.guard.before_request(url)
+            self._guard_request_url = url
 
     def space_request(self, host: str):
         if self.budget is not None:
@@ -224,6 +241,8 @@ class Client:
             max_attempts: int = 3) -> Page:
         if type(max_attempts) is not int or not 1 <= max_attempts <= 3:
             raise ValueError("invalid_max_attempts")
+        if self.guard is not None:
+            self.guard.check_url(url)
         if not allowed_url(url):
             raise FetchError("excluded_source")
         host = urlsplit(url).hostname
@@ -231,15 +250,26 @@ class Client:
         for attempt in range(max_attempts):
             self.wait_for_host(host)
             self.space_request(host)
+            if self.guard is not None:
+                self.guard.before_request(url)
+                self._guard_request_url = url
             try:
                 self.count += 1
                 request = Request(url, data=data, method=method, headers={"User-Agent": "PCSaleMonitor/0.1 (+https://github.com/chijimi33/pc-sale-monitor)", "Accept-Language": "ja,en;q=0.5", "Cache-Control": "no-cache", **(headers or {})})
                 request.single_request = max_attempts == 1
                 with self.opener.open(request, timeout=self.timeout) as result:
                     response_status = getattr(result, "status", None)
-                    body = _denial_body(result) if response_status == 403 else result.read()
+                    try:
+                        body = _denial_body(result) if response_status == 403 or (self.guard is not None and response_status == 401) else result.read()
+                    except (OSError, IncompleteRead) as exc:
+                        if self.guard is not None:
+                            self.guard.after_response(result.url, response_status, dict(result.headers), b"", parseable=False)
+                            raise FetchError(type(exc).__name__) from exc
+                        raise
                     page = Page(result.url, body, iso(), content_type=result.headers.get("Content-Type", ""),
                                 status=response_status if type(response_status) is int else 200, headers=dict(result.headers))
+                if self.guard is not None:
+                    self.guard.after_response(page.url, page.status, page.headers, page.body)
                 if response_status == 403 and self.page_denial is not None and self.page_denial(url, page):
                     self.evidence.record(url, "http", status=403)
                     raise FetchError("page_access_restricted", page=page)
@@ -254,14 +284,20 @@ class Client:
             except HTTPError as exc:
                 self.transport_failed_urls.pop(host, None)
                 error_page = None
-                if max_attempts == 1 or exc.code == 403:
+                if max_attempts == 1 or exc.code == 403 or self.guard is not None:
+                    parseable = True
                     try:
                         body = (_denial_body(exc) if exc.code == 403 else exc.read()) if exc.fp is not None else b""
                     except (OSError, IncompleteRead):
                         body = b""
+                        parseable = False
                     error_page = Page(exc.url, body, iso(), status=exc.code,
                                       content_type=(exc.headers or {}).get("Content-Type", ""),
                                       headers=dict(exc.headers or {}))
+                if self.guard is not None:
+                    self.guard.after_response(exc.url, exc.code, dict(exc.headers or {}), error_page.body, parseable=parseable)
+                    if not parseable:
+                        raise FetchError("incomplete_response", page=error_page) from exc
                 if exc.code == 403:
                     if self.page_denial is not None and self.page_denial(url, error_page):
                         self.evidence.record(url, "http", status=403)
@@ -301,6 +337,8 @@ class Client:
             except FetchError:
                 raise
             except (OSError, TimeoutError, IncompleteRead) as exc:
+                if self.guard is not None:
+                    self.guard.after_no_response(self._guard_request_url, exc)
                 self.evidence.record(url, "http", error=exc)
                 if attempt == max_attempts - 1:
                     # One broken URL is not a host outage. Only defer after
@@ -323,6 +361,8 @@ class Client:
             raise FetchError("invalid_json") from exc
 
     def rendered(self, url: str) -> Page:
+        if self.guard is not None:
+            self.guard.forbid("browser_disabled")
         host = urlsplit(url).hostname
         if not self.browser:
             raise FetchError("browser_disabled")
