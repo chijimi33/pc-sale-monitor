@@ -179,7 +179,8 @@ class MemberPriceDiskTests(OfflineTest):
         return rows
 
     def write_B_history(self, rule):
-        samples = ((40, 12000),) if rule == "B_observed_year_low" else ((40, 12500), (20, 12500), (1, 10000))
+        # Keep the median case outside the seven-day year-low hold window.
+        samples = ((40, 12000),) if rule == "B_observed_year_low" else ((40, 12500), (20, 12500), (8, 10000))
         for days, price in samples:
             row = offer(price=price, now=NOW-timedelta(days=days), run_id=f"past-{days}")
             self.disk.save(f"history/ark/{row.observed_at[:10]}.json",

@@ -123,7 +123,7 @@ class SellerHistoryBasisTests(unittest.TestCase):
         self.assertEqual((result["status"], result["rule"], result["reasons"]), ("met", "B_observed_year_low", []))
         self.assertEqual(result["history"], {"minimum_yen": 19479, "samples": 3,
             "from": iso(NOW - timedelta(days=10)), "to": iso(NOW - timedelta(days=1)),
-            "scope": "observed_period_only", "sources": sorted([offer().url, offer("ark").url]),
+            "scope": "observed_period_only", "sources": sorted([offer().url, offer("ark").url]), "year_low_mode": "new",
             "seller_history": {"seller_id": "koubou", "year": {"status": "present", "samples": 2,
                 "from": iso(NOW - timedelta(days=10)), "to": iso(NOW - timedelta(days=2))}}})
 
@@ -325,7 +325,7 @@ class SellerHistoryBasisTests(unittest.TestCase):
                 (offer(), [offer("ark", 9500)], [], False)]:
             with self.subTest(candidate=candidate, peers=peers, points=points):
                 decision = evaluate(candidate, peers, rows, NOW, points)
-                self.assertEqual(decision["criteria_version"], 2)
+                self.assertEqual(decision["criteria_version"], 3)
                 keys = list(decision)
                 self.assertEqual(keys[keys.index("basis") + 1], "criteria_version")
 
@@ -341,11 +341,11 @@ class SellerHistoryBasisTests(unittest.TestCase):
                 scope = {"version": 1, "in_scope_stores": ["koubou", "ark"],
                          "in_scope": ["koubou:direct", "ark:direct"], "paused_stores": {}, "routes": {}, "out_of_scope": {}} if scoped else None
                 index = aggregate(root, public, "run1", NOW, scope=scope)
-                self.assertEqual(index["decision_criteria_version"], 2)
-                self.assertEqual(read_json(public / "latest.json", {})["decision_criteria_version"], 2)
+                self.assertEqual(index["decision_criteria_version"], 3)
+                self.assertEqual(read_json(public / "latest.json", {})["decision_criteria_version"], 3)
                 decision = next(d["payment"] for d in read_json(public / "evidence.json", {})["decisions"]
                                 if d["offer"]["seller_id"] == "koubou")
-                self.assertEqual(decision["criteria_version"], 2)
+                self.assertEqual(decision["criteria_version"], 3)
                 self.assertEqual(decision["status"], "insufficient")
                 self.assertEqual(decision["history"]["seller_history"]["year"]["status"], "missing")
 

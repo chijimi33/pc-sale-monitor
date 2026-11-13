@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from dataclasses import dataclass
 from datetime import datetime, timedelta
 from fractions import Fraction
 from statistics import median
@@ -7,7 +8,8 @@ from statistics import median
 from .models import JST, Offer, allowed_url, digest, fresh, iso, same_product, timestamp
 
 
-CRITERIA_VERSION = 2
+CRITERIA_VERSION = 3
+YEAR_LOW_HOLD = timedelta(days=7)
 
 
 def amount(offer: Offer, points: bool) -> int | None:
@@ -67,6 +69,44 @@ def evaluate(offer: Offer, others: list[Offer], history: list[dict], now: dateti
     return decision
 
 
+@dataclass(frozen=True)
+class _HistoryRecord:
+    observed_at: datetime
+    yen: int
+    offer: Offer
+    observation_id: str
+    run_id: str | None
+
+
+def _year_low_new(candidate: Offer, rows: list[_HistoryRecord], at: datetime,
+                  points: bool) -> tuple[str | None, list[_HistoryRecord]]:
+    """Strict update only; rows are parsed and valid at their observation times."""
+    at_year = at.astimezone(JST).year
+    year = [r for r in rows if r.observed_at < at
+            and r.observed_at.astimezone(JST).year == at_year
+            and same_product(candidate, r.offer)]
+    if not year:
+        return None, year
+    if min(r.yen for r in year) - amount(candidate, points) < 500:
+        return "not_met", year
+    return ("met" if any(r.offer.seller_id == candidate.seller_id for r in year) else "insufficient"), year
+
+
+def _own_observations(rows):
+    return {"samples": len(rows), "from": iso(min(r[0] for r in rows)) if rows else None,
+            "to": iso(max(r[0] for r in rows)) if rows else None}
+
+
+def _year_low_history(candidate: Offer, year: list[_HistoryRecord], mode: str) -> dict:
+    own = [(r.observed_at,) for r in year if r.offer.seller_id == candidate.seller_id]
+    return {"minimum_yen": min(r.yen for r in year),
+            "from": iso(min(r.observed_at for r in year)), "to": iso(max(r.observed_at for r in year)),
+            "samples": len(year), "scope": "observed_period_only", "sources": sorted({r.offer.url for r in year}),
+            "seller_history": {"seller_id": candidate.seller_id,
+                               "year": {"status": "present", **_own_observations(own)}},
+            "year_low_mode": mode}
+
+
 def history_basis(offer: Offer, history: list[dict], now: datetime, points: bool = False) -> dict:
     """Return history-only evidence, independent of current comparisons."""
     result = {"status": "insufficient", "rule": None, "history": {}, "reasons": []}
@@ -78,37 +118,49 @@ def history_basis(offer: Offer, history: list[dict], now: datetime, points: bool
     if price is None:
         result["reasons"] = ["points_unknown"]
         return result
-    records = []
+    # Parse once without the current product filter: same_product is not transitive
+    # when a warranty is unknown, so an anchor must use its own product conditions.
+    parsed = []
     for row in history:
         try:
             past = Offer.from_dict(row["offer"])
             checked = timestamp(past.observed_at)
             # Historical validity is tested at observation time; do not require old prices to be fresh now.
-            if checked is None or checked >= now or not same_product(offer, past) or past.errors(checked):
+            if checked is None or checked >= now or past.errors(checked):
                 continue
             value = amount(past, points)
             if value is not None and allowed_url(past.url):
-                records.append((checked, value, past.url, past.seller_id == offer.seller_id))
+                parsed.append(_HistoryRecord(checked, value, past, str(row.get("observation_id") or ""), row.get("run_id")))
         except (KeyError, TypeError, ValueError):
             continue
 
-    def own_observations(rows):
-        return {"samples": len(rows), "from": iso(min(r[0] for r in rows)) if rows else None,
-                "to": iso(max(r[0] for r in rows)) if rows else None}
-
+    records = [(r.observed_at, r.yen, r.offer.url, r.offer.seller_id == offer.seller_id)
+               for r in parsed if same_product(offer, r.offer)]
     seller_history = {"seller_id": offer.seller_id}
-    year_missing = False
-    year = [r for r in records if r[0].astimezone(JST).year == now.astimezone(JST).year]
-    if year:
-        minimum = min(r[1] for r in year)
-        if minimum - price >= 500:
-            own_year = [r for r in year if r[3]]
-            seller_history["year"] = {"status": "present" if own_year else "missing", **own_observations(own_year)}
-            if own_year:
-                result.update(status="met", rule="B_observed_year_low", history={"minimum_yen": minimum, "from": iso(min(r[0] for r in year)), "to": iso(max(r[0] for r in year)), "samples": len(year), "scope": "observed_period_only", "sources": sorted(set(r[2] for r in year)), "seller_history": seller_history})
-                return result
-            year_missing = True
-            result["reasons"].append("B_seller_history_missing_in_period")
+    year_status, year = _year_low_new(offer, parsed, now, points)
+    if year_status == "met":
+        result.update(status="met", rule="B_observed_year_low", history=_year_low_history(offer, year, "new"))
+        return result
+    if year and price <= min(r.yen for r in year):
+        anchors = [r for r in year if r.offer.seller_id == offer.seller_id and r.run_id
+                   and now - r.observed_at <= YEAR_LOW_HOLD and r.yen >= price]
+        for anchor in sorted(anchors, key=lambda r: (r.observed_at, r.observation_id)):
+            status, anchor_year = _year_low_new(anchor.offer, [r for r in parsed if r.run_id != anchor.run_id],
+                                               anchor.observed_at, points)
+            if status != "met":
+                continue
+            audit = _year_low_history(offer, anchor_year, "held")
+            next_year = datetime(anchor.observed_at.astimezone(JST).year + 1, 1, 1, tzinfo=JST)
+            audit.update(observed_year_minimum_yen=min(r.yen for r in year),
+                         anchor={"observation_id": anchor.observation_id, "run_id": anchor.run_id,
+                                 "observed_at": iso(anchor.observed_at), "yen": anchor.yen,
+                                 "expires_at": iso(min(anchor.observed_at + YEAR_LOW_HOLD, next_year))})
+            result.update(status="met", rule="B_observed_year_low", history=audit)
+            return result
+    year_missing = year_status == "insufficient"
+    if year_missing:
+        seller_history["year"] = {"status": "missing", **_own_observations([])}
+        result["reasons"].append("B_seller_history_missing_in_period")
     # Use one market minimum per day, never count repeat observations as distinct days.
     recent = [r for r in records if now - timedelta(days=90) <= r[0] < now]
     daily = {}
@@ -124,7 +176,7 @@ def history_basis(offer: Offer, history: list[dict], now: datetime, points: bool
             own_days = {r[0].astimezone(JST).date().isoformat() for r in own_recent}
             seller_days_market = [r for r in recent if r[0].astimezone(JST).date().isoformat() in own_days]
             seller_baseline = Fraction(median([Fraction(daily[day]) for day in own_days])) if own_days else None
-            audit = {**own_observations(own_recent), "days": len(own_days),
+            audit = {**_own_observations(own_recent), "days": len(own_days),
                      "market_samples_on_seller_days": len(seller_days_market),
                      "market_median_on_seller_days_yen": float(seller_baseline) if seller_baseline is not None else None}
             if not own_recent:
