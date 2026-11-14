@@ -2,6 +2,7 @@
 from copy import deepcopy
 import json
 from pathlib import Path
+import subprocess
 import tempfile
 import unittest
 from unittest.mock import patch
@@ -10,7 +11,7 @@ from sale_monitor.routes import RouteState, load_config
 from sale_monitor.satellite.coordinator import RemoteStages, encode
 from sale_monitor.satellite import protocol, validation
 from sale_monitor.satellite.testing import mailbox_pair
-from sale_monitor.satellite.transport import TransportError
+from sale_monitor.satellite.transport import GitMailbox, TransportError
 from sale_monitor.storage import Store
 from test_satellite_protocol import AGENT_ID, NOW, COMMIT, NONCE, manifest_fixture, refusal_fixture
 from test_satellite_validation import config_fixture
@@ -194,6 +195,45 @@ class CoordinatorTests(CoordinatorFixture):
             nonce="different_nonce_123456", output_sha256=None, finished_at=None, status="acknowledged")
         remote._process(self.pc.post({"manifest.json": encode(manifest)}, "another ack"))
         self.assertEqual(sum("echo.json" in files for _, files in self.pc._read), 0)
+
+    def test_real_git_accepted_echo_reporting_failure_is_posted_once(self):
+        repo = self.root / "remote.git"
+        subprocess.run(["git", "init", "--bare", "--quiet", str(repo)], check=True, capture_output=True)
+        self.coord = GitMailbox(str(repo), "relay", "satellite", self.root / "coord", start_after="")
+        self.pc = GitMailbox(str(repo), "satellite", "relay", self.root / "pc", start_after="")
+        remote = self.remote()
+        handle = self.begin(remote)
+        ack = self.ack(handle)
+        original = self.coord._git
+        pushes = []
+
+        def accepted(*args, **kwargs):
+            result = original(*args, **kwargs)
+            if args[0] == "push":
+                self.assertNotIn("--force", args)
+                self.assertEqual(result.returncode, 0)
+                pushes.append(args)
+                return subprocess.CompletedProcess(args, 1, b"", b"SECRET")
+            return result
+
+        with patch.object(self.coord, "_git", side_effect=accepted):
+            remote._process(ack)
+            remote._process(ack)
+        self.assertEqual(len(pushes), 1)
+        echo = pushes[0][-1].split(":")[0]
+        self.assertEqual(handle.audit["echo_commit"], echo)
+        history = self.pc.poll()
+        self.assertEqual(history, [handle.audit["ticket_commit"], echo])
+        echoes = []
+        for commit in history:
+            try:
+                echoes.append(json.loads(self.pc.read(commit, "echo.json")))
+            except KeyError:
+                pass
+        self.assertEqual(len(echoes), 1)
+        self.assertEqual(echoes[0]["ticket_commit"], handle.audit["ticket_commit"])
+        self.result(handle)
+        self.assertEqual(remote.finish(handle, self.clock.sleep)[0], "completed")
 
     def test_completed_before_echo_is_unacknowledged(self):
         remote = self.remote()

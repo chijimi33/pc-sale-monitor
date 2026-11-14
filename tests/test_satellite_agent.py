@@ -17,6 +17,7 @@ from sale_monitor.satellite.control import ControlState
 from sale_monitor.satellite.guard import Guard, CommunicationForbidden
 from sale_monitor.satellite.deadline import Handshake
 from sale_monitor.satellite.protocol import sha256_bytes, time_string
+from sale_monitor.satellite.transport import TransportError
 from sale_monitor.storage import atomic_json, read_json
 from test_satellite_deadline import FakeClock
 from test_satellite_protocol import AGENT_ID, COMMIT, NOW, URL, refusal_fixture, ticket_fixture
@@ -656,6 +657,19 @@ class AgentTests(unittest.TestCase):
         self.clock.advance(30)
         self.agent.step()
         self.assertEqual(self.mailbox.manifests()[-1]["status"], wire_status("declined", "clock_unverified"))
+        self.assertEqual([json.loads(files["manifest.json"])["kind"] for files in self.mailbox.attempts],
+                         ["ack", "result"])
+
+    def test_failure_log_includes_only_transport_error_message(self):
+        for exc, detail in ((TransportError("git push failed"), "TransportError: git push failed"),
+                            (RuntimeError("secret"), "RuntimeError")):
+            with self.subTest(exception=type(exc).__name__):
+                self.agent.backoff = 30
+                self.agent._failure("post", exc)
+                args = self.agent.log.warning.call_args.args
+                self.assertEqual(args[0] % args[1:], "post failed (" + detail + "); retry in 30s")
+                self.assertEqual(self.agent.next_io, self.clock.m + 30)
+                self.assertEqual(self.agent.backoff, 60)
 
     def test_null_code_sha_and_status_summary(self):
         self.mailbox.add()

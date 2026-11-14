@@ -46,11 +46,15 @@
     確認段階では `input/plan.json`（その店の `confirm` と `run_id`）。
   - ticket の識別子は relay のコミット SHA。
 - `monitor-satellite`（書き手: PC）。1コミット = ack または result。
+  複数のエージェントが `monitor-satellite` に書き込むことがある。
   - `manifest.json`: `protocol_version`、`kind`（`ack`／`result`）、`nonce`（ack）、`ticket_commit`、`run_id`、`phase`、`store`、`status`、
     `started_at`、`finished_at`、`code_sha`、`code_fingerprint`、`dependencies`、`input_sha256`、`config_sha256`（実際に使った設定）、
     `output_sha256`、`active_refusals`（未解除の拒否の集合。ack・result とも常に載せる）、`counters`。
     `agent_id` は ack では必須、旧 PC の result では省略を許す。新しい PC はすべての manifest（ack 前後の辞退・異常終了からの復旧を含む）に載せる。
   - result では `stores/<store>.json` を同じコミットに置く。
+- 投稿が受理されなかった場合、送信側はまず自分の投稿がブランチの履歴にあるか確認し、あれば投稿済みと扱う。
+  履歴になく、他者の投稿が先に入った場合だけ、新しい先端を親にコミットを作り直して再投稿する。
+  競合時は最大5回まで投稿を試みる。継続する他者の投稿や通信障害がある場合、書き手が5つ以下でも成功は保証しない。
 - 入力・出力のファイルは再シリアライズせず、バイト列のまま扱う。ハッシュはそのバイト列に対して取る。
 - 確認段階の入力は、調整役が受理した発見結果（relay に添えたもの）。PC の手元の一時状態は使わない。
   発見結果を受理できなかった run では確認の ticket を出さない。

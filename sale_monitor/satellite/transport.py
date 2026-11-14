@@ -84,8 +84,8 @@ class GitMailbox:
                 raise TransportError("mailbox payload must be bytes")
             blob = self._git("hash-object", "-w", "--stdin", data=data).stdout.strip()
             rows.append(b"100644 " + blob + b"\t" + path.encode() + b"\0")
-        for attempt in range(2):
-            parent = self._fetch(self.write_branch)
+        parent = self._fetch(self.write_branch)
+        for attempt in range(5):
             self._git("read-tree", "--empty")
             self._git("update-index", "-z", "--index-info", data=b"".join(rows))
             tree = self._git("write-tree").stdout.decode().strip()
@@ -95,10 +95,13 @@ class GitMailbox:
                                allowed=(0, 1))
             if pushed.returncode == 0:
                 return commit
-            if attempt or not (b"[rejected]" in pushed.stdout and
-                               (b"fetch first" in pushed.stdout or b"non-fast-forward" in pushed.stdout)):
+            head = self._fetch(self.write_branch)
+            if head is not None and self._git("merge-base", "--is-ancestor", commit, head,
+                                              allowed=(0, 1)).returncode == 0:
+                return commit
+            if head == parent or attempt == 4:
                 raise TransportError("git push failed")
-        raise TransportError("git push rejected")
+            parent = head
 
     def poll(self):
         head = self._fetch(self.read_branch)

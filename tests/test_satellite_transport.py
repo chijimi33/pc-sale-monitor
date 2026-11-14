@@ -68,24 +68,150 @@ class GitTransportTests(unittest.TestCase):
             self.assertEqual(run.call_args.kwargs["timeout"], 60)
             self.assertNotIn("SECRET", str(caught.exception))
 
-    def test_retry_non_fast_forward_once_without_force(self):
+    def assert_push(self, args, kwargs):
+        self.assertNotIn("--force", args)
+        self.assertEqual(kwargs["allowed"], (0, 1))
+
+    def rejected(self, args):
+        return subprocess.CompletedProcess(args, 1,
+            b"!\t<src>:refs/heads/x\t[remote rejected] (incorrect old value provided)\n", b"SECRET")
+
+    def race_post(self, *, missing=False, server=False):
+        initial = [] if missing else [self.coord.post({"initial": b"x"}, "initial")]
         other = self.mailbox("other", "relay", "satellite", "")
         original = self.coord._git
-        pushes = []
+        pushes, winners = [], []
 
         def race(*args, **kwargs):
             if args[0] == "push":
+                self.assert_push(args, kwargs)
                 pushes.append(args)
                 if len(pushes) == 1:
-                    other.post({"race": b"winner"}, "racing writer")
+                    winners.append(other.post({"race": b"winner"}, "racing writer"))
+                    if server:
+                        return self.rejected(args)
             return original(*args, **kwargs)
 
         with patch.object(self.coord, "_git", side_effect=race):
             commit = self.coord.post({"ours": b"payload"}, "retry")
         self.assertEqual(len(pushes), 2)
-        self.assertTrue(all("--force" not in args for args in pushes))
-        self.assertEqual(self.pc.poll()[-1], commit)
+        self.assertEqual(self.pc.poll(), initial + winners + [commit])
+        self.assertEqual(self.coord._fetch("relay"), commit)
         self.assertEqual(self.pc.read(commit, "ours"), b"payload")
+
+    def test_retry_client_rejection_without_force(self):
+        self.race_post()
+
+    def test_retry_server_rejection_without_force(self):
+        self.race_post(server=True)
+
+    def test_rejection_with_unchanged_head_is_not_retried(self):
+        for existing in (False, True):
+            with self.subTest(existing=existing):
+                if existing:
+                    self.coord.post({"initial": b"x"}, "initial")
+                original = self.coord._git
+                pushes = []
+
+                def reject(*args, **kwargs):
+                    if args[0] == "push":
+                        self.assert_push(args, kwargs)
+                        pushes.append(args)
+                        return self.rejected(args)
+                    return original(*args, **kwargs)
+
+                with patch.object(self.coord, "_git", side_effect=reject):
+                    with self.assertRaisesRegex(TransportError, "^git push failed$"):
+                        self.coord.post({"ours": b"payload"}, "rejected")
+                self.assertEqual(len(pushes), 1)
+
+    def test_continuous_races_stop_after_five_pushes(self):
+        other = self.mailbox("other", "relay", "satellite", "")
+        original = self.coord._git
+        pushes, winners = [], []
+
+        def race(*args, **kwargs):
+            if args[0] == "push":
+                self.assert_push(args, kwargs)
+                pushes.append(args)
+                winners.append(other.post({"race": str(len(pushes)).encode()}, "racing writer"))
+            return original(*args, **kwargs)
+
+        with patch.object(self.coord, "_git", side_effect=race):
+            with self.assertRaisesRegex(TransportError, "^git push failed$"):
+                self.coord.post({"ours": b"payload"}, "retry")
+        self.assertEqual(len(pushes), 5)
+        self.assertEqual(self.pc.poll(), winners)
+
+    def test_retry_race_on_missing_branch_without_force(self):
+        self.race_post(missing=True)
+
+    def accepted_post(self, *, descendant=False, attempt=1):
+        other = self.mailbox("other", "relay", "satellite", "")
+        original = self.coord._git
+        pushes, winners = [], []
+
+        def report_failure(*args, **kwargs):
+            if args[0] == "push":
+                self.assert_push(args, kwargs)
+                pushes.append(args)
+                if len(pushes) < attempt:
+                    winners.append(other.post({"race": str(len(pushes)).encode()}, "racing writer"))
+                    return self.rejected(args)
+                result = original(*args, **kwargs)
+                self.assertEqual(result.returncode, 0)
+                if descendant:
+                    winners.append(other.post({"later": b"D"}, "later writer"))
+                return subprocess.CompletedProcess(args, 1, b"", b"SECRET")
+            return original(*args, **kwargs)
+
+        with patch.object(self.coord, "_git", side_effect=report_failure):
+            commit = self.coord.post({"ours": b"payload"}, "accepted")
+        self.assertEqual(len(pushes), attempt)
+        self.assertEqual(commit, pushes[-1][-1].split(":")[0])
+        history = self.pc.poll()
+        expected = [commit, *winners] if descendant else [*winners, commit]
+        self.assertEqual(history, expected)
+        payloads = []
+        for sha in history:
+            try:
+                payloads.append(self.pc.read(sha, "ours"))
+            except KeyError:
+                pass
+        self.assertEqual(payloads, [b"payload"])
+        self.assertEqual(self.coord._fetch("relay"), expected[-1])
+
+    def test_accepted_push_reporting_failure_returns_commit_once(self):
+        self.accepted_post()
+
+    def test_accepted_push_reporting_failure_returns_ancestor_not_head(self):
+        self.accepted_post(descendant=True)
+
+    def test_fifth_push_accepted_reporting_failure_returns_commit(self):
+        self.accepted_post(attempt=5)
+
+    def test_post_git_exceptions_are_not_retried(self):
+        for failure in ("push", "ls-remote", "merge-base"):
+            with self.subTest(failure=failure):
+                self.coord.post({"initial": b"x"}, "initial")
+                original = self.coord._git
+                pushes = []
+
+                def fail(*args, **kwargs):
+                    if args[0] == "push":
+                        self.assert_push(args, kwargs)
+                        pushes.append(args)
+                        if failure == "push":
+                            raise TransportError("git command unavailable or timed out")
+                        return self.rejected(args)
+                    if pushes and args[0] == failure:
+                        raise TransportError("git command unavailable or timed out")
+                    return original(*args, **kwargs)
+
+                with patch.object(self.coord, "_git", side_effect=fail):
+                    with self.assertRaisesRegex(TransportError, "^git command unavailable or timed out$"):
+                        self.coord.post({"ours": b"payload"}, "failure")
+                self.assertEqual(len(pushes), 1)
 
     def test_auth_header_and_fixed_remote(self):
         mailbox = GitMailbox(str(self.repo), "r", "s", self.root / "auth",

@@ -15,7 +15,7 @@ import uuid
 
 from ..pipeline import _attach_job, _close_job, _stop_process_tree, _kill_remaining_process_group, _job_api
 from ..storage import atomic_json, read_json
-from . import fingerprint, protocol
+from . import fingerprint, protocol, transport
 from .control import ControlState
 from .deadline import Handshake, deadline_clock as system_deadline_clock
 from .stage import COUNTERS, STOP_REASONS, atomic_bytes, check_inputs
@@ -264,7 +264,10 @@ class Agent:
             self.log = None
 
     def _failure(self, operation, exc):
-        self.log.warning("%s failed (%s); retry in %ss", operation, type(exc).__name__, self.backoff)
+        detail = type(exc).__name__
+        if isinstance(exc, transport.TransportError):
+            detail += ": " + str(exc)
+        self.log.warning("%s failed (%s); retry in %ss", operation, detail, self.backoff)
         self.next_io = self.clock() + self.backoff
         self.backoff = min(300, self.backoff * 2)
 

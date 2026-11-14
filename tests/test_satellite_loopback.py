@@ -418,7 +418,7 @@ class LoopbackTests(CoordinatorFixture):
         self.assertTrue(output["journal"])
         self.assertEqual([p.read_bytes() for p in paths], originals)
 
-    def test_real_git_both_endpoints_and_echo_between_tickets(self):
+    def use_real_git(self):
         self.agent.close()
         repo = self.root / "remote.git"
         subprocess.run(["git", "init", "--bare", "--quiet", str(repo)], check=True, capture_output=True)
@@ -432,6 +432,10 @@ class LoopbackTests(CoordinatorFixture):
         self.agent = Agent(self.home, self.pc, deadline_clock=lambda: self.clock.now - NOW,
             wall_clock=self.clock, sleep=self.agent_sleep, stage_runner=self.fake_git_stage, log=Mock())
         self.addCleanup(self.agent.close)
+        return repo
+
+    def test_real_git_both_endpoints_and_echo_between_tickets(self):
+        repo = self.use_real_git()
         first = self.begin_stage()
         # Simulate installation/restart after the live ticket was already posted.
         with patch.object(protocol, "REMOTE_URL", str(repo)):
@@ -453,6 +457,71 @@ class LoopbackTests(CoordinatorFixture):
         verified = json.loads(self.finish_stage(verification))
         self.assertEqual(verified["journal"][:1], json.loads(raw)["journal"])
         self.assertEqual(len(verified["journal"]), 2)
+
+    def test_real_git_decline_collides_with_registered_ack_both_phases(self):
+        repo = self.use_real_git()
+        other_home = self.root / "other-pc"
+        other_pc = GitMailbox(str(repo), protocol.SATELLITE_BRANCH, protocol.RELAY_BRANCH,
+                              self.root / "other-mailbox", start_after="")
+        other_calls = []
+        other = Agent(other_home, other_pc, deadline_clock=lambda: self.clock.now - NOW,
+            wall_clock=self.clock, sleep=self.clock.sleep,
+            stage_runner=lambda work: other_calls.append(work), log=Mock())
+        self.addCleanup(other.close)
+        original = self.pc._git
+        attempts, collisions = {}, []
+
+        def collide(*args, **kwargs):
+            if args[0] == "push":
+                self.assertNotIn("--force", args)
+                commit = args[-1].split(":")[0]
+                manifest = json.loads(original("cat-file", "blob", commit + ":manifest.json").stdout)
+                if manifest["kind"] == "ack":
+                    ticket = manifest["ticket_commit"]
+                    attempts[ticket] = attempts.get(ticket, 0) + 1
+                    if attempts[ticket] == 1:
+                        other.step()
+                        collisions.append(other_pc._fetch(protocol.SATELLITE_BRANCH))
+                        return subprocess.CompletedProcess(args, 1,
+                            b"!\t<src>:refs/heads/x\t[remote rejected] (incorrect old value provided)\n", b"")
+            return original(*args, **kwargs)
+
+        with patch.object(self.pc, "_git", side_effect=collide):
+            discovery = self.begin_stage()
+            raw = self.finish_stage(discovery)
+            key, offer = next(iter(json.loads(raw)["offers"].items()))
+            plan = {"run_id": "run-1", "confirm": {"tsukumo": [
+                {"url": offer["url"], "offer_key": key, "identity": "fixture"}]}}
+            verification = self.begin_stage("verification", raw, plan,
+                {"satellite_commit": discovery.audit["result_commit"], "state_sha256": protocol.sha256_bytes(raw)})
+            verified = self.finish_stage(verification)
+        self.assertNotEqual(other.agent_id, self.agent.agent_id)
+        self.assertEqual(other_calls, [])
+        self.assertEqual(self.runners, [discovery.audit["ticket_commit"], verification.audit["ticket_commit"]])
+        self.assertEqual(len(json.loads(verified)["journal"]), 2)
+        head = self.pc._fetch(protocol.RELAY_BRANCH)
+        history = self.pc._git("rev-list", "--reverse", head).stdout.decode().splitlines()
+        echoes = []
+        for commit in history:
+            try:
+                echoes.append((commit, json.loads(self.pc.read(commit, "echo.json"))))
+            except KeyError:
+                pass
+        self.assertEqual(len(echoes), 2)
+        for handle, decline in zip((discovery, verification), collisions, strict=True):
+            ticket = handle.audit["ticket_commit"]
+            self.assertEqual(attempts[ticket], 2)
+            self.assertEqual([commit for commit, echo in echoes if echo["ticket_commit"] == ticket],
+                             [handle.audit["echo_commit"]])
+            self.assertEqual(self.coord._git("rev-parse", handle.audit["ack_commit"] + "^").stdout.decode().strip(), decline)
+            declined = json.loads(self.coord.read(decline, "manifest.json"))
+            self.assertEqual((declined["agent_id"], declined["status"], declined["ticket_commit"]),
+                             (other.agent_id, "declined:agent_mismatch", ticket))
+            for kind in ("ack", "result"):
+                manifest = json.loads(self.coord.read(handle.audit[kind + "_commit"], "manifest.json"))
+                self.assertEqual(manifest["agent_id"], self.agent.agent_id)
+            self.assertEqual(handle.audit["other_agents"], 1)
+            self.assertEqual(handle.status, "completed")
 
     def fake_git_stage(self, work):
         self.runners.append(work.name)
