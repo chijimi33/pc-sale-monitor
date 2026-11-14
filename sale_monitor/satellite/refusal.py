@@ -15,21 +15,29 @@ import re
 
 # Each pattern must match one whole block after normalisation (case-folded,
 # whitespace collapsed, surrounding brackets and punctuation removed). Allowed
-# lead-ins and continuations are written into the patterns themselves.
+# lead-ins and continuations are spelled out: no pattern ends in "anything",
+# because that would also accept a sentence that merely describes the notice.
 _LEAD = r"(?:(?:http )?(?:error|エラー)?[ :：-]*(?:40[13]|429|503)?[ :：-]*(?:forbidden|error|エラー)?[ :：-]*)?"
 _NOTICE_PATTERNS = tuple(re.compile(pattern) for pattern in (
+    r"(?:http )?(?:error )?403[ :：-]*forbidden",
     _LEAD + r"access (?:is |was |has been )?denied",
-    _LEAD + r"(?:you have been|your access (?:has been|is|was)|your request (?:has been|was)) (?:blocked|denied)(?: [^.。]{0,80})?",
+    _LEAD + r"(?:you have been|your access (?:has been|is|was)|your request (?:has been|was)) (?:blocked|denied)"
+            r"(?: from (?:accessing )?this (?:site|page|website|server))?",
+    # The requested URL is the only free part.
     _LEAD + r"you (?:do not|don't) have permission to access (?:this (?:page|site|resource|server)|[^ ]{1,200} on this server)",
-    r"(?:our systems have |we have |we )?detected unusual traffic(?: from your (?:computer )?network)?(?: .{0,200})?",
+    r"(?:our systems have |we have |we )?detected unusual traffic(?: from your (?:computer )?network)?"
+    r"(?:\. please try (?:your request )?again later)?",
     r"are you a (?:robot|human) ?\??",
     r"i(?:'| a)?m not a robot",
-    r"(?:please )?(?:verify|confirm|prove) (?:that )?you(?:'re| are) (?:a )?(?:human|not a (?:robot|bot))(?: .{0,120})?",
-    r"(?:please )?complete the (?:security check|captcha)(?: to (?:continue|access|proceed)[^.。]{0,80})?",
-    r"checking (?:if the site connection is secure|your browser)(?: .{0,80})?",
+    r"(?:please )?(?:verify|confirm|prove) (?:that )?you(?:'re| are) (?:a )?(?:human|not a (?:robot|bot))"
+    r"(?: (?:to continue|to proceed|before (?:continuing|proceeding)|by completing the (?:action|challenge|captcha) below))?",
+    r"(?:please )?complete the (?:security check|captcha)"
+    r"(?: to (?:continue|proceed|access (?:this |the )?(?:site|page|website)))?",
+    # The site name is the only free part.
+    r"checking (?:if the site connection is secure|your browser(?: before accessing(?: the site| [^ ]{1,100})?)?)",
     _LEAD + r"(?:このページへの|当サイトへの|サイトへの|お客様の)?アクセス(?:が|は)(?:一時的に)?(?:拒否|禁止|制限|ブロック|遮断)され(?:ました|ています|ております)",
     _LEAD + r"(?:このページへの|当サイトへの|サイトへの|お客様の)?アクセスを(?:一時的に)?(?:拒否|制限|ブロック|遮断)(?:しました|しています|しております|させていただきました|させていただいております)",
-    r"不正なアクセス(?:を検[知出]しました|が検[知出]されました)(?:.{0,80})?",
+    r"不正なアクセス(?:を検[知出]しました|が検[知出]されました)",
     r"(?:私は)?ロボットではありません",
     r"あなたはロボットですか ?[?？]?",
     r"(?:お客様が)?ロボット(?:では|で)ないことを(?:ご)?確認(?:してください|して下さい|ください|下さい|します|させてください|させていただきます)",
