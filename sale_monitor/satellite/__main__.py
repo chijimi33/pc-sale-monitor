@@ -6,7 +6,8 @@ import subprocess
 import sys
 
 from . import fingerprint, protocol
-from .agent import Agent, LockHeld, OSLock, close_log, default_home, make_log
+from .agent import (Agent, LockHeld, OSLock, close_log, default_home, ensure_agent_id,
+                    make_log, read_agent_id)
 from .control import ControlState
 
 
@@ -44,10 +45,17 @@ def update(home, *, repo=None, command=subprocess.run, output=print):
 
 
 def status(home):
+    agent_id = read_agent_id(home)
+    if agent_id is None:
+        try:
+            with OSLock(home):
+                agent_id = ensure_agent_id(home)
+        except LockHeld:
+            agent_id = read_agent_id(home)
     control = ControlState(home)
     package = Path(__file__).resolve().parents[1]
     data = control.data
-    return {"home": str(Path(home).resolve()), "active_refusals": control.active_refusals,
+    return {"home": str(Path(home).resolve()), "agent_id": agent_id, "active_refusals": control.active_refusals,
             "unreachable": data["unreachable"], "zero_success_runs": data["zero_success_runs"],
             "intake_stopped": data["intake_stopped"], "intake_reason": data["intake_reason"],
             "last_tickets": list(data["processed"].items())[-20:],

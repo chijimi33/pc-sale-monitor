@@ -26,7 +26,13 @@ REMOTE_URL = "https://github.com/chijimi33/pc-sale-monitor.git"
 MAX_DOCUMENT_BYTES = 1_048_576
 MAX_ITEMS = 10_000
 MAX_STRING = 8192
-STAGE_STATUSES = {"satellite_absent", "satellite_deadline", "relay_failed", "completed"}
+STAGE_STATUSES = {"satellite_absent", "satellite_deadline", "relay_failed", "completed",
+                  "skipped:agent_unregistered"}
+
+
+def registered_agent(route):
+    value = route.get("satellite_agent")
+    return value if type(value) is str and re.fullmatch(r"[0-9a-f]{32}", value) else None
 
 
 class ValidationError(ValueError):
@@ -164,13 +170,16 @@ def validate_ticket(value):
 
 def validate_manifest(value):
     bounded(value)
-    keys(value, {"protocol_version", "kind", "ticket_commit", "run_id", "phase", "store", "status", "started_at", "finished_at", "code_sha", "code_fingerprint", "dependencies", "input_sha256", "config_sha256", "output_sha256", "active_refusals", "counters"}, {"nonce"})
+    keys(value, {"protocol_version", "kind", "ticket_commit", "run_id", "phase", "store", "status", "started_at", "finished_at", "code_sha", "code_fingerprint", "dependencies", "input_sha256", "config_sha256", "output_sha256", "active_refusals", "counters"}, {"nonce", "agent_id"})
     require(type(value["protocol_version"]) is int and value["protocol_version"] == 1, "protocol_version")
     require(value["kind"] in ("ack", "result"), "invalid_kind")
     if value["kind"] == "ack":
+        string(value.get("agent_id"), r"[0-9a-f]{32}")
         string(value.get("nonce"), r"[A-Za-z0-9_-]{16,128}")
     else:
         require("nonce" not in value, "unexpected_nonce")
+    if "agent_id" in value:
+        string(value["agent_id"], r"[0-9a-f]{32}")
     hash_value(value["ticket_commit"], commit=True)
     if value["code_sha"] is not None:
         hash_value(value["code_sha"], commit=True)

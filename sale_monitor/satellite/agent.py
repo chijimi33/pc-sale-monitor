@@ -23,7 +23,7 @@ from .stage import COUNTERS, STOP_REASONS, atomic_bytes, check_inputs
 
 def default_home():
     if os.name == "nt":
-        return Path(os.environ["LOCALAPPDATA"]) / "pc-sale-monitor-satellite"
+        return Path.home() / ".pc-sale-monitor-satellite"
     return Path.home() / ".local/state/pc-sale-monitor-satellite"
 
 
@@ -60,6 +60,24 @@ class OSLock:
         if self.handle is not None:
             self.handle.close()
             self.handle = None
+
+
+def read_agent_id(home):
+    try:
+        value = (Path(home) / "agent_id").read_text(encoding="ascii").strip()
+    except FileNotFoundError:
+        return None
+    protocol.string(value, r"[0-9a-f]{32}")
+    return value
+
+
+def ensure_agent_id(home):
+    """Caller holds OSLock(home); never replace an existing identity."""
+    value = read_agent_id(home)
+    if value is None:
+        value = uuid.uuid4().hex
+        atomic_bytes(Path(home) / "agent_id", (value + "\n").encode("ascii"))
+    return value
 
 
 def make_log(home):
@@ -162,10 +180,10 @@ def start_stage(work):
 
 
 def manifest_for(ticket, commit, status, *, started_at, finished_at, identity, dependencies,
-                 config_sha256, output=None, active_refusals, counters=None, nonce=None, code=None):
+                 config_sha256, agent_id, output=None, active_refusals, counters=None, nonce=None, code=None):
     """Keep the PC wire vocabulary here while protocol validation evolves."""
     result = dict(protocol_version=protocol.PROTOCOL_VERSION, kind="ack" if nonce else "result",
-        ticket_commit=commit, run_id=ticket["run_id"], phase=ticket["phase"], store=ticket["store"],
+        ticket_commit=commit, agent_id=agent_id, run_id=ticket["run_id"], phase=ticket["phase"], store=ticket["store"],
         status=status, started_at=started_at, finished_at=finished_at, code_sha=code,
         code_fingerprint=identity["fingerprint"], dependencies=dependencies,
         input_sha256=ticket["input_sha256"], config_sha256=config_sha256,
@@ -223,6 +241,7 @@ class Agent:
         lock = OSLock(self.home)
         lock.__enter__()
         try:
+            self.agent_id = ensure_agent_id(self.home)
             self.clock = self.clock or system_deadline_clock()
             self.log = self.log or make_log(self.home)
             self.control = ControlState(self.home)
@@ -342,7 +361,7 @@ class Agent:
             identity=metadata["identity"], dependencies=metadata["dependencies"],
             config_sha256=metadata["config_sha256"], output=output,
             active_refusals=self.control.active_refusals, counters=counters, nonce=nonce,
-            code=metadata["code_sha"])
+            code=metadata["code_sha"], agent_id=self.agent_id)
 
     def _finish(self, commit, status, output=None, counters=None):
         self.control = ControlState(self.home)
@@ -400,7 +419,7 @@ class Agent:
 
     def _account(self, commit, manifest):
         status = manifest["status"]
-        excluded = status.split(":")[-1] in {"code_mismatch", "dependency_mismatch", "expired", "retry_after",
+        excluded = status.split(":")[-1] in {"code_mismatch", "dependency_mismatch", "agent_mismatch", "expired", "retry_after",
                                              "clock_unverified", "clock_skew", "deadline", "killed"}
         excluded = excluded or self.state["tickets"][commit].get("account_excluded", False)
         run_id = manifest["run_id"]
@@ -513,7 +532,9 @@ class Agent:
             try:
                 config, saved, plan, interval = check_inputs(ticket, inputs)
                 host = protocol.ALLOWED_HOSTS[ticket["store"]]
-                if self.control.retry_until(host, saved.get("retry_after", {}).get(host, 0)) > self.wall_clock():
+                if protocol.registered_agent(config["route"]) != self.agent_id:
+                    reason = "agent_mismatch"
+                elif self.control.retry_until(host, saved.get("retry_after", {}).get(host, 0)) > self.wall_clock():
                     reason = "retry_after"
             except (ValueError, TypeError, KeyError, AttributeError, RecursionError) as exc:
                 # The wire status stays coarse; the local log says which check failed.

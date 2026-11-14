@@ -22,7 +22,8 @@ class RemoteStage:
     input_bytes: bytes
     ticket: dict = field(default_factory=dict)
     audit: dict = field(default_factory=dict)
-    nonces: set = field(default_factory=set)
+    agent_id: str | None = None
+    nonce: str | None = None
     acked: bool = False
     status: str | None = None
     accepted: bytes | None = None
@@ -73,13 +74,30 @@ class RemoteStages:
                 self.route_state.apply_refusals(route, rows, self.clock())
         self.route_state.save()
 
-    def _late(self, commit, manifest):
-        # Identifiers have already passed the manifest schema.
-        name = "satellite/late/" + manifest["run_id"] + "-" + manifest["phase"] + ".json"
-        records = self.disk.load(name, {"records": []})
-        if not any(row["satellite_commit"] == commit for row in records["records"]):
-            records["records"].append({"satellite_commit": commit, "manifest": manifest})
-            self.disk.save(name, records)
+    def _record(self, commit, manifest, reason, handle=None):
+        """Best-effort bounded evidence; no untrusted value selects a path."""
+        try:
+            # A known stage is named by the coordinator's own identifiers.
+            name = ("satellite/unattributed.json" if handle is None
+                    else "satellite/late/" + self.run_id + "-" + handle.phase + ".json")
+            record = {"satellite_commit": commit, "received_at": protocol.time_string(self.clock()),
+                      "reason": reason}
+            if type(manifest) is dict:
+                copy = encode(manifest)
+                if len(copy) <= 16384:
+                    record["manifest"] = json.loads(copy)
+                else:
+                    preview = copy[:16384].decode("utf-8", errors="replace")
+                    while len(encode({"preview": preview})) > 16384:
+                        preview = preview[:len(preview) // 2]
+                    record["manifest"] = {"preview": preview}
+            records = self.disk.load(name, {"records": []})
+            if not any(row["satellite_commit"] == commit for row in records["records"]):
+                records["records"] = (records["records"] + [record])[-100:]
+                self.disk.save(name, records)
+        except Exception:
+            # Evidence failures must never decide the collection outcome.
+            pass
 
     def begin(self, store, phase, input_state_bytes, deadlines, plan_bytes=None, accepted_discovery=None):
         handle = RemoteStage(store, phase, input_state_bytes)
@@ -88,6 +106,10 @@ class RemoteStages:
         function = "sale_discovery" if phase == "discovery" else "product_verify"
         if not self.route_state.is_active(store, function):
             handle.status = "skipped:route_inactive"
+            return handle
+        handle.agent_id = protocol.registered_agent(self.route_state.routes[route_id])
+        if handle.agent_id is None:
+            handle.status = "skipped:agent_unregistered"
             return handle
         if self._failed:
             handle.status = "relay_failed"
@@ -128,34 +150,46 @@ class RemoteStages:
     def _process(self, commit):
         try:
             manifest = json.loads(self.mailbox.read(commit, "manifest.json"))
-        except (KeyError, ValueError, UnicodeError):
+        except (KeyError, ValueError, UnicodeError, RecursionError):
+            self._record(commit, None, "invalid")
             return
         self._refusals(manifest)
+        handle = next((h for h in self.handles if type(manifest) is dict
+                       and type(manifest.get("ticket_commit")) is str
+                       and h.audit.get("ticket_commit") == manifest["ticket_commit"]), None)
+        if handle is None or handle.status is not None:
+            reason = "late" if handle is not None else "unattributed" if type(manifest) is dict else "invalid"
+            self._record(commit, manifest, reason, handle)
+            return
+        if type(manifest.get("agent_id")) is not str or manifest["agent_id"] != handle.agent_id:
+            handle.audit["other_agents"] = handle.audit.get("other_agents", 0) + 1
+            self._record(commit, manifest, "other_agent", handle)
+            return
         try:
             protocol.validate_manifest(manifest)
         except protocol.ValidationError as exc:
-            for handle in self.handles:
-                if handle.status is None and isinstance(manifest, dict) and manifest.get("ticket_commit") == handle.audit.get("ticket_commit"):
-                    handle.status = "satellite_rejected:" + exc.reason
-                    handle.audit.update(result_commit=commit, received_at=protocol.time_string(self.clock()))
+            handle.status = "satellite_rejected:" + exc.reason
+            handle.audit.update(result_commit=commit, received_at=protocol.time_string(self.clock()))
+            self._record(commit, manifest, "invalid", handle)
             return
-        handle = next((h for h in self.handles if h.audit.get("ticket_commit") == manifest["ticket_commit"]
-                       and (self.run_id, h.phase, h.store) == (manifest["run_id"], manifest["phase"], manifest["store"])), None)
-        if handle is None or handle.status is not None:
-            self._late(commit, manifest)
+        if (self.run_id, handle.phase, handle.store) != (manifest["run_id"], manifest["phase"], manifest["store"]):
+            self._record(commit, manifest, "late", handle)
             return
         now = self.clock()
+        if manifest["kind"] == "ack" and not manifest["status"].startswith("declined:") and handle.nonce is not None:
+            self._record(commit, manifest, "late", handle)
+            return
         handle.audit.update(counters=manifest["counters"], code_sha=manifest["code_sha"],
                             code_fingerprint=manifest["code_fingerprint"])
         if manifest["kind"] == "result":
             handle.audit["result_commit"] = commit
         if not handle.acked and now > self._ack_end(handle):
             handle.status = "satellite_absent"
-            self._late(commit, manifest)
+            self._record(commit, manifest, "late", handle)
             return
         if now > protocol.epoch(handle.ticket["accept_until"]):
             handle.status = "satellite_deadline"
-            self._late(commit, manifest)
+            self._record(commit, manifest, "late", handle)
             return
         if manifest["status"].startswith("declined:"):
             handle.acked = True
@@ -169,20 +203,22 @@ class RemoteStages:
                 handle.acked = True
                 handle.audit.setdefault("ack_commit", commit)
                 nonce = manifest["nonce"]
-                if nonce not in handle.nonces:
+                if handle.nonce is None:
+                    handle.nonce = nonce
                     echo = protocol.build_echo(ticket_commit=handle.audit["ticket_commit"], nonce=nonce,
                                                actions_time=protocol.time_string(now))
                     handle.audit["echo_commit"] = self.mailbox.post({"echo.json": encode(echo)}, "Echo " + self.run_id)
-                    handle.nonces.add(nonce)
             return
-        handle.acked = True
+        if "echo_commit" not in handle.audit:
+            handle.status = "satellite_rejected:unacknowledged"
+            return
         try:
             body = self.mailbox.read(commit, "stores/" + handle.store + ".json")
             received = self.clock()
             handle.audit["received_at"] = protocol.time_string(received)
             if received > protocol.epoch(handle.ticket["accept_until"]):
                 handle.status = "satellite_deadline"
-                self._late(commit, manifest)
+                self._record(commit, manifest, "late", handle)
                 return
             validation.validate_result(handle.input_bytes, body, handle.ticket, manifest, received,
                                        ticket_commit=handle.audit["ticket_commit"])

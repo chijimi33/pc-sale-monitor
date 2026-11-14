@@ -9,6 +9,7 @@ from sale_monitor.satellite.protocol import (
 
 COMMIT = "a" * 40
 NONCE = "unique_nonce_123456"
+AGENT_ID = "1" * 32
 NOW = 1_800_000_000
 URL = "https://shop.tsukumo.co.jp/goods/1"
 
@@ -27,7 +28,7 @@ def ticket_fixture(**changes):
 
 def manifest_fixture(ticket=None, **changes):
     ticket = ticket or ticket_fixture()
-    fields = dict(kind="result", ticket_commit=COMMIT, run_id=ticket["run_id"],
+    fields = dict(kind="result", agent_id=AGENT_ID, ticket_commit=COMMIT, run_id=ticket["run_id"],
                   phase=ticket["phase"], store=ticket["store"], status="completed",
                   started_at=time_string(NOW), finished_at=time_string(NOW + 50),
                   code_sha=COMMIT, code_fingerprint=ticket["code_fingerprint"],
@@ -46,6 +47,21 @@ def refusal_fixture():
 
 
 class ProtocolTests(unittest.TestCase):
+    def test_agent_id_required_on_ack_optional_on_old_result(self):
+        ack = manifest_fixture(kind="ack", nonce=NONCE, output_sha256=None,
+                               finished_at=None, status="acknowledged")
+        del ack["agent_id"]
+        with self.assertRaises(ValidationError):
+            validate_manifest(ack)
+        result = manifest_fixture()
+        del result["agent_id"]
+        self.assertEqual(validate_manifest(result), result)
+        for value in (None, 1, "A" * 32, "1" * 31, "../" * 12):
+            with self.subTest(value=value), self.assertRaises(ValidationError):
+                validate_manifest({**result, "agent_id": value})
+        self.assertEqual(validate_manifest(manifest_fixture(status="declined:agent_mismatch",
+                         output_sha256=None))["status"], "declined:agent_mismatch")
+
     def test_builders_roundtrip(self):
         ticket = ticket_fixture()
         self.assertEqual(validate_ticket(ticket), ticket)
@@ -87,6 +103,9 @@ class ProtocolTests(unittest.TestCase):
         self.assertEqual(ack_window_end(100, 200), 200)
         self.assertEqual(ack_window_end(100, 500), 280)
         self.assertEqual(stage_status("satellite_declined", "refused"), "satellite_declined:refused")
+        self.assertEqual(stage_status("satellite_declined", "agent_mismatch"), "satellite_declined:agent_mismatch")
+        self.assertEqual(stage_status("satellite_rejected", "unacknowledged"), "satellite_rejected:unacknowledged")
+        self.assertEqual(stage_status("skipped:agent_unregistered"), "skipped:agent_unregistered")
         self.assertEqual(stage_status("completed"), "completed")
 
     def test_size_depth_and_nonfinite(self):

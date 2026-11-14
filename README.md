@@ -36,6 +36,10 @@ active でない機能には通常収集の通信もタスク作成もしませ�
 
 route の `executor` は既定 `runner`、`satellite` は同じ run の遠隔の子です。調整役はその店の子を起動せず、定期疎通確認もしません。詳細は [satellite 仕様](docs/satellite.md) を参照。ツクモの停止状態・比較範囲は、この実装追加では有効化していません。
 
+satellite エージェントは1つだけ起動し、`python -m sale_monitor.satellite status` に表示される `agent_id` を route の
+`satellite_agent` に登録してください。未登録では収集しません。Windows の状態フォルダーは
+`%USERPROFILE%\.pc-sale-monitor-satellite`（`--home` で変更可能）です。交代時は停止後に home 全体を移動します。
+
 `successes_to_resume` は復旧候補を表示するまでの連続成功回数です（初期値2回）。閾値に達した時に公開 JSON の route ごとの `recovery_candidate` に、候補になった日時（`since`）・連続成功回数（`consecutive_successes`）・最終成功日時（`last_ok_at`）・直近の結果（`evidence`）を出します。成功が続く間は `since` を保ち、1回でも失敗すれば候補を消します。候補がなければ `null` です。
 
 楽天は取得・比較・履歴更新から除外し、過去の楽天価格も現在比較やB判定に使いません。取得完了率の分母は表示上10店のままです。

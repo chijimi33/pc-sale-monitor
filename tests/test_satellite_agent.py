@@ -10,6 +10,7 @@ import unittest
 from unittest.mock import Mock, patch
 
 from sale_monitor.satellite import agent as agent_module
+from sale_monitor.satellite import __main__ as command_module
 from sale_monitor.satellite.agent import Agent, LockHeld, OSLock, encode
 from sale_monitor.satellite.__main__ import main, status, update
 from sale_monitor.satellite.control import ControlState
@@ -18,7 +19,7 @@ from sale_monitor.satellite.deadline import Handshake
 from sale_monitor.satellite.protocol import sha256_bytes, time_string
 from sale_monitor.storage import atomic_json, read_json
 from test_satellite_deadline import FakeClock
-from test_satellite_protocol import COMMIT, NOW, URL, refusal_fixture, ticket_fixture
+from test_satellite_protocol import AGENT_ID, COMMIT, NOW, URL, refusal_fixture, ticket_fixture
 from test_satellite_validation import config_fixture
 
 
@@ -123,6 +124,8 @@ class AgentTests(unittest.TestCase):
         self.tmp = tempfile.TemporaryDirectory()
         self.addCleanup(self.tmp.cleanup)
         self.home = Path(self.tmp.name)
+        with OSLock(self.home):
+            (self.home / "agent_id").write_text(AGENT_ID, encoding="ascii")
         self.clock = FakeClock()
         self.mailbox = MemoryMailbox(self.clock)
         self.calls = []
@@ -163,6 +166,7 @@ class AgentTests(unittest.TestCase):
         self.agent.step()
         self.assertEqual(self.mailbox.manifests()[-1]["status"], wire_status("declined", reason))
         self.assertIn("active_refusals", self.mailbox.manifests()[-1])
+        self.assertEqual(self.mailbox.manifests()[-1]["agent_id"], AGENT_ID)
         self.assertIsNone(self.mailbox.manifests()[-1]["output_sha256"])
         self.assertEqual(self.mailbox.manifests()[-1]["counters"]["requests"], 0)
         self.assertEqual(set(self.mailbox.posts[-1]), {"manifest.json"})
@@ -173,6 +177,8 @@ class AgentTests(unittest.TestCase):
         self.agent.step()
         result = self.mailbox.manifests()[-1]
         self.assertEqual(result["status"], wire_status("completed"))
+        self.assertEqual(result["agent_id"], AGENT_ID)
+        self.assertEqual(self.mailbox.manifests("ack")[0]["agent_id"], AGENT_ID)
         self.assertEqual(result["config_sha256"], ticket["input_sha256"]["input/config.json"])
         self.assertEqual(result["output_sha256"], sha256_bytes(self.output))
         self.assertEqual(self.mailbox.posts[-1]["stores/tsukumo.json"], self.output)
@@ -190,6 +196,33 @@ class AgentTests(unittest.TestCase):
     def test_code_mismatch(self):
         self.mailbox.add(code_fingerprint="1" * 64)
         self.assert_declined("code_mismatch")
+
+    def test_old_ticket_code_check_precedes_missing_registration(self):
+        config = config_fixture()
+        del config["route"]["satellite_agent"]
+        self.mailbox.add(inputs=inputs_fixture(config), code_fingerprint="0" * 64)
+        self.assert_declined("code_mismatch")
+        self.assertEqual(self.mailbox.manifests("ack"), [])
+
+    def test_registration_missing_null_or_different_declines_once_before_ack(self):
+        for index, registered in enumerate((None, "2" * 32, "missing")):
+            with self.subTest(registered=registered):
+                config = config_fixture()
+                if registered == "missing":
+                    del config["route"]["satellite_agent"]
+                else:
+                    config["route"]["satellite_agent"] = registered
+                commit = str(index + 1) * 40
+                self.mailbox.add(commit, inputs=inputs_fixture(config))
+                self.clock.advance(30)
+                self.assert_declined("agent_mismatch")
+                self.assertEqual(self.mailbox.manifests("ack"), [])
+                count = len(self.mailbox.posts)
+                self.mailbox.pending.append(commit)
+                self.clock.advance(30)
+                self.agent.step()
+                self.assertEqual(len(self.mailbox.posts), count)
+                self.assertTrue(self.agent.state["accounting"]["run-1"][commit]["excluded"])
 
     def test_dependency_mismatch(self):
         self.mailbox.add()
@@ -373,6 +406,7 @@ class AgentTests(unittest.TestCase):
         self.agent.step()
         self.assertFalse(self.calls)
         self.assertEqual(self.mailbox.manifests()[-1]["status"], wire_status("stopped", "error"))
+        self.assertEqual(self.mailbox.manifests()[-1]["agent_id"], AGENT_ID)
         self.assertIn("stores/tsukumo.json", self.mailbox.posts[-1])
 
     def test_refusal_during_stage_latches_and_only_ticket_clears(self):
@@ -634,6 +668,66 @@ class AgentTests(unittest.TestCase):
 
 
 class StartupTests(unittest.TestCase):
+    def test_agent_id_created_under_lock_and_persists_across_restart(self):
+        with tempfile.TemporaryDirectory() as home:
+            agent = Agent(home, Mock(), deadline_clock=lambda: 0, log=Mock())
+            self.assertIsNone(agent_module.read_agent_id(home))
+            try:
+                agent._open()
+                value = agent.agent_id
+                self.assertRegex(value, r"^[0-9a-f]{32}$")
+                with self.assertRaises(LockHeld):
+                    with OSLock(home):
+                        pass
+            finally:
+                agent.close()
+            other = Agent(home, Mock(), deadline_clock=lambda: 0, log=Mock())
+            try:
+                other._open()
+                self.assertEqual(other.agent_id, value)
+            finally:
+                other.close()
+
+    def test_status_creates_id_prints_it_and_reads_it_without_lock(self):
+        with tempfile.TemporaryDirectory() as home:
+            value = status(home)["agent_id"]
+            self.assertRegex(value, r"^[0-9a-f]{32}$")
+            with OSLock(home), patch("builtins.print") as output:
+                self.assertEqual(main(["status", "--home", home]), 0)
+                self.assertEqual(json.loads(output.call_args.args[0])["agent_id"], value)
+
+    def test_status_rereads_after_lock_owner_creates_id(self):
+        with tempfile.TemporaryDirectory() as home, OSLock(home):
+            original = agent_module.read_agent_id
+            reads = []
+
+            def read(directory):
+                reads.append(directory)
+                if len(reads) == 1:
+                    self.assertIsNone(original(directory))
+                    # The running agent owns the lock and creates its identity
+                    # between status's first read and attempted lock acquisition.
+                    agent_module.ensure_agent_id(directory)
+                    return None
+                return original(directory)
+
+            with patch.object(command_module, "read_agent_id", side_effect=read), \
+                    patch.object(command_module, "ensure_agent_id", side_effect=AssertionError("not lock owner")):
+                self.assertEqual(status(home)["agent_id"], original(home))
+            self.assertEqual(len(reads), 2)
+
+    def test_status_does_not_create_id_while_lock_is_held(self):
+        with tempfile.TemporaryDirectory() as home, OSLock(home):
+            self.assertIsNone(status(home)["agent_id"])
+            self.assertFalse((Path(home) / "agent_id").exists())
+
+    def test_windows_default_home_uses_user_profile(self):
+        home = Path.home()
+        with patch.object(agent_module.os, "name", "nt"), \
+                patch.object(agent_module.Path, "home", return_value=home), \
+                patch.dict(agent_module.os.environ, {"LOCALAPPDATA": str(home / "redirected")}):
+            self.assertEqual(agent_module.default_home(), home / ".pc-sale-monitor-satellite")
+
     def test_mailbox_builder_uses_fixed_branches_and_persisted_cursor(self):
         module = types.ModuleType("sale_monitor.satellite.transport")
         module.GitMailbox = Mock()

@@ -121,12 +121,15 @@ def validate_effective_config(config, store):
         require(target == store, "foreign_seller_alias")
     route = config["route"]
     _typed(route, {"store": str, "channel": str, "executor": str, "functions": dict,
+                   "satellite_agent": (str, type(None)),
                    "reason": str, "evidence": dict, "probe": dict, "cleared_refusals": list,
                    "consecutive_successes": int, "retry_after_until": (int, float, type(None)),
                    "recovery_candidate": (dict, type(None)), "last_probe": (dict, type(None)), "probe_log": list},
            {"store", "channel", "functions"})
     require(route["store"] == store and route["channel"] == "direct", "foreign_route")
     require(route.get("executor", "satellite") == "satellite", "invalid_executor")
+    if route.get("satellite_agent") is not None:
+        string(route["satellite_agent"], r"[0-9a-f]{32}")
     keys(route["functions"], (), {"sale_discovery", "product_verify", "comparison_lookup", "shipping_policy"})
     for name, function in route["functions"].items():
         _typed(function, {"status": str, "since": str, "automatic": bool, "config_status": str,

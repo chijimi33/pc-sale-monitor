@@ -12,7 +12,7 @@ from sale_monitor.satellite import protocol, validation
 from sale_monitor.satellite.testing import mailbox_pair
 from sale_monitor.satellite.transport import TransportError
 from sale_monitor.storage import Store
-from test_satellite_protocol import NOW, COMMIT, NONCE, manifest_fixture, refusal_fixture
+from test_satellite_protocol import AGENT_ID, NOW, COMMIT, NONCE, manifest_fixture, refusal_fixture
 from test_satellite_validation import config_fixture
 
 
@@ -81,6 +81,216 @@ class CoordinatorFixture(unittest.TestCase):
 
 
 class CoordinatorTests(CoordinatorFixture):
+    def test_unregistered_route_skips_without_ticket(self):
+        route = self.routes.routes["tsukumo:direct"]
+        for value in (None, "", "A" * 32, "1" * 31, 123, [], {}):
+            with self.subTest(value=value):
+                route["satellite_agent"] = value
+                remote = self.remote()
+                handle = self.begin(remote)
+                self.assertEqual(handle.status, "skipped:agent_unregistered")
+                self.assertEqual(handle.audit, {})
+                self.assertEqual(self.pc._read, [])
+        del route["satellite_agent"]
+        self.assertEqual(self.begin(self.remote()).status, "skipped:agent_unregistered")
+
+    def test_malformed_registration_does_not_fail_routes_config(self):
+        path = self.root / "routes.json"
+        for value in (None, "", "A" * 32, "1" * 31, True, [], {}):
+            with self.subTest(value=value):
+                config = deepcopy(self.config)
+                config["routes"]["tsukumo:direct"]["satellite_agent"] = value
+                path.write_bytes(encode(config))
+                loaded = load_config(path)
+                self.assertIsNone(loaded["routes"]["tsukumo:direct"]["satellite_agent"])
+        config["routes"]["tsukumo:direct"]["satellite_agent"] = AGENT_ID
+        path.write_bytes(encode(config))
+        self.assertEqual(load_config(path)["routes"]["tsukumo:direct"]["satellite_agent"], AGENT_ID)
+
+    def test_other_agents_only_change_other_agents_audit_before_registered_ack(self):
+        remote = self.remote()
+        h = self.begin(remote)
+        before = deepcopy(h.audit)
+        manifests = [
+            manifest_fixture(h.ticket, ticket_commit=self.ticket(h), agent_id="2" * 32,
+                kind="ack", nonce=NONCE, output_sha256=None, finished_at=None, status="acknowledged"),
+            manifest_fixture(h.ticket, ticket_commit=self.ticket(h), agent_id="2" * 32,
+                status="declined:agent_mismatch", output_sha256=None),
+            manifest_fixture(h.ticket, ticket_commit=self.ticket(h), agent_id="2" * 32),
+            {"ticket_commit": self.ticket(h), "agent_id": "2" * 32, "counters": "invalid"},
+            {"ticket_commit": self.ticket(h), "agent_id": [AGENT_ID]},
+        ]
+        for index, manifest in enumerate(manifests, 1):
+            with self.subTest(manifest=manifest):
+                commit = self.pc.post({"manifest.json": encode(manifest)}, "other agent")
+                remote._process(commit)
+                self.assertEqual(h.audit, {**before, "other_agents": index})
+                self.assertIsNone(h.status)
+                self.assertFalse(h.acked)
+                self.assertIsNone(h.nonce)
+                self.assertIsNone(h.accepted)
+                self.assertEqual(len(self.pc._read), 1)
+        self.ack(h)
+        remote.service()
+        self.result(h)
+        self.clock.sleep(15)
+        self.assertEqual(remote.finish(h, self.clock.sleep)[0], "completed")
+
+    def test_nondict_and_invalid_json_are_only_recorded_without_attribution(self):
+        remote = self.remote()
+        h = self.begin(remote)
+        before = deepcopy(h.audit)
+        for body in (b"[]", b"null", b'"string"', b"{invalid"):
+            commit = self.pc.post({"manifest.json": body}, "malformed")
+            remote._process(commit)
+            self.assertEqual(h.audit, before)
+            self.assertIsNone(h.status)
+        records = self.disk.load("satellite/unattributed.json", {})["records"]
+        self.assertEqual(len(records), 4)
+        self.assertTrue(all(row["reason"] == "invalid" for row in records))
+
+    def test_other_agent_decline_during_collection_cannot_finalise_or_replace_audit(self):
+        remote = self.remote()
+        h = self.begin(remote)
+        remote._process(self.ack(h))
+        before = deepcopy(h.audit)
+        commit, _ = self.result(h, agent_id="2" * 32, status="declined:clock_unverified",
+                                output_sha256=None, code_sha="f" * 40)
+        remote._process(commit)
+        self.assertEqual(h.audit, {**before, "other_agents": 1})
+        self.assertTrue(h.acked)
+        self.assertEqual(h.nonce, NONCE)
+        self.assertIsNone(h.status)
+        commit, body = self.result(h)
+        remote._process(commit)
+        self.assertEqual((h.status, h.accepted), ("completed", body))
+        self.assertEqual(h.audit["result_commit"], commit)
+
+    def test_two_nonces_and_duplicate_ack_get_only_one_echo(self):
+        remote = self.remote()
+        h = self.begin(remote)
+        first = self.ack(h)
+        remote._process(first)
+        before = deepcopy(h.audit)
+        remote._process(first)
+        second = manifest_fixture(h.ticket, ticket_commit=self.ticket(h), kind="ack",
+            nonce="different_nonce_123456", output_sha256=None, finished_at=None,
+            status="acknowledged", counters=dict(requests=9, ordinary_attempted=0,
+                                                ordinary_succeeded=0, no_response=0, refusal=0))
+        remote._process(self.pc.post({"manifest.json": encode(second)}, "second nonce"))
+        self.assertEqual(h.nonce, NONCE)
+        self.assertEqual(h.audit, before)
+        self.assertEqual(sum("echo.json" in files for _, files in self.pc._read), 1)
+
+    def test_echo_post_failure_binds_nonce_and_never_retries_another_nonce(self):
+        remote = self.remote()
+        h = self.begin(remote)
+        self.ack(h)
+        with patch.object(self.coord, "post", side_effect=TransportError):
+            remote.service()
+        self.assertEqual(h.nonce, NONCE)
+        self.assertEqual(h.status, "relay_failed")
+        manifest = manifest_fixture(h.ticket, ticket_commit=self.ticket(h), kind="ack",
+            nonce="different_nonce_123456", output_sha256=None, finished_at=None, status="acknowledged")
+        remote._process(self.pc.post({"manifest.json": encode(manifest)}, "another ack"))
+        self.assertEqual(sum("echo.json" in files for _, files in self.pc._read), 0)
+
+    def test_completed_before_echo_is_unacknowledged(self):
+        remote = self.remote()
+        h = self.begin(remote)
+        self.result(h)
+        self.assertEqual(remote.finish(h, self.clock.sleep), ("satellite_rejected:unacknowledged", None))
+        self.assertFalse(h.acked)
+        self.assertNotIn("echo_commit", h.audit)
+
+    def test_registered_preack_decline_prevents_later_echo(self):
+        remote = self.remote()
+        h = self.begin(remote)
+        commit, _ = self.result(h, status="declined:agent_mismatch", output_sha256=None)
+        remote._process(commit)
+        self.assertEqual(h.status, "satellite_declined:agent_mismatch")
+        before = deepcopy(h.audit)
+        remote._process(self.ack(h))
+        self.assertEqual(h.audit, before)
+        self.assertNotIn("echo_commit", h.audit)
+
+    def test_old_decline_is_recorded_and_expires_as_absent(self):
+        remote = self.remote()
+        h = self.begin(remote)
+        manifest = manifest_fixture(h.ticket, ticket_commit=self.ticket(h),
+            status="declined:code_mismatch", output_sha256=None)
+        del manifest["agent_id"]
+        commit = self.pc.post({"manifest.json": encode(manifest)}, "old decline")
+        self.assertEqual(remote.finish(h, self.clock.sleep), ("satellite_absent", None))
+        self.assertEqual(h.audit["other_agents"], 1)
+        self.assertNotIn("result_commit", h.audit)
+        self.assertNotIn("echo_commit", h.audit)
+        record = self.disk.load("satellite/late/run-1-discovery.json", {})["records"][0]
+        self.assertEqual(record["satellite_commit"], commit)
+        self.assertEqual(record["reason"], "other_agent")
+        self.assertEqual(record["manifest"]["status"], "declined:code_mismatch")
+
+    def test_old_ack_and_late_old_result_do_not_change_stage(self):
+        remote = self.remote()
+        h = self.begin(remote)
+        manifest = manifest_fixture(h.ticket, ticket_commit=self.ticket(h), kind="ack",
+            nonce=NONCE, output_sha256=None, finished_at=None, status="acknowledged")
+        del manifest["agent_id"]
+        remote._process(self.pc.post({"manifest.json": encode(manifest)}, "old ack"))
+        self.assertIsNone(h.status)
+        self.assertEqual(h.audit, {"ticket_commit": self.ticket(h), "other_agents": 1})
+        self.assertEqual(remote.finish(h, self.clock.sleep)[0], "satellite_absent")
+        before = deepcopy(h.audit)
+        manifest = manifest_fixture(h.ticket, ticket_commit=self.ticket(h))
+        del manifest["agent_id"]
+        remote._process(self.pc.post({"manifest.json": encode(manifest)}, "late old result"))
+        self.assertEqual(h.audit, before)
+        self.assertIsNone(h.accepted)
+
+    def test_records_never_use_manifest_paths_and_are_bounded(self):
+        remote = self.remote()
+        h = self.begin(remote)
+        before = deepcopy(h.audit)
+        manifest = manifest_fixture(h.ticket, ticket_commit=self.ticket(h), agent_id="2" * 32)
+        manifest.update(run_id="../../outside", phase="../escape")
+        commit = self.pc.post({"manifest.json": encode(manifest)}, "bad path")
+        remote._process(commit)
+        self.assertEqual(h.audit, {**before, "other_agents": 1})
+        # The stage is known, so the coordinator's own identifiers name the file.
+        records = self.disk.load("satellite/late/run-1-discovery.json", {})["records"]
+        self.assertEqual(records[0]["satellite_commit"], commit)
+        self.assertEqual(records[0]["reason"], "other_agent")
+        self.assertFalse((self.root / "outside").exists())
+        self.assertEqual([p.name for p in (self.disk.root / "satellite/late").iterdir()], ["run-1-discovery.json"])
+        for i in range(110):
+            remote._record(f"{i:040x}", {"payload": "x" * 20000}, "invalid")
+        records = self.disk.load("satellite/unattributed.json", {})["records"]
+        self.assertEqual(len(records), 100)
+        self.assertEqual(records[-1]["satellite_commit"], f"{109:040x}")
+        self.assertLessEqual(len(encode(records[-1]["manifest"])), 16384)
+        self.assertEqual(sorted(p.name for p in (self.disk.root / "satellite").iterdir()), ["late", "unattributed.json"])
+
+    def test_record_failure_cannot_change_stage(self):
+        remote = self.remote()
+        h = self.begin(remote)
+        before = deepcopy(h.audit)
+        manifest = manifest_fixture(h.ticket, ticket_commit=self.ticket(h), agent_id="2" * 32)
+        commit = self.pc.post({"manifest.json": encode(manifest)}, "other")
+        with patch.object(self.disk, "load", side_effect=OSError("disk failure")):
+            remote._process(commit)
+        self.assertEqual(h.audit, {**before, "other_agents": 1})
+        self.assertIsNone(h.status)
+
+    def test_other_agent_refusals_still_apply_independently(self):
+        remote = self.remote()
+        h = self.begin(remote)
+        before = deepcopy(h.audit)
+        commit, _ = self.result(h, agent_id="2" * 32, active_refusals=[refusal_fixture()])
+        remote._process(commit)
+        self.assertEqual(self.routes.status("tsukumo:direct", "sale_discovery"), "paused_refused")
+        self.assertEqual(h.audit, {**before, "other_agents": 1})
+        self.assertIsNone(h.status)
+
     def test_ticket_has_exact_inputs_effective_config_and_unknown_state_sha(self):
         remote = self.remote()
         h = self.begin(remote)
@@ -104,7 +314,7 @@ class CoordinatorTests(CoordinatorFixture):
         self.assertEqual(self.clock.now, NOW + 180)
         self.assertEqual(self.disk.load("satellite/run-1.json", {})["phases"]["discovery"]["outcome"], status)
 
-    def test_ack_boundary_and_echo_once_per_nonce(self):
+    def test_ack_boundary_and_echo_once_per_ticket(self):
         remote = self.remote()
         h = self.begin(remote)
         ack = self.ack(h)
@@ -157,11 +367,11 @@ class CoordinatorTests(CoordinatorFixture):
                 self.assertEqual(accepted, None if delay else body)
                 self.assertEqual(h.audit["result_commit"], commit)
 
-    def test_result_without_ack_and_stopped_result_are_accepted(self):
+    def test_result_without_echo_is_rejected(self):
         remote = self.remote()
         h = self.begin(remote)
         commit, body = self.result(h, status="stopped:no_response")
-        self.assertEqual(remote.finish(h, self.clock.sleep), ("stopped:no_response", body))
+        self.assertEqual(remote.finish(h, self.clock.sleep), ("satellite_rejected:unacknowledged", None))
         self.assertEqual(self.disk.load("satellite/position.json", {}), {"commit": commit})
         self.assertEqual(h.audit["counters"]["requests"], 0)
 
@@ -171,12 +381,14 @@ class CoordinatorTests(CoordinatorFixture):
         self.result(h, run_id="old-run")
         self.result(h, ticket_commit=COMMIT)
         self.assertEqual(remote.finish(h, self.clock.sleep), ("satellite_absent", None))
-        self.assertTrue((self.disk.root / "satellite/late/old-run-discovery.json").exists())
+        self.assertTrue((self.disk.root / "satellite/unattributed.json").exists())
         self.assertTrue((self.disk.root / "satellite/late/run-1-discovery.json").exists())
 
     def test_invalid_result_keeps_state_but_applies_refusal(self):
         remote = self.remote()
         h = self.begin(remote)
+        self.ack(h)
+        remote.service()
         before = (self.disk.root / "stores/tsukumo.json").read_bytes()
         self.result(h, body=b"bad state", active_refusals=[refusal_fixture()])
         status, body = remote.finish(h, self.clock.sleep)
@@ -197,7 +409,7 @@ class CoordinatorTests(CoordinatorFixture):
         next_remote = self.remote()
         self.assertEqual(self.begin(next_remote).status, "skipped:route_inactive")
         self.assertEqual(len(self.pc._read), 2)
-        self.assertTrue((self.disk.root / "satellite/late/previous-run-discovery.json").exists())
+        self.assertTrue((self.disk.root / "satellite/unattributed.json").exists())
         ids = self.routes.routes["tsukumo:direct"]["functions"]["sale_discovery"]["refusal_ids"]
         self.assertEqual(ids, ["refusal-1", "refusal-2"])
 

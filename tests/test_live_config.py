@@ -21,7 +21,7 @@ class LiveConfigTests(TestCase):
         self.routes = routes.RouteState(self.disk, self.config, now=1000)
 
     def test_scope_and_revision(self):
-        self.assertEqual(self.config["config_revision"], 3)
+        self.assertEqual(self.config["config_revision"], 4)
         self.assertEqual(self.config["scope"]["version"], 2)
         self.assertCountEqual(self.config["scope"]["in_scope"],
                               ["dospara:direct", "ark:direct", "koubou:direct", "sofmap:direct"])
@@ -30,6 +30,8 @@ class LiveConfigTests(TestCase):
     def test_tsukumo_satellite_route_and_runner_defaults(self):
         route = self.config["routes"]["tsukumo:direct"]
         self.assertEqual(route["executor"], "satellite")
+        # The one registered collector: the agent_id of the owner's state folder.
+        self.assertEqual(route["satellite_agent"], "5c815d9ab267402fb73140f98156888e")
         for function in ("sale_discovery", "product_verify"):
             self.assertEqual(route["functions"][function]["status"], "active")
         self.assertNotEqual(route["functions"]["comparison_lookup"]["status"], "active")

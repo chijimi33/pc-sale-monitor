@@ -118,6 +118,61 @@ class SatellitePipelineTests(Fixture):
             return pipeline.run(self.root, self.public, RUN, config_path=self.config_path,
                 routes_path=self.routes_path, remote=remote, spawn=spawn or self.spawn_empty, clock=self.clock)
 
+    def test_unregistered_route_publishes_skip_without_ticket(self):
+        del self.route_config["routes"]["tsukumo:direct"]["satellite_agent"]
+        self.save_config()
+        result = self.execute(self.remote())
+        stage = result["run"]["stage_results"]["tsukumo"]["discovery"]
+        self.assertEqual(stage["status"], "skipped:agent_unregistered")
+        self.assertNotIn("other_agents", stage)
+        self.assertEqual(self.script.tickets, [])
+        published = read_json(self.public / "latest.json", {})
+        self.assertEqual(published["run"]["stage_results"]["tsukumo"]["discovery"], stage)
+
+    def test_other_agent_audit_is_published_without_blocking_registered_result(self):
+        remote = self.remote()
+        original = self.script.service
+        answered = set()
+
+        def service():
+            original()
+            for handle in remote.handles:
+                commit = handle.audit.get("ticket_commit")
+                if commit and commit not in answered:
+                    manifest = manifest_fixture(handle.ticket, ticket_commit=commit,
+                        agent_id="2" * 32, status="declined:agent_mismatch", output_sha256=None,
+                        started_at=handle.ticket["issued_at"], finished_at=handle.ticket["issued_at"])
+                    self.pc.post({"manifest.json": encode(manifest)}, "other agent")
+                    answered.add(commit)
+
+        self.script.service = service
+        result = self.execute(remote)
+        stage = result["run"]["stage_results"]["tsukumo"]["discovery"]
+        self.assertEqual(stage["status"], "completed")
+        self.assertEqual(stage["other_agents"], 1)
+        published = read_json(self.public / "latest.json", {})
+        self.assertEqual(published["run"]["stage_results"]["tsukumo"]["discovery"], stage)
+
+    def test_new_rejection_and_decline_statuses_are_published(self):
+        for mode, expected in (("unacknowledged", "satellite_rejected:unacknowledged"),
+                               ("declined:agent_mismatch", "satellite_declined:agent_mismatch")):
+            with self.subTest(mode=mode):
+                self.setUp()
+                remote = self.remote(mode)
+                if mode == "unacknowledged":
+                    def service():
+                        for commit in self.pc.poll():
+                            ticket = json.loads(self.pc.read(commit, "ticket.json"))
+                            raw = self.pc.read(commit, "input/stores/tsukumo.json")
+                            self.script.mode = "completed"
+                            self.script.result(commit, ticket, raw)
+                    self.script.service = service
+                result = self.execute(remote)
+                stage = result["run"]["stage_results"]["tsukumo"]["discovery"]
+                self.assertEqual(stage["status"], expected)
+                published = read_json(self.public / "latest.json", {})
+                self.assertEqual(published["run"]["stage_results"]["tsukumo"]["discovery"], stage)
+
     def test_absent_never_spawns_or_requests_and_other_stores_publish(self):
         result = self.execute(self.remote("absent"))
         self.assertEqual(result["run"]["stage_results"]["tsukumo"]["discovery"]["status"], "satellite_absent")

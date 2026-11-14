@@ -21,6 +21,10 @@
 - route に `executor` を持たせる（既定 `"runner"`＝調整役と同じ場所、`"satellite"`＝所有者の PC）。route 単位で、
   機能ごとには分けない。`tsukumo:direct` は `executor: "satellite"`、`sale_discovery`・`product_verify` が `active`、
   `comparison_lookup` は `paused_configuration`（v1 では PC から検索しない）。
+- 収集者は固定登録する。home ごとにランダムな `agent_id`（小文字16進32文字）を永続し、route の
+  `satellite_agent` にその ID を人が登録する。初回応答による登録・自動登録はしない。未指定・null・不正な値は未登録として
+  `skipped:agent_unregistered` にし、ticket を出さない。不正な登録値だけで設定全体や必須4店を失敗させない。
+  登録 ID は既存の `input/routes.json`／`input/config.json` の route に載せ、ticket のトップレベルには追加しない。
 - satellite は「同じ run の遠隔の子」。調整役（Actions）と同じ run ID で `cli stage` 相当を動かす。
   調整役は `executor: "satellite"` の店の子プロセスを起動せず、その店へ通常収集の通信をしない。定期疎通確認もしない。
 - `monitor-data` の書き手は Actions の1ジョブだけ。PC は `monitor-satellite` にだけ書く。
@@ -45,6 +49,7 @@
   - `manifest.json`: `protocol_version`、`kind`（`ack`／`result`）、`nonce`（ack）、`ticket_commit`、`run_id`、`phase`、`store`、`status`、
     `started_at`、`finished_at`、`code_sha`、`code_fingerprint`、`dependencies`、`input_sha256`、`config_sha256`（実際に使った設定）、
     `output_sha256`、`active_refusals`（未解除の拒否の集合。ack・result とも常に載せる）、`counters`。
+    `agent_id` は ack では必須、旧 PC の result では省略を許す。新しい PC はすべての manifest（ack 前後の辞退・異常終了からの復旧を含む）に載せる。
   - result では `stores/<store>.json` を同じコミットに置く。
 - 入力・出力のファイルは再シリアライズせず、バイト列のまま扱う。ハッシュはそのバイト列に対して取る。
 - 確認段階の入力は、調整役が受理した発見結果（relay に添えたもの）。PC の手元の一時状態は使わない。
@@ -71,6 +76,9 @@
   その店のホスト設定、`config_revision`）。PC の段階実行は渡された設定だけで動き、ローカルの `config/` は読まない。
   PC は渡された設定を検証する（既知のキーだけ、URL はすべて許可ホスト、ブラウザー描画なし、
   取得間隔は PC に固定した下限5秒と ticket の値の大きい方）。
+- ack 前の確認順は、制御状態の辞退理由 → コード指紋・依存の不一致 → 入力ハッシュ → 入力検証（登録 ID を含む）→ Retry-After。
+  検証した `input/config.json` の route の登録 ID が無い、または自分の `agent_id` と異なる場合は、ack を出さず、店へ通信せず、
+  自分の ID を付けた `declined:agent_mismatch` を一度だけ返す。この辞退は連続失敗の集計から除く。
 - PC の更新は人が明示的に実行する（`python -m sale_monitor.satellite update`: 固定した本家 remote の `origin/main` へ
   fast-forward し、依存を入れ直す）。収集と排他。依存の導入に失敗したら受付停止の印を残し、次に成功するまで ticket を受けない。
 
@@ -86,15 +94,18 @@ accept_until  = S + G        # 調整役が結果本体を取得し終えてい�
 
 - ローカルの子の終了猶予もこの枠に入れる。残りが足りなければ段階を始めない。確認段階の秒数はローカル・遠隔とも
   run の残り時間に収める。
-- ack の受付期限は `min(発行 + 180秒, accept_until)`。調整役がローカルの子の実行と並行して監視する
-  （早く届いた result は ack を兼ねる）。受付期限までに ack がなければ `satellite_absent` として待たない。
+- ack の受付期限は `min(発行 + 180秒, accept_until)`。調整役がローカルの子の実行と並行して監視する。
+  受付期限までに登録済み収集者の ack がなければ `satellite_absent` として待たない。
+  echo を発行していない段階の `completed`／`stopped:*` は `satellite_rejected:unacknowledged` とし、結果検証に進めない。
 - 受理の判定は調整役の時計だけで行う。PC の申告時刻は使わない。
 - PC の時計（PC の壁時計の絶対値には頼らない）:
   - 期限用の時計（期限時計）は、スリープ・休止の時間を含む単調時計に限る。Windows は QPC（Python の `time.perf_counter()`）、
     Linux は `CLOCK_BOOTTIME`。それ以外の環境では satellite は起動を拒否する。
   - 手順: (1) PC は ticket を受けたら使い回さない `nonce` を作り、ack の push を始める直前の期限時計 `m1`（と壁時計 `w1`）を記録して、
     `nonce` 入りの ack を push する。(2) 調整役は ack を観測したら `monitor-relay` に `echo.json` =
-    `{ticket_commit, nonce, actions_time}` を追記する（ack ごとに1回だけ）。(3) PC は自分の `nonce` を含む echo を受け取った時点の
+    `{ticket_commit, nonce, actions_time}` を追記する（登録済み収集者からの、その ticket の最初の ack にだけ1回）。
+    echo の送信前に nonce を固定し、同じ nonce の再配達は何もせず、違う nonce へは echo を出さず記録だけする。
+    echo 送信失敗は `relay_failed` とし、後から別 nonce に echo を出さない。(3) PC は自分の `nonce` を含む echo を受け取った時点の
     期限時計 `m2`（壁時計 `w2`）を記録する。
   - echo は ack の送信開始より後に作られるので、以後は `調整役の現在時刻 ≤ actions_time + (期限時計の現在値 − m1)` が成り立つ。
     この上限 `U` が `collect_until` に達したら、PC は以後の HTTP 要求を始めない。親エージェントは `U` が `collect_until + 30秒` に
@@ -164,6 +175,22 @@ accept_until  = S + G        # 調整役が結果本体を取得し終えてい�
 
 ## 6. 取り込み時の検証（調整役）
 
+- 処理順: JSON として読めた manifest の拒否情報は、送信者と独立に従来どおり反映する。次に、自分が発行した
+  `ticket_commit` で段階を特定する。未知・確定済みの段階は記録だけする。未確定の段階では `agent_id` が登録 ID と
+  完全一致しない（欠落・不正・別 ID を含む）manifest は `other_agents` だけを加算し、記録する。
+  状態・ack・カウンター・コード・受信時刻・result のコミット SHA は変えず、スキーマ不正による段階拒否にも進めない。
+  `other_agents` は段階を特定できた場合だけ数え、ゼロの場合は監査に載せない。
+- 登録 ID が一致した manifest だけを完全なスキーマ検証と通常処理に進める。ack 前の `declined:*` は直ちに
+  `satellite_declined:<理由>`（`agent_mismatch` を含む）で確定し、後の ack には echo を出さない。
+  ack 後の `declined:clock_unverified`／`clock_skew`／`expired` も従来どおり確定する。
+  `satellite_absent`／`satellite_deadline` の期限判定は調整役の時計で行い、登録済み収集者の manifest と期限処理だけが段階を進める。
+- 未検証の記録先に manifest の値を使わない。既知の段階は調整役自身の run ID・phase から
+  `state/satellite/late/<run_id>-<phase>.json` を選ぶ（manifest がキー欠落・型不正でも、段階が特定できればここ）。
+  段階を特定できないもの（未知の `ticket_commit`、JSON 不正、非オブジェクト）は固定の
+  `state/satellite/unattributed.json` の `records` に記録する。キーは poll で得た satellite コミット SHA。
+  各記録はその SHA・受信時刻・理由（`other_agent`／`late`／`unattributed`／`invalid`）と、オブジェクトならサイズを制限した写しを持つ。
+  写しは16 KiBまでとし、超過時は先頭部分だけを保持する。各ファイルは100件までで古いものから落とす。
+  記録の例外はすべて飲み込み、段階の結果に影響させない。
 - 対応: `ticket_commit`・`run_id`・`phase`・`store`・`code_fingerprint`・`input_sha256`・設定のハッシュが発行した ticket と一致し、
   `output_sha256` が添付の状態と一致する。
 - 状態全体: 既知のトップレベルキーと型、`store`、`run_id`、件数とサイズの上限。
@@ -212,10 +239,27 @@ accept_until  = S + G        # 調整役が結果本体を取得し終えてい�
 
 - 専用 clone と venv。`python -m sale_monitor.satellite run`（常駐）／`update`／`status`／`clear-local`
   （`unreachable` と受付停止の解除。`refused` は ticket の `cleared_refusals` でしか解除できない）。
+- エージェントは1つだけ起動する。Windows の既定 home は `%USERPROFILE%\.pc-sale-monitor-satellite`。
+  `--home` で上書きでき、旧 `%LOCALAPPDATA%\pc-sale-monitor-satellite` からの自動移行はしない。
+  `agent.lock` の OS ロックを取得してから `agent_id` を生成・保存する。`status` は `agent_id` を表示する。
+  既存 ID の読取はロック不要。無ければロックを取って作り、実行中のエージェントがロックを持つ場合は再読込する
+  （まだ生成途中なら null を表示し、別 ID は作らない）。
 - 30秒ごとに `git ls-remote` で relay を見る（GitHub API は使わない）。
 - 多重起動防止は、プロセス終了で解放される OS のロック。収集の子はジョブオブジェクトに入れ、親が死ねば終わる。
   タスクスケジューラでログオン時に起動し、異常終了で再起動する。ログはローカル。
 - push は所有者の既存の git 資格情報を使う。新しい秘密情報を Actions に置かない。
+
+### 収集者の交代
+
+- 登録した1つのエージェントだけが収集し、未登録のエージェントは収集しない（収集者は高々1つで、ゼロの場合もある）。
+- 通常の交代は、旧エージェントと収集中の子プロセスを停止し、自動起動の登録を削除してから、home フォルダー全体を移動する。
+  `agent_id`、拒否ラッチ、Retry-After、連続失敗数、未集計分、処理済み ticket をすべて引き継ぎ、設定は変更しない。
+- home を失った後の再登録は、停止状態の継続保証から外れる手動復旧とする。時間の経過は、Retry-After の満了や拒否の解除を証明しない。残っている記録（Actions 側の経路状態、`monitor-satellite` に届いている manifest の `active_refusals` など）で確認できる拒否・待機期限は従来の規則に従う。復元できない状態（未送信の拒否ラッチ、Retry-After、連続失敗数、未集計分）を失ったまま再開する判断は、通常の移行（home 全体の移動）とは別のものとして、人が明示的に行う。
+- 同じ `agent_id` の home のコピーを2つ同時に動かす運用は保証外とする。1 ticket 内では echo は1つなので収集者は1つだが、
+  ticket をまたいだ通信の重複は起こり得る。
+- 版が混在する場合、進行中の run は開始コミットのコードを使い続けるため、旧調整役の ticket が新 PC に届くことがある。
+  PC は指紋確認を先に行い、ack 前に `declined:code_mismatch` で辞退する。新調整役は旧形式（`agent_id` 無し）の辞退を
+  記録するだけで、段階は `satellite_absent` となり、理由は別記録に残る。旧調整役が公開する結果名は保証しない。
 
 ## 10. v1 に入れないもの
 

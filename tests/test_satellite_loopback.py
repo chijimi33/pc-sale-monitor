@@ -10,6 +10,7 @@ from sale_monitor.models import digest
 from sale_monitor.routes import RouteState
 from sale_monitor.satellite import agent as agent_module, protocol, stage, validation
 from sale_monitor.satellite.agent import Agent, make_mailbox
+from sale_monitor.satellite.__main__ import status
 from sale_monitor.satellite.control import ControlState
 from sale_monitor.satellite.coordinator import RemoteStages, encode
 from sale_monitor.satellite.testing import MemoryMailbox, mailbox_pair
@@ -27,6 +28,9 @@ class LoopbackTests(CoordinatorFixture):
     def setUp(self):
         super().setUp()
         self.home = self.root / "pc"
+        agent_id = status(self.home)["agent_id"]
+        self.config["routes"]["tsukumo:direct"]["satellite_agent"] = agent_id
+        self.routes.routes["tsukumo:direct"]["satellite_agent"] = agent_id
         self.sources["stores"]["tsukumo"]["seed_urls"] = [LIST]
         self.transports, self.robots_calls, self.inputs, self.outputs = [], [], [], []
         self.runners = []
@@ -164,6 +168,45 @@ class LoopbackTests(CoordinatorFixture):
         self.assertEqual(verified["journal"][:len(observed)], observed)
         self.assertEqual(len(verified["journal"]), 2)
         self.assertTrue(verified["verification"]["results"])
+
+    def test_only_registered_home_collects_both_phases_when_other_answers_first(self):
+        other_home = self.root / "other-pc"
+        other_pc = MemoryMailbox(self.pc._write, self.pc._read)
+        other_calls = []
+        other = Agent(other_home, other_pc, deadline_clock=lambda: self.clock.now - NOW,
+            wall_clock=self.clock, sleep=self.clock.sleep,
+            stage_runner=lambda work: other_calls.append(work), log=Mock())
+        self.addCleanup(other.close)
+        discovery = self.begin_stage()
+        other.step()
+        self.assertNotEqual(other.agent_id, status(self.home)["agent_id"])
+        self.remote_stages.service()
+        self.assertIsNone(discovery.status)
+        self.assertEqual(discovery.audit["other_agents"], 1)
+        self.assertNotIn("ack_commit", discovery.audit)
+        raw = self.finish_stage(discovery)
+        key, offer = next(iter(json.loads(raw)["offers"].items()))
+        plan = {"run_id": "run-1", "confirm": {"tsukumo": [
+            {"url": offer["url"], "offer_key": key, "identity": "fixture"}]}}
+        verification = self.begin_stage("verification", raw, plan,
+            {"satellite_commit": discovery.audit["result_commit"], "state_sha256": protocol.sha256_bytes(raw)})
+        self.clock.sleep(30)
+        other.step()
+        self.remote_stages.service()
+        self.assertIsNone(verification.status)
+        self.assertEqual(verification.audit["other_agents"], 1)
+        verified = self.finish_stage(verification)
+        self.assertTrue(json.loads(verified)["verification"]["results"])
+        self.assertEqual(other_calls, [])
+        self.assertEqual(self.runners, [discovery.audit["ticket_commit"], verification.audit["ticket_commit"]])
+        for handle in (discovery, verification):
+            manifest = json.loads(self.coord.read(handle.audit["result_commit"], "manifest.json"))
+            self.assertEqual(manifest["agent_id"], self.agent.agent_id)
+            self.assertEqual(handle.status, "completed")
+        declines = [json.loads(files["manifest.json"]) for _, files in self.coord._read
+                    if json.loads(files["manifest.json"])["agent_id"] == other.agent_id]
+        self.assertEqual([row["status"] for row in declines], ["declined:agent_mismatch"] * 2)
+        self.assertTrue(all(row["kind"] == "result" for row in declines))
 
     def test_all_declines_cross_real_endpoints(self):
         reasons = ("refused", "unreachable", "intake_stopped", "code_mismatch", "dependency_mismatch",
@@ -331,7 +374,7 @@ class LoopbackTests(CoordinatorFixture):
         self.assertEqual((self.disk.root / "stores/tsukumo.json").read_bytes(), before)
         self.assertFalse((self.disk.root / "satellite/late/run-1-discovery.json").exists())
         self.remote_stages = self.new_remote("run-2")
-        records = self.disk.load("satellite/late/run-1-discovery.json", {})["records"]
+        records = self.disk.load("satellite/unattributed.json", {})["records"]
         self.assertEqual(len(records), 1)
         self.assertEqual(records[0]["manifest"]["status"], "completed")
         self.assertEqual(self.coord.read(records[0]["satellite_commit"], "stores/tsukumo.json"), self.outputs[0])
@@ -358,6 +401,7 @@ class LoopbackTests(CoordinatorFixture):
         self.sources, self.config = [json.loads(raw) for raw in originals]
         route = self.config["routes"]["tsukumo:direct"]
         route["executor"] = "satellite"
+        route["satellite_agent"] = status(self.home)["agent_id"]
         for name in ("sale_discovery", "product_verify"):
             route["functions"][name]["status"] = "active"
         route["functions"]["comparison_lookup"]["status"] = "paused_configuration"

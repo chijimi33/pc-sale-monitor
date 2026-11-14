@@ -10,7 +10,7 @@ from .http import Client, FetchError
 from .http_evidence import retry_after_evidence
 from .models import iso, timestamp
 from .storage import Store
-from .satellite.protocol import ALLOWED_HOSTS
+from .satellite.protocol import ALLOWED_HOSTS, registered_agent
 
 
 STATUSES = {"active", "paused_maintenance", "paused_refused", "paused_unreachable",
@@ -44,6 +44,8 @@ def load_config(path) -> dict:
         if any(route in config["scope"]["in_scope"] for route in optional):
             raise ValueError("overlapping_scope_route")
         for route in routes.values():
+            if "satellite_agent" in route:
+                route["satellite_agent"] = registered_agent(route)
             if not isinstance(route["store"], str) or not isinstance(route["channel"], str):
                 raise ValueError("invalid_route")
             if not isinstance(route["functions"], dict):

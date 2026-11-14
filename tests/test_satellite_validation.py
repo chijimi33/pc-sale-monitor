@@ -14,7 +14,7 @@ from sale_monitor.satellite.validation import (
     validate_effective_config, validate_result,
 )
 from sale_monitor.storage import Store
-from test_satellite_protocol import COMMIT, NOW, URL, manifest_fixture, refusal_fixture, ticket_fixture
+from test_satellite_protocol import AGENT_ID, COMMIT, NOW, URL, manifest_fixture, refusal_fixture, ticket_fixture
 
 
 def encode(value):
@@ -26,7 +26,7 @@ def config_fixture():
                 stores={"tsukumo": dict(name="Tsukumo", adapter="html", seed_urls=[URL],
                                         product_patterns=[r"/goods/\d+"], sale_patterns=["/special/"],
                                         default_condition="new", pc_only=True, browser_fallback=False)},
-                seller_aliases={}, route=dict(store="tsukumo", channel="direct", executor="satellite",
+                seller_aliases={}, route=dict(store="tsukumo", channel="direct", executor="satellite", satellite_agent=AGENT_ID,
                     functions={"sale_discovery": {"status": "active"}, "product_verify": {"status": "active"},
                                "comparison_lookup": {"status": "paused_configuration"}}),
                 hosts={"default": {"min_interval_seconds": 2}, "shop.tsukumo.co.jp": {}})
@@ -39,6 +39,17 @@ def offer_fixture(**changes):
 
 
 class ValidationTests(unittest.TestCase):
+    def test_effective_config_validates_registered_agent(self):
+        for value in (None, AGENT_ID):
+            config = config_fixture()
+            config["route"]["satellite_agent"] = value
+            self.assertEqual(validate_effective_config(config, "tsukumo"), 5)
+        for value in ("A" * 32, "1" * 31, [], 1):
+            config = config_fixture()
+            config["route"]["satellite_agent"] = value
+            with self.subTest(value=value), self.assertRaises(ValidationError):
+                validate_effective_config(config, "tsukumo")
+
     def setUp(self):
         offer = offer_fixture()
         self.before = dict(schema_version=1, store="tsukumo", run_id="discovery-previous", phase="discovery",
