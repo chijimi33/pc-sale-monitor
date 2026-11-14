@@ -21,7 +21,7 @@ class LiveConfigTests(TestCase):
         self.routes = routes.RouteState(self.disk, self.config, now=1000)
 
     def test_scope_and_revision(self):
-        self.assertEqual(self.config["config_revision"], 2)
+        self.assertEqual(self.config["config_revision"], 3)
         self.assertEqual(self.config["scope"]["version"], 2)
         self.assertCountEqual(self.config["scope"]["in_scope"],
                               ["dospara:direct", "ark:direct", "koubou:direct", "sofmap:direct"])
@@ -34,7 +34,7 @@ class LiveConfigTests(TestCase):
             self.assertEqual(route["functions"][function]["status"], "active")
         self.assertNotEqual(route["functions"]["comparison_lookup"]["status"], "active")
         self.assertNotIn("probe", route)
-        self.assertEqual(route["cleared_refusals"], [])
+        self.assertEqual(route["cleared_refusals"], ["f4c7e5d5cb4b48708aede54dbfa67179"])
         for route_id, other in self.config["routes"].items():
             if route_id != "tsukumo:direct":
                 with self.subTest(route_id=route_id):

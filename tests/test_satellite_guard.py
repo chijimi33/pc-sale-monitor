@@ -11,7 +11,14 @@ from sale_monitor.budget import Robots
 from sale_monitor.http import Client, FetchError, SafeRedirect
 from sale_monitor.satellite.control import ControlState
 from sale_monitor.satellite.deadline import Handshake
-from sale_monitor.satellite.guard import CommunicationForbidden, Guard, REFUSAL_MARKERS
+from sale_monitor.satellite.guard import CommunicationForbidden, Guard
+
+# Whole-block notices a visitor would be shown; each must stop the stage.
+NOTICES = ("Access Denied", "403 Forbidden - Access denied.", "Are you a robot?",
+           "Our systems have detected unusual traffic from your computer network.",
+           "アクセスが拒否されました。", "お客様のアクセスを一時的に制限しております",
+           "不正なアクセスを検知しました", "私はロボットではありません",
+           "ロボットではないことを確認してください")
 from sale_monitor.satellite.protocol import time_string
 from test_satellite_deadline import FakeClock
 from test_satellite_protocol import COMMIT, NONCE, NOW, URL, refusal_fixture
@@ -81,7 +88,7 @@ class GuardTests(unittest.TestCase):
         self.assertFalse(self.control.active_refusals)
 
     def test_each_marker_and_401(self):
-        for marker in REFUSAL_MARKERS:
+        for marker in NOTICES:
             with self.subTest(marker=marker), tempfile.TemporaryDirectory() as root:
                 control = ControlState(root)
                 guard = Guard("tsukumo", control, self.handshake, NOW + 500,
@@ -110,9 +117,10 @@ class GuardTests(unittest.TestCase):
 
     def test_title_small_challenge_and_error_marker_refuse(self):
         for status, body in ((200, b'<title>Access Denied</title>' + b'x' * 9000),
-                             (200, b'<p>CAPTCHA</p>'), (503, b'x' * 9000 + b'captcha'),
+                             (200, b'<p>Please verify you are human</p>'),
+                             (503, b'<div>' + b'x ' * 9000 + b'</div><h1>Access Denied</h1>'),
                              (404, b'<title>Access Denied</title>' + b'x' * 9000),
-                             (200, b'captcha' + b'x' * (8191 - 7))):
+                             (200, b'Access Denied')):
             with self.subTest(status=status), tempfile.TemporaryDirectory() as root:
                 self.control = ControlState(root)
                 self.guard = self.make_guard()
@@ -129,7 +137,7 @@ class GuardTests(unittest.TestCase):
         spaced = b'<h1>Access \n   Denied</h1>' + b'x' * 20000
         widget = b'<html><body><form><div class="g-recaptcha" data-sitekey="k"></div></form>' + b'x' * 20000 + b'</body></html>'
         field = b'<html><body><textarea name="g-recaptcha-response"></textarea>' + b'x' * 20000 + b'</body></html>'
-        for body in (page, entity, spaced, widget, field, b'captcha' + b'x' * 9000):
+        for body in (page, entity, spaced, widget, field):
             with self.subTest(body=body[:40]), tempfile.TemporaryDirectory() as root:
                 self.control = ControlState(root)
                 self.guard = self.make_guard()
@@ -230,7 +238,7 @@ class GuardTests(unittest.TestCase):
         self.assertEqual(self.clock.m, 5)
 
     def test_redirect_response_denial_or_retry_blocks_hop(self):
-        for headers, body in (({"Location": URL + "2"}, b"CAPTCHA"),
+        for headers, body in (({"Location": URL + "2"}, b"Access Denied"),
                               ({"Location": URL + "2", "Retry-After": "20"}, b"")):
             with self.subTest(headers=headers), tempfile.TemporaryDirectory() as root:
                 self.control = ControlState(root)

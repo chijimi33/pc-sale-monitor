@@ -7,47 +7,9 @@ from urllib.parse import urlsplit
 import uuid
 
 from ..http import Client, FetchError, Page
+from .refusal import refusal_feature
 from .protocol import (ALLOWED_HOSTS, MIN_INTERVAL_FLOOR_SECONDS, NO_RESPONSE_LIMIT,
                        require, sha256_bytes, time_string)
-
-# A refusal or a challenge is recognised by what the page says to a person
-# (title and visible text) or by a challenge widget in the document. Words in
-# comments, scripts and styles do not count: ordinary pages load a reCAPTCHA
-# library everywhere. Body size is never a reason to skip the inspection.
-REFUSAL_MARKERS = ("access denied", "captcha", "are you a robot", "unusual traffic",
-                   "アクセスが拒否", "アクセスを拒否", "不正なアクセス", "ロボットではありません")
-_CHALLENGE_CLASSES = ("g-recaptcha", "h-captcha", "cf-turnstile")
-_CHALLENGE_FIELDS = ("g-recaptcha-response", "h-captcha-response", "cf-turnstile-response")
-_CHALLENGE_XPATH = " | ".join(
-    [f'//*[contains(concat(" ", normalize-space(@class), " "), " {name} ")]' for name in _CHALLENGE_CLASSES]
-    + [f'//*[@name="{name}"]' for name in _CHALLENGE_FIELDS]
-    + ['//iframe[contains(translate(@src, "CAPTCHA", "captcha"), "captcha")]'])
-_INVISIBLE = re.compile(r"(?is)<!--.*?-->|<(script|style|template)\b.*?</\1\s*>|<[^>]+>")
-
-
-def _normalise(text):
-    return " ".join(text.casefold().split())
-
-
-def refusal_feature(text):
-    """Return the marker or widget that makes this response a refusal, else None."""
-    visible, widget = text, False
-    if "<" in text:
-        try:
-            from lxml import html
-            tree = html.document_fromstring(text.encode("utf-8"), parser=html.HTMLParser(
-                remove_comments=True, remove_pis=True, encoding="utf-8"))
-            widget = bool(tree.xpath(_CHALLENGE_XPATH))
-            for element in tree.xpath("//script | //style | //template"):
-                element.drop_tree()
-            visible = tree.text_content()
-        except Exception:
-            # Unparseable markup: inspect the text without its invisible parts.
-            visible = _INVISIBLE.sub(" ", text)
-    visible = _normalise(visible)
-    marker = next((marker for marker in REFUSAL_MARKERS if _normalise(marker) in visible), None)
-    return marker or ("challenge_widget" if widget else None)
-
 
 class CommunicationForbidden(FetchError):
     pass
