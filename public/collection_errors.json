@@ -1,6 +1,6 @@
 {
-  "generated_at": "2026-11-15T16:52:32.659647+00:00",
-  "run_id": "43730993218-1",
+  "generated_at": "2026-11-15T22:15:47.545322+00:00",
+  "run_id": "43761289890-1",
   "stores": {
     "amazon": {
       "checkpoint_at": "2026-11-11T06:12:41.783987+00:00",
@@ -29,7 +29,7 @@
       "transport_diagnostic": null
     },
     "ark": {
-      "checkpoint_at": "2026-11-15T16:27:25.954359+00:00",
+      "checkpoint_at": "2026-11-15T21:47:33.020785+00:00",
       "discovery_gaps": [
         {
           "first_seen_at": "2026-10-30T15:05:35.164211+00:00",
@@ -64,14 +64,14 @@
         "response_status_counts": {
           "browser": {},
           "http": {
-            "200": 55
+            "200": 31
           }
         },
-        "run_id": "43730993218-1",
+        "run_id": "43761289890-1",
         "scope": "current_client_instance; redirects_and_browser_subresources_excluded",
-        "started_at": "2026-11-15T16:22:33.357974+00:00"
+        "started_at": "2026-11-15T21:45:44.403513+00:00"
       },
-      "run_id": "43730993218-1",
+      "run_id": "43761289890-1",
       "status": "partial",
       "transport_diagnostic": null
     },
@@ -187,7 +187,7 @@
       "transport_diagnostic": null
     },
     "dospara": {
-      "checkpoint_at": "2026-11-15T15:46:38.543270+00:00",
+      "checkpoint_at": "2026-11-15T21:09:34.669858+00:00",
       "discovery_gaps": [],
       "errors": [],
       "http_evidence": {
@@ -204,11 +204,11 @@
             "200": 133
           }
         },
-        "run_id": "43730993218-1",
+        "run_id": "43761289890-1",
         "scope": "current_client_instance; redirects_and_browser_subresources_excluded",
-        "started_at": "2026-11-15T15:41:54.402124+00:00"
+        "started_at": "2026-11-15T21:04:56.445806+00:00"
       },
-      "run_id": "43730993218-1",
+      "run_id": "43761289890-1",
       "status": "complete",
       "transport_diagnostic": null
     },
@@ -250,41 +250,64 @@
       "transport_diagnostic": null
     },
     "koubou": {
-      "checkpoint_at": "2026-11-15T16:50:04.406954+00:00",
+      "checkpoint_at": "2026-11-15T22:13:30.895524+00:00",
       "discovery_gaps": [],
-      "errors": [],
+      "errors": [
+        {
+          "affected_tasks": 1,
+          "reason": "http_404",
+          "url": "https://www.pc-koubou.jp/products/detail.php?product_id=1153453"
+        }
+      ],
       "http_evidence": {
         "exception_counts": {
           "browser": {},
           "http": {}
         },
-        "failure_observations": 0,
-        "failure_samples": [],
+        "failure_observations": 1,
+        "failure_samples": [
+          {
+            "host": "www.pc-koubou.jp",
+            "method": "http",
+            "observed_at": "2026-11-15T22:07:00.301472+00:00",
+            "retry_after": {
+              "kind": "absent"
+            },
+            "status": 404,
+            "url_sha256": "4ea09d9aaf299ed0fdfb3da6510ad9412699202dc045702bf2f46ca542097146"
+          }
+        ],
         "omitted_failure_samples": 0,
         "response_status_counts": {
           "browser": {
-            "200": 3
+            "200": 4
           },
           "http": {
-            "200": 108
+            "200": 107,
+            "404": 1
           }
         },
-        "run_id": "43730993218-1",
+        "run_id": "43761289890-1",
         "scope": "current_client_instance; redirects_and_browser_subresources_excluded",
-        "started_at": "2026-11-15T16:22:33.311217+00:00"
+        "started_at": "2026-11-15T21:45:44.291393+00:00"
       },
-      "run_id": "43730993218-1",
-      "status": "complete",
+      "run_id": "43761289890-1",
+      "status": "partial",
       "transport_diagnostic": null
     },
     "sofmap": {
-      "checkpoint_at": "2026-11-15T16:52:32.434093+00:00",
+      "checkpoint_at": "2026-11-15T22:15:47.185318+00:00",
       "discovery_gaps": [],
       "errors": [
         {
           "affected_tasks": 1,
           "reason": "page_access_restricted",
-          "url": "https://www.sofmap.com/product_detail.aspx?sku=102011066"
+          "url": "https://www.sofmap.com/product_detail.aspx?sku=102110755"
+        },
+        {
+          "affected_tasks": 1,
+          "reason": "page_access_restricted",
+          "url": "https://www.sofmap.com/product_detail.aspx?sku=101906963"
         },
         {
           "affected_tasks": 1,
@@ -300,6 +323,11 @@
           "affected_tasks": 1,
           "reason": "page_access_restricted",
           "url": "https://www.sofmap.com/product_detail.aspx?sku=415048171"
+        },
+        {
+          "affected_tasks": 1,
+          "reason": "page_access_restricted",
+          "url": "https://www.sofmap.com/product_detail.aspx?sku=102045578"
         },
         {
           "affected_tasks": 1,
@@ -414,17 +442,7 @@
         {
           "affected_tasks": 1,
           "reason": "page_access_restricted",
-          "url": "https://www.sofmap.com/product_detail.aspx?sku=102045582"
-        },
-        {
-          "affected_tasks": 1,
-          "reason": "page_access_restricted",
           "url": "https://www.sofmap.com/product_detail.aspx?sku=101551752"
-        },
-        {
-          "affected_tasks": 1,
-          "reason": "page_access_restricted",
-          "url": "https://www.sofmap.com/product_detail.aspx?sku=415370898"
         },
         {
           "affected_tasks": 1,
@@ -444,27 +462,17 @@
         {
           "affected_tasks": 1,
           "reason": "page_access_restricted",
-          "url": "https://www.sofmap.com/product_detail.aspx?sku=101890207"
-        },
-        {
-          "affected_tasks": 1,
-          "reason": "page_access_restricted",
-          "url": "https://www.sofmap.com/product_detail.aspx?sku=102077355"
-        },
-        {
-          "affected_tasks": 1,
-          "reason": "page_access_restricted",
           "url": "https://www.sofmap.com/product_detail.aspx?sku=415351846"
         },
         {
           "affected_tasks": 1,
           "reason": "page_access_restricted",
-          "url": "https://www.sofmap.com/product_detail.aspx?sku=415240885"
+          "url": "https://www.sofmap.com/product_detail.aspx?sku=102029199"
         },
         {
           "affected_tasks": 1,
           "reason": "page_access_restricted",
-          "url": "https://www.sofmap.com/product_detail.aspx?sku=102379069"
+          "url": "https://www.sofmap.com/product_detail.aspx?sku=415240885"
         },
         {
           "affected_tasks": 1,
@@ -479,77 +487,7 @@
         {
           "affected_tasks": 1,
           "reason": "page_access_restricted",
-          "url": "https://www.sofmap.com/product_detail.aspx?sku=101097444"
-        },
-        {
-          "affected_tasks": 1,
-          "reason": "page_access_restricted",
-          "url": "https://www.sofmap.com/product_detail.aspx?sku=102296079"
-        },
-        {
-          "affected_tasks": 1,
-          "reason": "page_access_restricted",
-          "url": "https://www.sofmap.com/product_detail.aspx?sku=102367358"
-        },
-        {
-          "affected_tasks": 1,
-          "reason": "page_access_restricted",
-          "url": "https://www.sofmap.com/product_detail.aspx?sku=101249767"
-        },
-        {
-          "affected_tasks": 1,
-          "reason": "page_access_restricted",
-          "url": "https://www.sofmap.com/product_detail.aspx?sku=101400210"
-        },
-        {
-          "affected_tasks": 1,
-          "reason": "page_access_restricted",
-          "url": "https://www.sofmap.com/product_detail.aspx?sku=415399164"
-        },
-        {
-          "affected_tasks": 1,
-          "reason": "page_access_restricted",
-          "url": "https://www.sofmap.com/product_detail.aspx?sku=101611619"
-        },
-        {
-          "affected_tasks": 1,
-          "reason": "page_access_restricted",
-          "url": "https://www.sofmap.com/product_detail.aspx?sku=102077332"
-        },
-        {
-          "affected_tasks": 1,
-          "reason": "page_access_restricted",
-          "url": "https://www.sofmap.com/product_detail.aspx?sku=101877495"
-        },
-        {
-          "affected_tasks": 1,
-          "reason": "page_access_restricted",
-          "url": "https://www.sofmap.com/product_detail.aspx?sku=415306301"
-        },
-        {
-          "affected_tasks": 1,
-          "reason": "page_access_restricted",
-          "url": "https://www.sofmap.com/product_detail.aspx?sku=101292710"
-        },
-        {
-          "affected_tasks": 1,
-          "reason": "page_access_restricted",
-          "url": "https://www.sofmap.com/product_detail.aspx?sku=101210648"
-        },
-        {
-          "affected_tasks": 1,
-          "reason": "page_access_restricted",
-          "url": "https://www.sofmap.com/product_detail.aspx?sku=415222780"
-        },
-        {
-          "affected_tasks": 1,
-          "reason": "page_access_restricted",
-          "url": "https://www.sofmap.com/product_detail.aspx?sku=415337988"
-        },
-        {
-          "affected_tasks": 1,
-          "reason": "page_access_restricted",
-          "url": "https://www.sofmap.com/product_detail.aspx?sku=22143176"
+          "url": "https://www.sofmap.com/product_detail.aspx?sku=100823644"
         },
         {
           "affected_tasks": 1,
@@ -559,7 +497,47 @@
         {
           "affected_tasks": 1,
           "reason": "page_access_restricted",
-          "url": "https://www.sofmap.com/product_detail.aspx?sku=102011065"
+          "url": "https://www.sofmap.com/product_detail.aspx?sku=415370898"
+        },
+        {
+          "affected_tasks": 1,
+          "reason": "page_access_restricted",
+          "url": "https://www.sofmap.com/product_detail.aspx?sku=101890207"
+        },
+        {
+          "affected_tasks": 1,
+          "reason": "page_access_restricted",
+          "url": "https://www.sofmap.com/product_detail.aspx?sku=102367357"
+        },
+        {
+          "affected_tasks": 1,
+          "reason": "page_access_restricted",
+          "url": "https://www.sofmap.com/product_detail.aspx?sku=102379069"
+        },
+        {
+          "affected_tasks": 1,
+          "reason": "page_access_restricted",
+          "url": "https://www.sofmap.com/product_detail.aspx?sku=102296079"
+        },
+        {
+          "affected_tasks": 1,
+          "reason": "page_access_restricted",
+          "url": "https://www.sofmap.com/product_detail.aspx?sku=415399164"
+        },
+        {
+          "affected_tasks": 1,
+          "reason": "page_access_restricted",
+          "url": "https://www.sofmap.com/product_detail.aspx?sku=415158984"
+        },
+        {
+          "affected_tasks": 1,
+          "reason": "page_access_restricted",
+          "url": "https://www.sofmap.com/product_detail.aspx?sku=415306301"
+        },
+        {
+          "affected_tasks": 1,
+          "reason": "page_access_restricted",
+          "url": "https://www.sofmap.com/product_detail.aspx?sku=415337988"
         },
         {
           "affected_tasks": 1,
@@ -569,187 +547,202 @@
         {
           "affected_tasks": 1,
           "reason": "page_access_restricted",
-          "url": "https://www.sofmap.com/product_detail.aspx?sku=100551046"
+          "url": "https://www.sofmap.com/product_detail.aspx?sku=415293258"
         },
         {
           "affected_tasks": 1,
           "reason": "page_access_restricted",
-          "url": "https://www.sofmap.com/product_detail.aspx?sku=102349778"
+          "url": "https://www.sofmap.com/product_detail.aspx?sku=101393495"
         },
         {
           "affected_tasks": 1,
           "reason": "page_access_restricted",
-          "url": "https://www.sofmap.com/product_detail.aspx?sku=102023859"
+          "url": "https://www.sofmap.com/product_detail.aspx?sku=102012781"
         },
         {
           "affected_tasks": 1,
           "reason": "page_access_restricted",
-          "url": "https://www.sofmap.com/product_detail.aspx?sku=102349783"
+          "url": "https://www.sofmap.com/product_detail.aspx?sku=101806150"
         },
         {
           "affected_tasks": 1,
           "reason": "page_access_restricted",
-          "url": "https://www.sofmap.com/product_detail.aspx?sku=102023862"
+          "url": "https://www.sofmap.com/product_detail.aspx?sku=102048280"
         },
         {
           "affected_tasks": 1,
           "reason": "page_access_restricted",
-          "url": "https://www.sofmap.com/product_detail.aspx?sku=101373431"
+          "url": "https://www.sofmap.com/product_detail.aspx?sku=25303951"
         },
         {
           "affected_tasks": 1,
           "reason": "page_access_restricted",
-          "url": "https://www.sofmap.com/product_detail.aspx?sku=101373122"
+          "url": "https://www.sofmap.com/product_detail.aspx?sku=101564256"
         },
         {
           "affected_tasks": 1,
           "reason": "page_access_restricted",
-          "url": "https://www.sofmap.com/product_detail.aspx?sku=102023860"
+          "url": "https://www.sofmap.com/product_detail.aspx?sku=100970723"
         },
         {
           "affected_tasks": 1,
           "reason": "page_access_restricted",
-          "url": "https://www.sofmap.com/product_detail.aspx?sku=101748904"
+          "url": "https://www.sofmap.com/product_detail.aspx?sku=101908999"
         },
         {
           "affected_tasks": 1,
           "reason": "page_access_restricted",
-          "url": "https://www.sofmap.com/product_detail.aspx?sku=101748434"
+          "url": "https://www.sofmap.com/product_detail.aspx?sku=101755442"
         },
         {
           "affected_tasks": 1,
           "reason": "page_access_restricted",
-          "url": "https://www.sofmap.com/product_detail.aspx?sku=101057416"
+          "url": "https://www.sofmap.com/product_detail.aspx?sku=23322874"
         },
         {
           "affected_tasks": 1,
           "reason": "page_access_restricted",
-          "url": "https://www.sofmap.com/product_detail.aspx?sku=101547981"
+          "url": "https://www.sofmap.com/product_detail.aspx?sku=101786576"
         },
         {
           "affected_tasks": 1,
           "reason": "page_access_restricted",
-          "url": "https://www.sofmap.com/product_detail.aspx?sku=102049475"
+          "url": "https://www.sofmap.com/product_detail.aspx?sku=102201182"
         },
         {
           "affected_tasks": 1,
           "reason": "page_access_restricted",
-          "url": "https://www.sofmap.com/product_detail.aspx?sku=101221547"
+          "url": "https://www.sofmap.com/product_detail.aspx?sku=102086932"
         },
         {
           "affected_tasks": 1,
           "reason": "page_access_restricted",
-          "url": "https://www.sofmap.com/product_detail.aspx?sku=101776294"
+          "url": "https://www.sofmap.com/product_detail.aspx?sku=101300290"
         },
         {
           "affected_tasks": 1,
           "reason": "page_access_restricted",
-          "url": "https://www.sofmap.com/product_detail.aspx?sku=101490113"
+          "url": "https://www.sofmap.com/product_detail.aspx?sku=100729348"
         },
         {
           "affected_tasks": 1,
           "reason": "page_access_restricted",
-          "url": "https://www.sofmap.com/product_detail.aspx?sku=101855758"
+          "url": "https://www.sofmap.com/product_detail.aspx?sku=101780240"
         },
         {
           "affected_tasks": 1,
           "reason": "page_access_restricted",
-          "url": "https://www.sofmap.com/product_detail.aspx?sku=101358000"
+          "url": "https://www.sofmap.com/product_detail.aspx?sku=102349777"
         },
         {
           "affected_tasks": 1,
           "reason": "page_access_restricted",
-          "url": "https://www.sofmap.com/product_detail.aspx?sku=102367359"
+          "url": "https://www.sofmap.com/product_detail.aspx?sku=100788852"
         },
         {
           "affected_tasks": 1,
           "reason": "page_access_restricted",
-          "url": "https://www.sofmap.com/product_detail.aspx?sku=102235828"
+          "url": "https://www.sofmap.com/product_detail.aspx?sku=100910035"
         },
         {
           "affected_tasks": 1,
           "reason": "page_access_restricted",
-          "url": "https://www.sofmap.com/product_detail.aspx?sku=23032351"
+          "url": "https://www.sofmap.com/product_detail.aspx?sku=101940031"
         },
         {
           "affected_tasks": 1,
           "reason": "page_access_restricted",
-          "url": "https://www.sofmap.com/product_detail.aspx?sku=101746477"
+          "url": "https://www.sofmap.com/product_detail.aspx?sku=20152292"
         },
         {
           "affected_tasks": 1,
           "reason": "page_access_restricted",
-          "url": "https://www.sofmap.com/product_detail.aspx?sku=101391364"
+          "url": "https://www.sofmap.com/product_detail.aspx?sku=101858287"
         },
         {
           "affected_tasks": 1,
           "reason": "page_access_restricted",
-          "url": "https://www.sofmap.com/product_detail.aspx?sku=101373123"
+          "url": "https://www.sofmap.com/product_detail.aspx?sku=101858295"
         },
         {
           "affected_tasks": 1,
           "reason": "page_access_restricted",
-          "url": "https://www.sofmap.com/product_detail.aspx?sku=102348815"
+          "url": "https://www.sofmap.com/product_detail.aspx?sku=101868712"
         },
         {
           "affected_tasks": 1,
           "reason": "page_access_restricted",
-          "url": "https://www.sofmap.com/product_detail.aspx?sku=101784468"
+          "url": "https://www.sofmap.com/product_detail.aspx?sku=101564254"
         },
         {
           "affected_tasks": 1,
           "reason": "page_access_restricted",
-          "url": "https://www.sofmap.com/product_detail.aspx?sku=101933964"
+          "url": "https://www.sofmap.com/product_detail.aspx?sku=21132418"
         },
         {
           "affected_tasks": 1,
           "reason": "page_access_restricted",
-          "url": "https://www.sofmap.com/product_detail.aspx?sku=101483637"
+          "url": "https://www.sofmap.com/product_detail.aspx?sku=102077327"
         },
         {
           "affected_tasks": 1,
           "reason": "page_access_restricted",
-          "url": "https://www.sofmap.com/product_detail.aspx?sku=101940032"
+          "url": "https://www.sofmap.com/product_detail.aspx?sku=101987653"
         },
         {
           "affected_tasks": 1,
           "reason": "page_access_restricted",
-          "url": "https://www.sofmap.com/product_detail.aspx?sku=102061594"
+          "url": "https://www.sofmap.com/product_detail.aspx?sku=102012779"
         },
         {
           "affected_tasks": 1,
           "reason": "page_access_restricted",
-          "url": "https://www.sofmap.com/product_detail.aspx?sku=102235832"
+          "url": "https://www.sofmap.com/product_detail.aspx?sku=101754478"
         },
         {
           "affected_tasks": 1,
           "reason": "page_access_restricted",
-          "url": "https://www.sofmap.com/product_detail.aspx?sku=101773564"
+          "url": "https://www.sofmap.com/product_detail.aspx?sku=101877390"
         },
         {
           "affected_tasks": 1,
           "reason": "page_access_restricted",
-          "url": "https://www.sofmap.com/product_detail.aspx?sku=101773563"
+          "url": "https://www.sofmap.com/product_detail.aspx?sku=101736160"
         },
         {
           "affected_tasks": 1,
           "reason": "page_access_restricted",
-          "url": "https://www.sofmap.com/product_detail.aspx?sku=101921628"
+          "url": "https://www.sofmap.com/product_detail.aspx?sku=25022614"
         },
         {
           "affected_tasks": 1,
           "reason": "page_access_restricted",
-          "url": "https://www.sofmap.com/product_detail.aspx?sku=101773562"
+          "url": "https://www.sofmap.com/product_detail.aspx?sku=102091533"
         },
         {
           "affected_tasks": 1,
           "reason": "page_access_restricted",
-          "url": "https://www.sofmap.com/product_detail.aspx?sku=101746475"
+          "url": "https://www.sofmap.com/product_detail.aspx?sku=102233883"
         },
         {
           "affected_tasks": 1,
           "reason": "page_access_restricted",
-          "url": "https://www.sofmap.com/product_detail.aspx?sku=102136479"
+          "url": "https://www.sofmap.com/product_detail.aspx?sku=102261192"
+        },
+        {
+          "affected_tasks": 1,
+          "reason": "page_access_restricted",
+          "url": "https://www.sofmap.com/product_detail.aspx?sku=101246049"
+        },
+        {
+          "affected_tasks": 1,
+          "reason": "page_access_restricted",
+          "url": "https://www.sofmap.com/product_detail.aspx?sku=101921631"
+        },
+        {
+          "affected_tasks": 1,
+          "reason": "page_access_restricted",
+          "url": "https://www.sofmap.com/product_detail.aspx?sku=101773561"
         },
         {
           "affected_tasks": 1,
@@ -768,53 +761,28 @@
         },
         {
           "affected_tasks": 1,
-          "reason": "http_403",
-          "url": "https://www.sofmap.com/search_result.aspx?keyword=4894979047434"
+          "reason": "page_access_restricted",
+          "url": "https://www.sofmap.com/product_detail.aspx?sku=21139194"
         },
         {
           "affected_tasks": 1,
-          "reason": "http_403",
-          "url": "https://www.sofmap.com/search_result.aspx?keyword=6976804630221"
-        },
-        {
-          "affected_tasks": 1,
-          "reason": "http_403",
-          "url": "https://www.sofmap.com/search_result.aspx?keyword=0740617333541"
-        },
-        {
-          "affected_tasks": 1,
-          "reason": "http_403",
-          "url": "https://www.sofmap.com/search_result.aspx?keyword=4573596881446"
-        },
-        {
-          "affected_tasks": 1,
-          "reason": "http_403",
+          "reason": "comparison_search_response_unverified",
           "url": "https://www.sofmap.com/search_result.aspx?keyword=HYTE+Y60+Snow+White+%28E-ATX+%E3%82%AC%E3%83%A9%E3%82%B9+%E3%82%B9%E3%83%8E%E3%83%BC%E3%83%9B%E3%83%AF%E3%82%A4%E3%83%88%29"
         },
         {
           "affected_tasks": 1,
           "reason": "http_403",
-          "url": "https://www.sofmap.com/search_result.aspx?keyword=72003206"
+          "url": "https://www.sofmap.com/search_result.aspx?keyword=4580748931843"
         },
         {
           "affected_tasks": 1,
-          "reason": "comparison_search_response_unverified",
+          "reason": "http_403",
           "url": "https://www.sofmap.com/search_result.aspx?keyword=%E3%82%B5%E3%83%B3%E3%83%AF%E3%82%B5%E3%83%97%E3%83%A9%E3%82%A4+CP-034+%28CPU%E3%82%B9%E3%82%BF%E3%83%B3%E3%83%89%29"
         },
         {
           "affected_tasks": 1,
           "reason": "http_403",
           "url": "https://www.sofmap.com/search_result.aspx?keyword=4562469770116"
-        },
-        {
-          "affected_tasks": 1,
-          "reason": "http_403",
-          "url": "https://www.sofmap.com/search_result.aspx?keyword=0889523056660"
-        },
-        {
-          "affected_tasks": 1,
-          "reason": "http_403",
-          "url": "https://www.sofmap.com/search_result.aspx?keyword=72003664"
         },
         {
           "affected_tasks": 1,
@@ -834,21 +802,16 @@
         {
           "affected_tasks": 1,
           "reason": "http_403",
-          "url": "https://www.sofmap.com/search_result.aspx?keyword=72003626"
-        },
-        {
-          "affected_tasks": 1,
-          "reason": "http_403",
           "url": "https://www.sofmap.com/search_result.aspx?keyword=4713294231338"
         },
         {
           "affected_tasks": 1,
           "reason": "http_403",
-          "url": "https://www.sofmap.com/search_result.aspx?keyword=ASRock+DESKMINI+B860%2FB%2FBB%2FBOX%2FJP+%28LGA1851%E5%AF%BE%E5%BF%9C+%E3%83%99%E3%82%A2%E3%83%9C%E3%83%BC%E3%83%B3%E3%82%AD%E3%83%83%E3%83%88%29"
+          "url": "https://www.sofmap.com/search_result.aspx?keyword=0740617339345"
         },
         {
           "affected_tasks": 1,
-          "reason": "comparison_search_response_unverified",
+          "reason": "http_403",
           "url": "https://www.sofmap.com/search_result.aspx?keyword=NZXT+F140X+RF-U14PN-W1+%28%E3%83%9B%E3%83%AF%E3%82%A4%E3%83%88%29"
         },
         {
@@ -879,21 +842,6 @@
         {
           "affected_tasks": 1,
           "reason": "http_403",
-          "url": "https://www.sofmap.com/search_result.aspx?keyword=4571411228452&new_jan=4571411228452&product_type=USED"
-        },
-        {
-          "affected_tasks": 1,
-          "reason": "http_403",
-          "url": "https://www.sofmap.com/search_result.aspx?keyword=0740617333749"
-        },
-        {
-          "affected_tasks": 1,
-          "reason": "http_403",
-          "url": "https://www.sofmap.com/search_result.aspx?keyword=6974856981261"
-        },
-        {
-          "affected_tasks": 1,
-          "reason": "http_403",
           "url": "https://www.sofmap.com/search_result.aspx?keyword=4573596881453"
         },
         {
@@ -905,6 +853,36 @@
           "affected_tasks": 1,
           "reason": "http_403",
           "url": "https://www.sofmap.com/search_result.aspx?keyword=4573517143073"
+        },
+        {
+          "affected_tasks": 1,
+          "reason": "http_403",
+          "url": "https://www.sofmap.com/search_result.aspx?keyword=4988481908793"
+        },
+        {
+          "affected_tasks": 1,
+          "reason": "http_403",
+          "url": "https://www.sofmap.com/search_result.aspx?keyword=4560299344675"
+        },
+        {
+          "affected_tasks": 1,
+          "reason": "http_403",
+          "url": "https://www.sofmap.com/search_result.aspx?keyword=0740617350234"
+        },
+        {
+          "affected_tasks": 1,
+          "reason": "http_403",
+          "url": "https://www.sofmap.com/search_result.aspx?keyword=4573596881842"
+        },
+        {
+          "affected_tasks": 1,
+          "reason": "http_403",
+          "url": "https://www.sofmap.com/search_result.aspx?keyword=9760133220652"
+        },
+        {
+          "affected_tasks": 1,
+          "reason": "http_403",
+          "url": "https://www.sofmap.com/search_result.aspx?keyword=4713224527968"
         }
       ],
       "http_evidence": {
@@ -912,53 +890,12 @@
           "browser": {},
           "http": {}
         },
-        "failure_observations": 54,
+        "failure_observations": 55,
         "failure_samples": [
           {
             "host": "www.sofmap.com",
             "method": "http",
-            "observed_at": "2026-11-15T16:35:34.175579+00:00",
-            "retry_after": {
-              "kind": "absent"
-            },
-            "status": 403,
-            "url_sha256": "ba7be4cb8287ae7b2e3493427d8d66858451f311ba281b29d987d4eb22d8bded"
-          },
-          {
-            "host": "www.sofmap.com",
-            "method": "http",
-            "observed_at": "2026-11-15T16:35:36.368173+00:00",
-            "retry_after": {
-              "kind": "absent"
-            },
-            "status": 403,
-            "url_sha256": "56e3a8487ad7fa2bac13644cd2d34c4d7fb7051b7073905a8812c4416ef0a87d"
-          },
-          {
-            "host": "www.sofmap.com",
-            "host_retry_at_epoch_seconds": 1794760837.8657732,
-            "method": "http",
-            "observed_at": "2026-11-15T16:35:37.865785+00:00",
-            "retry_after": {
-              "kind": "absent"
-            },
-            "status": 403,
-            "url_sha256": "71590e460c16c925538ac668ae46d3f10ac78b5d5af33e3bf1e694a9e5b83316"
-          },
-          {
-            "host": "www.sofmap.com",
-            "method": "http",
-            "observed_at": "2026-11-15T16:41:10.732833+00:00",
-            "retry_after": {
-              "kind": "absent"
-            },
-            "status": 403,
-            "url_sha256": "d8014b3efeb01b0268989386e65a9926259bb781cc81f0183ac804fec4de458d"
-          },
-          {
-            "host": "www.sofmap.com",
-            "method": "http",
-            "observed_at": "2026-11-15T16:41:12.801277+00:00",
+            "observed_at": "2026-11-15T21:54:00.446633+00:00",
             "retry_after": {
               "kind": "absent"
             },
@@ -967,50 +904,29 @@
           },
           {
             "host": "www.sofmap.com",
-            "host_retry_at_epoch_seconds": 1794761174.943041,
             "method": "http",
-            "observed_at": "2026-11-15T16:41:14.943054+00:00",
+            "observed_at": "2026-11-15T21:54:02.074584+00:00",
             "retry_after": {
               "kind": "absent"
             },
             "status": 403,
-            "url_sha256": "8e7af021794e56841a0b8bd1c12adcaa8baa06e8ec0828a402d51b76c759dd68"
+            "url_sha256": "d0d5c4df4e468203450d5d57f52158747d71e1fa5ac380e7ab5ba57fcb0fe526"
           },
           {
             "host": "www.sofmap.com",
+            "host_retry_at_epoch_seconds": 1794779944.2506669,
             "method": "http",
-            "observed_at": "2026-11-15T16:47:03.288240+00:00",
+            "observed_at": "2026-11-15T21:54:04.250679+00:00",
             "retry_after": {
               "kind": "absent"
             },
             "status": 403,
-            "url_sha256": "fe15daaea71f71e620a4d407514957d24e36f290f6d06009e6564a4d010ba8c3"
+            "url_sha256": "d98d4cc546518e0a1de24b4697cd4b00bf3d71603692e78839b2f7f03a82191b"
           },
           {
             "host": "www.sofmap.com",
             "method": "http",
-            "observed_at": "2026-11-15T16:47:05.353833+00:00",
-            "retry_after": {
-              "kind": "absent"
-            },
-            "status": 403,
-            "url_sha256": "4e8075d572b3f8abf3de11e6613bbffc0c0d745c854a7004dafe544754dc4623"
-          },
-          {
-            "host": "www.sofmap.com",
-            "host_retry_at_epoch_seconds": 1794761527.314338,
-            "method": "http",
-            "observed_at": "2026-11-15T16:47:07.314348+00:00",
-            "retry_after": {
-              "kind": "absent"
-            },
-            "status": 403,
-            "url_sha256": "e9d58d8e1c14c68c3a56c17ff63be2db628838ef8747ae38d1c6ce9c72fa439e"
-          },
-          {
-            "host": "www.sofmap.com",
-            "method": "http",
-            "observed_at": "2026-11-15T16:52:28.471819+00:00",
+            "observed_at": "2026-11-15T21:59:45.368556+00:00",
             "retry_after": {
               "kind": "absent"
             },
@@ -1020,7 +936,7 @@
           {
             "host": "www.sofmap.com",
             "method": "http",
-            "observed_at": "2026-11-15T16:52:30.180776+00:00",
+            "observed_at": "2026-11-15T21:59:47.328855+00:00",
             "retry_after": {
               "kind": "absent"
             },
@@ -1029,29 +945,91 @@
           },
           {
             "host": "www.sofmap.com",
-            "host_retry_at_epoch_seconds": 1794761852.1983838,
+            "host_retry_at_epoch_seconds": 1794780289.4616904,
             "method": "http",
-            "observed_at": "2026-11-15T16:52:32.198394+00:00",
+            "observed_at": "2026-11-15T21:59:49.461700+00:00",
             "retry_after": {
               "kind": "absent"
             },
             "status": 403,
             "url_sha256": "ffd56fdfdfe3692777cbf9bd7c936314142a4856e7a7c77d3bf4c221546095d0"
+          },
+          {
+            "host": "www.sofmap.com",
+            "method": "http",
+            "observed_at": "2026-11-15T22:05:10.483355+00:00",
+            "retry_after": {
+              "kind": "absent"
+            },
+            "status": 403,
+            "url_sha256": "e44c298c528c06780002aec5b47cfd80f5ee6ffd86194e680b4f376a6a6422ef"
+          },
+          {
+            "host": "www.sofmap.com",
+            "method": "http",
+            "observed_at": "2026-11-15T22:05:12.873474+00:00",
+            "retry_after": {
+              "kind": "absent"
+            },
+            "status": 403,
+            "url_sha256": "3530db2322108ff160c46e1489f1422fe3f488a206f57f1a7a337e9f10ec0b9a"
+          },
+          {
+            "host": "www.sofmap.com",
+            "host_retry_at_epoch_seconds": 1794780614.7275193,
+            "method": "http",
+            "observed_at": "2026-11-15T22:05:14.727529+00:00",
+            "retry_after": {
+              "kind": "absent"
+            },
+            "status": 403,
+            "url_sha256": "6400119c30582085accb93204e60dba21f00c9ad3a1c34cc362a7b01c4e2a1b8"
+          },
+          {
+            "host": "www.sofmap.com",
+            "method": "http",
+            "observed_at": "2026-11-15T22:10:35.979004+00:00",
+            "retry_after": {
+              "kind": "absent"
+            },
+            "status": 403,
+            "url_sha256": "e2ec282b65ae68c1c0ab8ccf14f6d34f69211913a6fe34831b836667be8e640b"
+          },
+          {
+            "host": "www.sofmap.com",
+            "method": "http",
+            "observed_at": "2026-11-15T22:10:37.739120+00:00",
+            "retry_after": {
+              "kind": "absent"
+            },
+            "status": 403,
+            "url_sha256": "3692751c6eb643596b8a468bd56412323b5fc2ac2b14a3e4c3fa2b1a0862477b"
+          },
+          {
+            "host": "www.sofmap.com",
+            "host_retry_at_epoch_seconds": 1794780939.7341738,
+            "method": "http",
+            "observed_at": "2026-11-15T22:10:39.734183+00:00",
+            "retry_after": {
+              "kind": "absent"
+            },
+            "status": 403,
+            "url_sha256": "e5e1e4b3392c761345012d5035398c8aa05bfc95a6546e4bfd6be1205c7bc93d"
           }
         ],
-        "omitted_failure_samples": 42,
+        "omitted_failure_samples": 43,
         "response_status_counts": {
           "browser": {},
           "http": {
-            "200": 80,
-            "403": 54
+            "200": 72,
+            "403": 55
           }
         },
-        "run_id": "43730993218-1",
+        "run_id": "43761289890-1",
         "scope": "current_client_instance; redirects_and_browser_subresources_excluded",
-        "started_at": "2026-11-15T16:22:33.293911+00:00"
+        "started_at": "2026-11-15T21:45:44.447442+00:00"
       },
-      "run_id": "43730993218-1",
+      "run_id": "43761289890-1",
       "status": "partial",
       "transport_diagnostic": null
     },
