@@ -21,6 +21,7 @@ from .runner import Collector, record_unverified_discoveries
 from .storage import Store, read_json
 from .satellite import protocol
 from .satellite.coordinator import encode
+from .satellite.transport import HIDDEN
 
 
 DEADLINE_GRACE = 120
@@ -169,7 +170,7 @@ def _stop_process_tree(process):
         _stop_posix_process_tree(process)
     else:
         result = subprocess.run(["taskkill", "/PID", str(process.pid), "/T", "/F"],
-                                capture_output=True, timeout=15)
+                                capture_output=True, timeout=15, **HIDDEN)
         if result.returncode and getattr(process, "_pipeline_job", None) is None and process.poll() is None:
             raise RuntimeError("process_tree_stop_failed")
         _close_job(process)

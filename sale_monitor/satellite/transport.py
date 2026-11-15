@@ -8,6 +8,11 @@ import re
 import subprocess
 
 
+# Without this, every child of a console-less agent (pythonw under Task
+# Scheduler) opens its own console window.  0x08000000 = CREATE_NO_WINDOW.
+HIDDEN = {"creationflags": 0x08000000} if os.name == "nt" else {}
+
+
 class TransportError(RuntimeError):
     pass
 
@@ -59,7 +64,7 @@ class GitMailbox:
     def _git(self, *args, data=None, allowed=(0,)):
         try:
             result = subprocess.run(["git", *args], cwd=self.workdir, env=self.env,
-                                    input=data, capture_output=True, timeout=self.timeout)
+                                    input=data, capture_output=True, timeout=self.timeout, **HIDDEN)
         except (OSError, subprocess.TimeoutExpired):
             raise TransportError("git command unavailable or timed out") from None
         if result.returncode not in allowed:

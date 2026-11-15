@@ -580,6 +580,19 @@ class VerticalPipeline(Fixture):
         self.assertEqual(result["run"]["stage_results"]["sofmap"]["verification"]["status"], "skipped")
 
 
+class WindowsTreeStop(unittest.TestCase):
+    def test_taskkill_opens_no_console_window(self):
+        done = subprocess.CompletedProcess([], 0, b"", b"")
+        for hidden in ({"creationflags": 0x08000000}, {}):
+            process = Mock(spec=subprocess.Popen)
+            process.pid = 123
+            with self.subTest(hidden=hidden), patch.object(pipeline.os, "name", "nt"),                     patch.object(pipeline, "HIDDEN", hidden), patch.object(pipeline, "_close_job"),                     patch.object(pipeline.subprocess, "run", return_value=done) as run:
+                pipeline._stop_process_tree(process)
+            self.assertEqual(run.call_args.args[0], ["taskkill", "/PID", "123", "/T", "/F"])
+            self.assertEqual(run.call_args.kwargs.get("creationflags"), hidden.get("creationflags"))
+            self.assertEqual("creationflags" in run.call_args.kwargs, bool(hidden))
+
+
 class RealProcessTrees(unittest.TestCase):
     def test_real_child_group_is_killed_and_missing_group_is_ignored(self):
         for error in (None, ProcessLookupError()):

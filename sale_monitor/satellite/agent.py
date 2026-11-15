@@ -111,7 +111,7 @@ def make_mailbox(home):
 def code_sha(package_dir):
     try:
         result = subprocess.run(["git", "-C", str(package_dir), "rev-parse", "HEAD"],
-                                capture_output=True, text=True, timeout=15, check=True)
+                                capture_output=True, text=True, timeout=15, check=True, **transport.HIDDEN)
         value = result.stdout.strip()
         protocol.hash_value(value, commit=True)
         return value
@@ -162,7 +162,7 @@ def _close_parent_job(process):
 
 def start_stage(work):
     options = {"start_new_session": True} if os.name == "posix" else {
-        "creationflags": subprocess.CREATE_NEW_PROCESS_GROUP | 0x00000004}
+        "creationflags": subprocess.CREATE_NEW_PROCESS_GROUP | 0x00000004 | 0x08000000}  # suspended, no window
     process = subprocess.Popen([sys.executable, "-m", "sale_monitor.satellite", "stage", "--work", str(work)],
                                stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
                                stderr=subprocess.DEVNULL, **options)

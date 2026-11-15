@@ -764,7 +764,7 @@ class StartupTests(unittest.TestCase):
                 patch.object(agent_module, "_attach_job", side_effect=lambda p: calls.append("resume")):
             self.assertIs(agent_module.start_stage("work"), process)
         self.assertEqual(calls, ["contain", "resume"])
-        self.assertTrue(spawn.call_args.kwargs["creationflags"] & 4)
+        self.assertEqual(spawn.call_args.kwargs["creationflags"], 512 | 4 | 0x08000000)
         self.assertEqual(spawn.call_args.args[0][1:], ["-m", "sale_monitor.satellite", "stage", "--work", "work"])
 
     def test_windows_parent_job_configured_before_assignment(self):
@@ -790,7 +790,16 @@ class StartupTests(unittest.TestCase):
                 patch.object(agent_module, "_attach_job"):
             agent_module.start_stage("work")
         self.assertTrue(spawn.call_args.kwargs["start_new_session"])
+        self.assertNotIn("creationflags", spawn.call_args.kwargs)
         self.assertTrue(process._pipeline_owned_group)
+
+    def test_code_sha_git_opens_no_console_window_on_windows(self):
+        done = subprocess.CompletedProcess([], 0, COMMIT + "\n", "")
+        for hidden in ({"creationflags": 0x08000000}, {}):
+            with self.subTest(hidden=hidden), patch.object(agent_module.transport, "HIDDEN", hidden),                     patch.object(agent_module.subprocess, "run", return_value=done) as run:
+                self.assertEqual(agent_module.code_sha("package"), COMMIT)
+                self.assertEqual(run.call_args.kwargs.get("creationflags"), hidden.get("creationflags"))
+                self.assertEqual("creationflags" in run.call_args.kwargs, bool(hidden))
 
 
 class UpdateTests(unittest.TestCase):

@@ -68,6 +68,14 @@ class GitTransportTests(unittest.TestCase):
             self.assertEqual(run.call_args.kwargs["timeout"], 60)
             self.assertNotIn("SECRET", str(caught.exception))
 
+    def test_git_children_open_no_console_window_on_windows(self):
+        done = subprocess.CompletedProcess([], 0, b"", b"")
+        for hidden in ({"creationflags": 0x08000000}, {}):
+            with self.subTest(hidden=hidden), patch("sale_monitor.satellite.transport.HIDDEN", hidden),                     patch("sale_monitor.satellite.transport.subprocess.run", return_value=done) as run:
+                self.coord._git("status")
+                self.assertEqual(run.call_args.kwargs.get("creationflags"), hidden.get("creationflags"))
+                self.assertEqual("creationflags" in run.call_args.kwargs, bool(hidden))
+
     def assert_push(self, args, kwargs):
         self.assertNotIn("--force", args)
         self.assertEqual(kwargs["allowed"], (0, 1))
