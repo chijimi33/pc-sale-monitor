@@ -2,6 +2,8 @@
 import json
 from pathlib import Path
 import subprocess
+import time
+import types
 from unittest.mock import Mock, patch
 from urllib.request import build_opener
 
@@ -43,6 +45,11 @@ class LoopbackTests(CoordinatorFixture):
         self.agent = Agent(self.home, self.pc, deadline_clock=lambda: self.clock.now - NOW,
             wall_clock=self.clock, sleep=self.agent_sleep, stage_runner=self.run_stage, log=Mock())
         self.addCleanup(self.agent.close)
+        # Children (real git) are waited for in real time.  subprocess polls a
+        # running child with time.sleep; with the simulated sleep below it would
+        # spin instead, and on a busy machine run the clock past the ticket.
+        self.enterContext(patch("subprocess.time", types.SimpleNamespace(
+            **{name: getattr(time, name) for name in dir(time) if not name.startswith("__")})))
         # No live HTTP, browser or unbounded sleeps can hide behind the real Client.
         for name, value in (("time", self.clock), ("monotonic", self.clock), ("sleep", self.clock.sleep)):
             self.enterContext(patch("sale_monitor.runner.time." + name, value))
