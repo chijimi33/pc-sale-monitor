@@ -26,7 +26,13 @@ jobs:
         with:
           python-version: '3.12'
       - run: pip install -e .
-      - run: python -m unittest discover -s tests -v
+      - name: Run the tests
+        run: |
+          set -o pipefail
+          python -m unittest discover -s tests -v 2>&1 | tee "$RUNNER_TEMP/tests.log"
+      - name: Name the failing tests (readable without signing in)
+        if: failure()
+        run: python scripts/ci_test_failures.py "$RUNNER_TEMP/tests.log"
 
   run:
     needs: test
