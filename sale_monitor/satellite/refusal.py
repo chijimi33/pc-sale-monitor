@@ -42,6 +42,8 @@ _NOTICE_PATTERNS = tuple(re.compile(pattern) for pattern in (
     r"あなたはロボットですか ?[?？]?",
     r"(?:お客様が)?ロボット(?:では|で)ないことを(?:ご)?確認(?:してください|して下さい|ください|下さい|します|させてください|させていただきます)",
     r"(?:お客様が)?人間であることを(?:ご)?確認(?:してください|して下さい|ください|下さい|します|させてください|させていただきます)",
+    # Cloudflare's challenge interstitial (shown inside <noscript>).
+    r"enable javascript and cookies to continue",
 ))
 _STRIP = " \t\r\n.。!！:：-–—・「」『』【】[]()（）<>《》\"'“”‘’"
 
@@ -50,7 +52,11 @@ _CHALLENGE_FIELDS = ("g-recaptcha-response", "h-captcha-response", "cf-turnstile
 _CHALLENGE_XPATH = " | ".join(
     [f'//*[contains(concat(" ", normalize-space(@class), " "), " {name} ")]' for name in _CHALLENGE_CLASSES]
     + [f'//*[@name="{name}"]' for name in _CHALLENGE_FIELDS]
-    + ['//iframe[contains(translate(@src, "CAPTCHA", "captcha"), "captcha")]'])
+    + ['//iframe[contains(translate(@src, "CAPTCHA", "captcha"), "captcha")]',
+       # Cloudflare's challenge page: its configuration object and error slot.  The
+       # /cdn-cgi/challenge-platform/ path alone is not a challenge: Bot Management
+       # also injects /cdn-cgi/challenge-platform/scripts/jsd/main.js into ordinary pages.
+       '//script[contains(., "window._cf_chl_opt")]', '//*[@id="challenge-error-text"]'])
 _BLOCKS = frozenset((
     "address", "article", "aside", "blockquote", "body", "caption", "center", "dd", "details", "dialog", "div",
     "dl", "dt", "fieldset", "figcaption", "figure", "footer", "form", "h1", "h2", "h3", "h4", "h5", "h6",

@@ -13,6 +13,26 @@ ROUTER = ("<html><head><title>ASUS エイスース ROG Rapture GT-BE98 [ゲー�
           "<tr><td>Connection Diagnosis</td></tr></table></body></html>")
 
 
+# Anonymised copy of the page ARK served to automated requests on 2026-11-24
+# (nonce, ray, token and option values replaced; structure and text unchanged).
+CLOUDFLARE = ('<!DOCTYPE html><html lang="en-US"><head><title>Just a moment...</title>'
+              '<meta name="robots" content="noindex,nofollow"><style>body{margin:0}</style>'
+              '<meta http-equiv="refresh" content="360"></head><body><div class="main-wrapper" role="main">'
+              '<div class="main-content"><noscript><div class="h2"><span id="challenge-error-text">'
+              'Enable JavaScript and cookies to continue</span></div></noscript></div></div>'
+              '<script nonce="n">(function(){window._cf_chl_opt = {cType: "managed", cRay: "0"};'
+              'var a = document.createElement("script");'
+              'a.src = "/cdn-cgi/challenge-platform/h/b/orchestrate/chl_page/v1?ray=0";'
+              'document.getElementsByTagName("head")[0].appendChild(a);}());</script></body></html>')
+# An ordinary page behind Cloudflare Bot Management: the detection script is
+# injected, but there is no challenge.
+CLOUDFLARE_ORDINARY = ("<html><head><title>商品｜ショップ</title></head><body>" + NAV +
+                       "<h1>GeForce RTX 5070</h1><p>価格 98,000円</p>"
+                       "<noscript><p>Please enable JavaScript to use all features of this site.</p></noscript>"
+                       "<script>window.__CF$cv$params={r:'0',t:'1'};</script>"
+                       '<script src="/cdn-cgi/challenge-platform/scripts/jsd/main.js"></script></body></html>')
+
+
 class RefusalFeatureTests(TestCase):
     def check(self, cases):
         for name, body, expected in cases:
@@ -68,6 +88,18 @@ class RefusalFeatureTests(TestCase):
             ("response field", '<body><textarea name="h-captcha-response"></textarea></body>', "challenge_widget"),
             ("iframe", '<body><iframe src="https://www.google.com/recaptcha/api2/anchor"></iframe></body>', "challenge_widget"),
             ("library only", '<head><script src="https://www.google.com/recaptcha/enterprise.js"></script></head><body>ok</body>', None),
+        ))
+
+    def test_cloudflare_challenge_page(self):
+        self.check((
+            ("served page", CLOUDFLARE, "notice"),
+            ("configuration object only", "<html><body><script>window._cf_chl_opt = {};</script></body></html>",
+             "challenge_widget"),
+            ("request sentence only", "<html><body><noscript><div>Enable JavaScript and cookies to continue</div>"
+                                      "</noscript></body></html>", "notice"),
+            ("error slot only", '<body><span id="challenge-error-text"></span></body>', "challenge_widget"),
+            ("bot management on an ordinary page", CLOUDFLARE_ORDINARY, None),
+            ("sentence described in text", "<p>Enable JavaScript and cookies to continue is shown by some sites.</p>", None),
         ))
 
     def test_plain_text_and_robots_bodies(self):
